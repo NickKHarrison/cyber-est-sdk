@@ -1,0 +1,27 @@
+{
+  "targets": {
+    "release": {
+      "outFile": "build/module.wasm",
+      "optimizeLevel": 3,
+      "shrinkLevel": 0,
+      "converge": false,
+      "noAssert": true
+    }
+  },
+  "options": {
+    "path": ["../../as"],
+    "runtime": "../../as/est/runtime",
+    "exportTable": true,
+    "initialMemory": 4,
+    "maximumMemory": 16,
+    "use": ["abort=assembly/index/abort"],
+    "disable": ["gc", "exception-handling", "relaxed-simd", "threads", "tail-calls"]
+  },
+  "est": {
+    "build": "asc assembly/index.ts --config asconfig.json --target release",
+    "module": "build/module.wasm",
+    "library": "../../as/est",
+    "golden": "test/golden.json",
+    "identity": ["est.json", "assembly/index.ts"]
+  }
+}

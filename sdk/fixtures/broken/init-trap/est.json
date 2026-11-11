@@ -1,0 +1,42 @@
+{
+  "est": 1,
+  "id": "org.cyber.est.broken-init-trap",
+  "version": "1.0.0",
+  "name": "Broken Initialize",
+  "vendor": "Cyber",
+  "description": "A broken EST fixture: a plugin whose _initialize() never returns.",
+  "license": "MIT",
+  "kind": "effect",
+  "features": [
+    "audio-effect"
+  ],
+  "abi": {
+    "est": "1.0",
+    "clap": "1.2"
+  },
+  "module": {
+    "path": "module.wasm"
+  },
+  "audio": {
+    "inputs": [
+      {
+        "channels": 2
+      }
+    ],
+    "outputs": [
+      {
+        "channels": 2
+      }
+    ]
+  },
+  "notes": {
+    "inputs": 0,
+    "outputs": 0
+  },
+  "limits": {
+    "maxLatencyFrames": 0,
+    "memoryPagesMax": 64,
+    "tailSeconds": 0
+  },
+  "permissions": []
+}

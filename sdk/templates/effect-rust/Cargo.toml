@@ -1,0 +1,32 @@
+[package]
+name = "est-effect-template"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+# The EST SDK's crate, by path: in a folder `est new` made, its copy in est/ (`library` below
+# names the same folder).
+[dependencies]
+est = { path = "../../rust/est" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false
+
+# How the `est` command builds and packs this plugin.
+[package.metadata.est]
+build = "cargo build --release"
+module = "target/wasm32-unknown-unknown/release/est_effect_template.wasm"
+library = "../../rust/est"
+golden = "test/golden.json"
+# The files that name the plugin's id and name (`est new` sets both there).
+identity = ["est.json", "src/lib.rs"]

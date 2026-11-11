@@ -1,0 +1,2 @@
+# est bundles itself here on each run (bin/est.mjs)
+.build/

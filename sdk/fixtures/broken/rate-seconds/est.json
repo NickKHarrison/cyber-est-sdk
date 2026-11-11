@@ -1,0 +1,42 @@
+{
+  "est": 1,
+  "id": "org.cyber.est.rate-seconds",
+  "version": "1.0.0",
+  "name": "Rate (seconds)",
+  "vendor": "Cyber",
+  "description": "The planted rate fault done right (1.342): EST Gain with an echo 0.1 s late at any rate (0.1 s times the rate activate gives).",
+  "license": "MIT",
+  "kind": "effect",
+  "features": [
+    "audio-effect"
+  ],
+  "abi": {
+    "est": "1.0",
+    "clap": "1.2"
+  },
+  "module": {
+    "path": "module.wasm"
+  },
+  "audio": {
+    "inputs": [
+      {
+        "channels": 2
+      }
+    ],
+    "outputs": [
+      {
+        "channels": 2
+      }
+    ]
+  },
+  "notes": {
+    "inputs": 0,
+    "outputs": 0
+  },
+  "limits": {
+    "maxLatencyFrames": 0,
+    "memoryPagesMax": 64,
+    "tailSeconds": 0
+  },
+  "permissions": []
+}

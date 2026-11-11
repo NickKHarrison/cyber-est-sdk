@@ -1,0 +1,38 @@
+{
+  "est": 1,
+  "id": "org.cyber.est.gain",
+  "version": "1.0.0",
+  "name": "Broken Instrument",
+  "vendor": "Cyber",
+  "description": "A broken EST fixture: an instrument whose est.json declares no note input.",
+  "license": "MIT",
+  "kind": "instrument",
+  "features": [
+    "instrument"
+  ],
+  "abi": {
+    "est": "1.0",
+    "clap": "1.2"
+  },
+  "module": {
+    "path": "module.wasm"
+  },
+  "audio": {
+    "inputs": [],
+    "outputs": [
+      {
+        "channels": 2
+      }
+    ]
+  },
+  "notes": {
+    "inputs": 0,
+    "outputs": 0
+  },
+  "limits": {
+    "maxLatencyFrames": 0,
+    "memoryPagesMax": 64,
+    "tailSeconds": 0
+  },
+  "permissions": []
+}

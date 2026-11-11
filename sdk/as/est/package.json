@@ -1,0 +1,8 @@
+{
+  "name": "est",
+  "version": "0.4.0",
+  "private": true,
+  "description": "The EST SDK for AssemblyScript: found by asc through asconfig.json's \"path\" option (no npm install).",
+  "license": "MIT",
+  "ascMain": "index.ts"
+}

@@ -1,0 +1,53 @@
+{
+  "name": "@cyber-est/ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The library for an EST plugin's own UI: the frame protocol, parameter binding, <est-knob> and <est-slider>.",
+  "keywords": [
+    "est",
+    "cyber",
+    "audio-plugin",
+    "web-components",
+    "ui"
+  ],
+  "license": "MIT",
+  "author": "Cyber",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NickKHarrison/cyber-est-sdk.git",
+    "directory": "sdk/packages/ui"
+  },
+  "homepage": "https://github.com/NickKHarrison/cyber-est-sdk/tree/main/sdk#readme",
+  "bugs": {
+    "url": "https://github.com/NickKHarrison/cyber-est-sdk/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./est-ui.js": "./dist/est-ui.js",
+    "./est-ui.d.ts": "./est-ui.d.ts",
+    "./copy-rule": "./copyRule.mjs"
+  },
+  "files": [
+    "dist/est-ui.js",
+    "dist/index.js",
+    "dist/types",
+    "est-ui.d.ts",
+    "copyRule.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check"
+  }
+}

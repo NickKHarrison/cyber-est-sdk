@@ -1,0 +1,27 @@
+{
+  "$schema": "../../../src/audio/est/abi/est-manifest-1.schema.json",
+  "est": 1,
+  "id": "org.example.est-effect-template",
+  "version": "1.0.0",
+  "name": "EST Effect Template",
+  "vendor": "Example",
+  "description": "A smoothed gain into a resonant filter: the starting point for an EST effect in Rust.",
+  "license": "MIT",
+  "kind": "effect",
+  "features": ["audio-effect", "filter", "stereo"],
+  "abi": { "est": "1.0", "clap": "1.2" },
+  "module": { "path": "module.wasm" },
+  "assets": [],
+  "audio": { "inputs": [{ "channels": 2 }], "outputs": [{ "channels": 2 }], "sampleRates": "any" },
+  "notes": { "inputs": 0, "outputs": 0 },
+  "limits": { "maxLatencyFrames": 0, "memoryPagesMax": 16, "tailSeconds": 1 },
+  "parameters": [
+    { "id": 0, "name": "Gain", "unit": "dB" },
+    { "id": 1, "name": "Cutoff", "unit": "Hz" },
+    { "id": 2, "name": "Resonance" },
+    { "id": 3, "name": "Mode" }
+  ],
+  "stateVersion": 1,
+  "permissions": [],
+  "compat": { "host": ">=1.0.0 <2" }
+}

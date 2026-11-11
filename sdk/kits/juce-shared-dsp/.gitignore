@@ -1,0 +1,2 @@
+# CMake's build folder (the desktop plugin, the reference renderer, the EST module's copy).
+build/

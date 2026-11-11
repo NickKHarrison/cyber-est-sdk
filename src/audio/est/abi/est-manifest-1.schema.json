@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:est:schema:est-manifest-1",
+  "title": "EST manifest (est.json), schema version 1",
+  "description": "The manifest of an EST plugin bundle (EST specification §1), as Cyber's install reader (parseManifest) accepts it; a test proves the two agree. `est pack` fills module.sha256, module.bytes, ui.sha256 and assets from the files, so a plugin's source est.json may leave those out. Unknown keys are ignored. Lengths are in characters (the host counts UTF-16 code units: a character outside the Basic Multilingual Plane counts twice there).",
+  "type": "object",
+  "required": ["est", "id", "version", "name", "vendor", "license", "kind", "features", "abi", "module", "audio"],
+  "properties": {
+    "$schema": { "type": "string", "description": "Where the schema is, for an editor (`./est-manifest-1.schema.json` in a folder `est new` made). `est pack` leaves it out of the bundle." },
+    "est": { "const": 1, "description": "The manifest schema version: 1." },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9.-]{1,118})[a-z0-9]$",
+      "description": "The plugin's id, a reverse-DNS name (`com.example.my-verb`), the same as its CLAP descriptor's. Never changed: projects name the plugin by it. (EST-M002)"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(?:[-+][0-9A-Za-z.-]{1,40})?$",
+      "description": "A semantic version. (EST-M003)"
+    },
+    "name": { "$ref": "#/$defs/text60", "description": "The plugin's name as Cyber shows it. (EST-M004)" },
+    "vendor": { "$ref": "#/$defs/text60", "description": "Who makes it. (EST-M004)" },
+    "description": { "type": "string", "maxLength": 400, "pattern": "^[^\\u0000-\\u001f\\u007f]*$", "description": "One or two plain sentences. (EST-M004)" },
+    "url": { "type": "string", "pattern": "^https://[^\\s]{1,300}$", "description": "The plugin's web page, https only. (EST-M004)" },
+    "license": { "type": "string", "maxLength": 64, "pattern": "^(?=[\\s\\S]*\\S)[^\\u0000-\\u001f\\u007f]*$", "description": "An SPDX licence id or name (`MIT`). (EST-M004)" },
+    "kind": { "enum": ["effect", "instrument"], "description": "An effect (audio in, audio out) or an instrument (notes in, audio out). (EST-M005)" },
+    "features": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": { "type": "string", "maxLength": 64, "pattern": "^(?=[\\s\\S]*\\S)[^\\u0000-\\u001f\\u007f]*$" },
+      "description": "CLAP feature names, the kind's first: `audio-effect` or `instrument`. (EST-M006)"
+    },
+    "abi": {
+      "type": "object",
+      "required": ["est", "clap"],
+      "properties": {
+        "est": { "enum": ["1.0", "1.1"], "description": "The EST ABI edition: `1.0`, or (since Cyber 1.327) `1.1` for the fields EST 1.1 adds (a sidechain, up to 8 channels, `modulatable`, `ui.audio`, a preset's `image` and `author`). A newer edition is refused (EST-M019); a 1.1 field in a 1.0 manifest is refused (EST-M020)." },
+        "clap": { "type": "string", "maxLength": 16, "pattern": "^1\\.\\d{1,4}(\\.\\d{1,4})?$", "description": "The CLAP version (`1.2`)." }
+      },
+      "description": "(EST-M007)"
+    },
+    "module": {
+      "type": "object",
+      "required": ["path", "sha256", "bytes"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path", "description": "The module's path in the bundle (`module.wasm`)." },
+        "sha256": { "$ref": "#/$defs/sha256", "description": "Filled by `est pack`." },
+        "bytes": { "type": "integer", "minimum": 8, "maximum": 67108864, "description": "Filled by `est pack`." }
+      },
+      "description": "The WebAssembly module. (EST-M008)"
+    },
+    "ui": {
+      "description": "A custom UI page, or null (or absent) for the generated UI. (EST-M009)",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["path", "sha256", "size"],
+          "properties": {
+            "path": { "allOf": [{ "$ref": "#/$defs/path" }, { "pattern": "\\.html$" }] },
+            "sha256": { "$ref": "#/$defs/sha256", "description": "Filled by `est pack`." },
+            "size": {
+              "type": "object",
+              "required": ["w", "h"],
+              "properties": {
+                "w": { "type": "integer", "minimum": 120, "maximum": 2000 },
+                "h": { "type": "integer", "minimum": 80, "maximum": 1400 }
+              }
+            },
+            "resizable": { "description": "Read but unused in EST 1.0 (frame protocol 1 has no resize message): the host draws the frame at `size`, never scaled." },
+            "audio": { "type": "boolean", "default": false, "description": "EST 1.1 (frame protocol v3): the page may ask for an analysis of the plugin's output (`est.audio()`: magnitudes and RMS at most 30 times a second, never samples). (EST-M020)" }
+          }
+        }
+      ]
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "properties": { "path": { "$ref": "#/$defs/path" }, "sha256": { "$ref": "#/$defs/sha256" } }
+      },
+      "description": "Every other file in the bundle, hashed. Written by `est pack`. (EST-M010)"
+    },
+    "audio": {
+      "type": "object",
+      "required": ["inputs", "outputs"],
+      "properties": {
+        "inputs": { "$ref": "#/$defs/ports" },
+        "outputs": { "$ref": "#/$defs/ports", "maxItems": 1 },
+        "sampleRates": { "description": "Informational in EST 1.0: the host does not read it. The templates write \"any\": a plugin runs at the audio context's rate (44.1 or 48 kHz, whatever the device runs at) and must take whatever `activate` gives it." }
+      },
+      "description": "One main audio port each way at most; EST 1.1: an effect's inputs may add a sidechain after it. (EST-M011, EST-M021)"
+    },
+    "notes": {
+      "description": "Note ports: 0 or 1 each way; an instrument has a note input. (A value that is not an object is read as none.) (EST-M012)",
+      "if": { "type": "object" },
+      "then": {
+        "properties": {
+          "inputs": { "type": "integer", "minimum": 0, "maximum": 1 },
+          "outputs": { "type": "integer", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "limits": {
+      "description": "The most the plugin may use; the host holds it to them. (A value that is not an object is read as the defaults.) (EST-M013)",
+      "if": { "type": "object" },
+      "then": {
+        "properties": {
+          "maxLatencyFrames": { "type": "integer", "minimum": 0, "maximum": 192000, "default": 0 },
+          "memoryPagesMax": { "type": "integer", "minimum": 1, "maximum": 2048, "default": 256, "description": "64 KiB pages; the module's declared maximum must be within it." },
+          "tailSeconds": { "type": "integer", "minimum": 0, "maximum": 60, "default": 0 }
+        }
+      }
+    },
+    "permissions": { "type": "array", "maxItems": 0, "description": "EST 1.0 grants none: empty. (EST-M014)" },
+    "parameters": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+          "name": { "type": "string", "maxLength": 255, "pattern": "^(?=[\\s\\S]*\\S)[^\\u0000-\\u001f\\u007f]*$" },
+          "unit": { "type": "string", "maxLength": 16, "pattern": "^[^\\u0000-\\u001f\\u007f]*$" },
+          "scale": { "enum": ["linear", "log"], "default": "linear", "description": "How knobs, sliders and automation move over the parameter's range: \"log\" geometrically (a lane's midpoint is the geometric middle; the range the module reports must stay above 0, EST-C021). Since EST 1.286." },
+          "modulatable": { "type": "boolean", "default": false, "description": "EST 1.1: Cyber's clip envelopes may send this parameter `CLAP_EVENT_PARAM_MOD`; the DSP flags it `CLAP_PARAM_IS_MODULATABLE` (EST-C022). (EST-M020)" }
+        }
+      },
+      "description": "A mirror of the module's parameters: the same ids. (EST-M015)"
+    },
+    "stateVersion": { "type": "integer", "minimum": 1, "maximum": 1000000, "default": 1, "description": "The version of the state the plugin saves. (EST-M016)" },
+    "presets": {
+      "description": "The bundle's preset index (`presets/index.json`), or null. (EST-M017)",
+      "oneOf": [{ "type": "null" }, { "allOf": [{ "$ref": "#/$defs/path" }, { "pattern": "\\.json$" }] }]
+    },
+    "compat": {
+      "description": "Informational in EST 1.0: Cyber's reader ignores it. The host versions the bundle is built for (the specification draft's plan: a bundle outside the range installs with a warning and runs).",
+      "properties": {
+        "host": { "description": "A semver range of EST host versions; the templates write \">=1.0.0 <2\"." }
+      }
+    },
+    "migrate": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": ["from"],
+        "properties": {
+          "from": { "type": "string", "minLength": 1, "maxLength": 100, "pattern": "^\\s*(?:\\*|(?:>=|<=|>|<|=)?\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(?:[-+][0-9A-Za-z.-]{1,40})?)(?:\\s+(?:\\*|(?:>=|<=|>|<|=)?\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(?:[-+][0-9A-Za-z.-]{1,40})?))*\\s*$", "description": "The versions this entry applies to: comparators separated by spaces, all of which must hold (`>=1.0.0 <1.2.0`), a single version (that one only), or `*` (every version). Versions compare as semver (a pre-release before its release)." },
+          "params": {
+            "type": "object",
+            "maxProperties": 512,
+            "propertyNames": { "pattern": "^\\d{1,10}$" },
+            "additionalProperties": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^\\d{1,10}$" }] },
+            "description": "Old CLAP id (a decimal string) to new id (a renamed or split parameter: the value moves) or `null` (dropped on purpose). Every new id must be one `parameters` lists; an old id named by neither this map nor `parameters` is dropped with a note."
+          },
+          "state": { "enum": ["keep", "drop"], "default": "keep", "description": "Whether the saved state (the CLAP state stream) crosses: `keep` (the plugin reads its earlier versions' state, CLAP's rule) or `drop` (the new version starts from its defaults on purpose, with the mapped values on top)." }
+        }
+      },
+      "description": "Since Cyber 1.337: what this version does with the settings a project saved with an earlier version. On Use installed version, Cyber applies the first entry whose `from` takes the version moved from and says what it kept, moved and dropped; without one, settings cross by id as before. A manifest with `migrate` lists its `parameters`. (EST-M022)"
+    }
+  },
+  "dependentSchemas": { "migrate": { "required": ["parameters"], "properties": { "parameters": { "minItems": 1 } }, "description": "A manifest with `migrate` lists its parameters (EST-M022)." } },
+  "allOf": [
+    {
+      "if": { "properties": { "abi": { "properties": { "est": { "const": "1.0" } }, "required": ["est"] } }, "required": ["abi"] },
+      "then": {
+        "properties": {
+          "audio": { "properties": {
+            "inputs": { "maxItems": 1, "items": { "properties": { "channels": { "maximum": 2 }, "role": { "const": "main" } } } },
+            "outputs": { "items": { "properties": { "channels": { "maximum": 2 }, "role": { "const": "main" } } } }
+          } },
+          "ui": { "if": { "type": "object" }, "then": { "properties": { "audio": { "const": false } } } },
+          "parameters": { "items": { "properties": { "modulatable": { "const": false } } } }
+        }
+      },
+      "else": {
+        "properties": {
+          "audio": { "properties": {
+            "inputs": { "prefixItems": [{ "properties": { "role": { "const": "main" } } }, { "required": ["role"], "properties": { "role": { "const": "sidechain" }, "channels": { "maximum": 2 } } }] },
+            "outputs": { "items": { "properties": { "role": { "const": "main" } } } }
+          } }
+        }
+      },
+      "description": "EST 1.1's fields only with `\"abi\": { \"est\": \"1.1\" }` (EST-M020); a second input is the sidechain (EST-M021)."
+    },
+    {
+      "if": { "properties": { "kind": { "const": "effect" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "features": { "prefixItems": [{ "const": "audio-effect" }] },
+          "audio": { "properties": { "inputs": { "minItems": 1 }, "outputs": { "minItems": 1 } } }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "instrument" } }, "required": ["kind"] },
+      "then": {
+        "required": ["notes"],
+        "properties": {
+          "features": { "prefixItems": [{ "const": "instrument" }] },
+          "notes": { "type": "object", "required": ["inputs"], "properties": { "inputs": { "const": 1 } } }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "text60": { "type": "string", "maxLength": 60, "pattern": "^(?=[\\s\\S]*\\S)[^\\u0000-\\u001f\\u007f]*$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^(?!(?:[^/]*/)*\\.\\.?(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+      "description": "A path in the bundle: `/`-separated segments of `[A-Za-z0-9._-]`, none `.` or `..`. (EST-B005)"
+    },
+    "ports": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["channels"],
+        "properties": {
+          "channels": { "type": "integer", "minimum": 1, "maximum": 8, "description": "1 or 2 in EST 1.0; up to 8 on a main port in EST 1.1 (an instrument's further pairs play on output strips; an effect's past two are summed into its stereo strip); a sidechain has 1 or 2." },
+          "role": { "enum": ["main", "sidechain"], "description": "EST 1.1: the first port is the main one; an effect's second input is the `\"sidechain\"`, fed from a track or a return. (EST-M021)" }
+        }
+      }
+    }
+  }
+}

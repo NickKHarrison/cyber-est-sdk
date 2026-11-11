@@ -1,0 +1,4 @@
+// est's freestanding <cstdint> (sdk/cpp/build.mjs): wasm32 has no C++ library unless you bring one
+// (a wasi-sdk or Emscripten sysroot); CLAP's headers include this. Searched after every other folder.
+#pragma once
+#include <stdint.h>

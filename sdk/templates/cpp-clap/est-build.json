@@ -1,0 +1,8 @@
+{
+  "$comment": "How est builds this plugin (sdk/cpp/build.mjs): each source compiled to wasm32 with clang, linked with EST's flags (the exported, growable table; a 64 KiB stack; est.json's memoryPagesMax as the maximum) into build/module.wasm. est.json is the only file that names the plugin: build/est_plugin.h is written from it before every build.",
+  "sources": ["src/plugin.cpp"],
+  "include": ["src"],
+  "std": "c++17",
+  "module": "build/module.wasm",
+  "golden": "test/golden.json"
+}

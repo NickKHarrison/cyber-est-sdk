@@ -1,0 +1,39 @@
+{
+  "est": 1,
+  "id": "org.cyber.est.probe",
+  "version": "1.0.0",
+  "name": "Broken Silent",
+  "vendor": "Cyber",
+  "description": "A broken EST fixture: Phase 3's EST Probe, an instrument that sounds nothing.",
+  "license": "MIT",
+  "kind": "instrument",
+  "features": [
+    "instrument",
+    "synthesizer"
+  ],
+  "abi": {
+    "est": "1.0",
+    "clap": "1.2"
+  },
+  "module": {
+    "path": "module.wasm"
+  },
+  "audio": {
+    "inputs": [],
+    "outputs": [
+      {
+        "channels": 2
+      }
+    ]
+  },
+  "notes": {
+    "inputs": 1,
+    "outputs": 0
+  },
+  "limits": {
+    "maxLatencyFrames": 0,
+    "memoryPagesMax": 64,
+    "tailSeconds": 2
+  },
+  "permissions": []
+}

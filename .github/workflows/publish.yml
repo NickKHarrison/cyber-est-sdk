@@ -1,0 +1,83 @@
+# Publishes the EST kit to npm as @cyber-est/cli, @cyber-est/tools and @cyber-est/ui, from this public
+# repository (npm's provenance needs a public source; Cyber's own repository is private and mirrors
+# the kit here). Written by Cyber's scripts/sdk-export.mjs; its runbook is Cyber's
+# Cyber_Deploy_Web_Runbook.md §6e.
+#
+# Run by a version tag, `v<version>`, the version all three packages carry (the script refuses any
+# other), and only while the repository variable EST_NPM_PUBLISH is "on"; the publish job runs only
+# through the `npm` environment (required reviewer: the owner).
+#
+# Two jobs. `build` installs, builds, runs the kit's suites, packs, checks and smoke-tests, and
+# uploads the tarballs with a SHA256SUMS list; it holds no OIDC token. `publish` holds the token and
+# installs nothing (npm itself only, without scripts), builds nothing and runs no package code: it
+# downloads the artifact, checks the hashes, the tarballs and the tag, and runs
+# `npm publish <tgz> --provenance`. No token anywhere: npm's trusted publishing trusts this
+# workflow's OIDC token, and scripts/sdk-publish.mjs refuses a token in the environment, any other
+# repository, workflow or ref, and a private repository.
+#
+# Every action is pinned to a full commit SHA (the tag in the comment).
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: vars.EST_NPM_PUBLISH == 'on' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - run: npm ci
+      - name: Build, test, pack, check, smoke
+        run: node scripts/sdk-publish.mjs --pack-only --out sdk-tarballs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sdk-tarballs
+          path: sdk-tarballs/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: vars.EST_NPM_PUBLISH == 'on' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # The scripts only (sdk-publish.mjs and sdk-pack-check.mjs use Node's own modules): no dependencies installed.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          # No registry URL here: setup-node would write an .npmrc and a placeholder NODE_AUTH_TOKEN,
+          # and the script refuses any token (npm's default registry is the public one).
+      # Trusted publishing needs npm 11.5.1 or newer (the script checks); installed without scripts.
+      - run: npm install --global --ignore-scripts npm@11.6.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sdk-tarballs
+          path: sdk-tarballs
+      - name: Check the hashes, the tarballs and the tag, publish
+        run: node scripts/sdk-publish.mjs --publish --from sdk-tarballs

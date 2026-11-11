@@ -1,0 +1,13 @@
+{
+  "files": {
+    "sdk/cpp/build.mjs": "3f81642820842cf0102c5b523780bfa00b36a74f7a281b4f08c88f8f2c23df3a",
+    "sdk/cpp/freestanding/cstddef": "d71125e54fe74072507e075b793f69a87d11279c9f852057c0fcf1afa66f634b",
+    "sdk/cpp/freestanding/cstdint": "0c5e5b06018d7df54e45bceaf2b5b0af3b83882197e7817d62345e22db6d08eb",
+    "sdk/cpp/include/est/runtime.hpp": "852dde68baa15e6da71bcd8341f0ff67c6fe93ff708c758156a089c52b405ad9",
+    "sdk/cpp/toolchain.mjs": "37b0471875b72a4c8b92fa4f7510e0f502db8968735fb669b3c19cd787ee63ef",
+    "sdk/templates/cpp-clap/est-build.json": "9696a2c59f74ea0b566aada4931bab498ce96e53600e5e140c2f87cf9ceb4da9",
+    "sdk/templates/cpp-clap/est.json": "468de60fc717187d64a50ded74adaa6656d3ca296192ea39e109382231e0f73a",
+    "sdk/templates/cpp-clap/src/gain.hpp": "bb31be15e3c1a3d7b952e51c4d80b4959facd3fa2794e6ca7dc1143af8509d0e",
+    "sdk/templates/cpp-clap/src/plugin.cpp": "daf323c39bdc946bec631ceb06eee29306a0bd3eeef6452fd8a7590ab9aa8f3b"
+  }
+}

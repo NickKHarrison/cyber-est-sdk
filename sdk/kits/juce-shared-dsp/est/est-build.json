@@ -1,0 +1,12 @@
+{
+  "$comment": "The EST half of the kit, built by est (sdk/cpp/build.mjs). ../dsp is the folder the JUCE desktop build compiles too.",
+  "sources": [
+    "src/plugin.cpp"
+  ],
+  "include": [
+    "src",
+    "../dsp"
+  ],
+  "std": "c++17",
+  "module": "build/module.wasm"
+}

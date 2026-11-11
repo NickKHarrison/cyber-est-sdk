@@ -1,0 +1,26 @@
+{
+  "$schema": "../../../src/audio/est/abi/est-manifest-1.schema.json",
+  "est": 1,
+  "id": "org.example.est-visualiser-template-as",
+  "version": "1.0.0",
+  "name": "EST Visualiser Template (AS)",
+  "vendor": "Example",
+  "description": "Audio through, and a page that draws the level after it: the starting point for an EST plugin with a visual UI in AssemblyScript.",
+  "license": "MIT",
+  "kind": "effect",
+  "features": ["audio-effect", "analyzer", "stereo"],
+  "abi": { "est": "1.0", "clap": "1.2" },
+  "module": { "path": "module.wasm" },
+  "ui": { "path": "ui/index.html", "size": { "w": 520, "h": 240 } },
+  "assets": [],
+  "audio": { "inputs": [{ "channels": 2 }], "outputs": [{ "channels": 2 }], "sampleRates": "any" },
+  "notes": { "inputs": 0, "outputs": 0 },
+  "limits": { "maxLatencyFrames": 0, "memoryPagesMax": 16, "tailSeconds": 0 },
+  "parameters": [
+    { "id": 0, "name": "Trim", "unit": "dB" },
+    { "id": 1, "name": "History", "unit": "s" }
+  ],
+  "stateVersion": 1,
+  "permissions": [],
+  "compat": { "host": ">=1.0.0 <2" }
+}

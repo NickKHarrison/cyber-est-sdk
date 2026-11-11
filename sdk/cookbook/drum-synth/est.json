@@ -1,0 +1,50 @@
+{
+  "$schema": "../../../src/audio/est/abi/est-manifest-1.schema.json",
+  "est": 1,
+  "id": "org.example.cookbook-drum-synth",
+  "version": "1.0.0",
+  "name": "Cookbook Drum Synth",
+  "vendor": "Example",
+  "description": "A drum synth: a kick (a falling sine), a snare (a tone and noise) and a hat (high-passed noise), on the General MIDI keys.",
+  "license": "MIT",
+  "kind": "instrument",
+  "features": ["instrument", "drum-machine", "stereo"],
+  "abi": {
+    "est": "1.0",
+    "clap": "1.2"
+  },
+  "module": {
+    "path": "module.wasm"
+  },
+  "assets": [],
+  "audio": {
+    "inputs": [],
+    "outputs": [
+      {
+        "channels": 2
+      }
+    ],
+    "sampleRates": "any"
+  },
+  "notes": {
+    "inputs": 1,
+    "outputs": 0
+  },
+  "limits": {
+    "maxLatencyFrames": 0,
+    "memoryPagesMax": 16,
+    "tailSeconds": 4
+  },
+  "parameters": [
+    { "id": 0, "name": "Level", "unit": "dB" },
+    { "id": 1, "name": "Kick decay", "unit": "ms" },
+    { "id": 2, "name": "Kick pitch", "unit": "Hz" },
+    { "id": 3, "name": "Snare decay", "unit": "ms" },
+    { "id": 4, "name": "Hat decay", "unit": "ms" }
+  ],
+  "stateVersion": 1,
+  "permissions": [],
+  "compat": {
+    "host": ">=1.0.0 <2"
+  }
+}

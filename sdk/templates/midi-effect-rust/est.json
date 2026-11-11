@@ -1,0 +1,29 @@
+{
+  "$schema": "../../../src/audio/est/abi/est-manifest-1.schema.json",
+  "est": 1,
+  "id": "org.example.est-midi-effect-template",
+  "version": "1.0.0",
+  "name": "EST MIDI Effect Template",
+  "vendor": "Example",
+  "description": "An arpeggiator synced to the tempo and a chord memory: the starting point for an EST note effect in Rust.",
+  "license": "MIT",
+  "kind": "effect",
+  "features": ["audio-effect", "note-effect", "stereo"],
+  "abi": { "est": "1.0", "clap": "1.2" },
+  "module": { "path": "module.wasm" },
+  "assets": [],
+  "audio": { "inputs": [{ "channels": 2 }], "outputs": [{ "channels": 2 }], "sampleRates": "any" },
+  "notes": { "inputs": 1, "outputs": 1 },
+  "limits": { "maxLatencyFrames": 0, "memoryPagesMax": 16, "tailSeconds": 0 },
+  "parameters": [
+    { "id": 0, "name": "Mode" },
+    { "id": 1, "name": "Rate" },
+    { "id": 2, "name": "Pattern" },
+    { "id": 3, "name": "Octaves" },
+    { "id": 4, "name": "Gate", "unit": "%" },
+    { "id": 5, "name": "Learn" }
+  ],
+  "stateVersion": 1,
+  "permissions": [],
+  "compat": { "host": ">=1.0.0 <2" }
+}

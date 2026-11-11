@@ -1,0 +1,4 @@
+// est's freestanding <cstddef> (sdk/cpp/build.mjs): see cstdint beside it.
+#pragma once
+#include <stddef.h>
+namespace std { using ::size_t; using ::ptrdiff_t; typedef decltype(nullptr) nullptr_t; }

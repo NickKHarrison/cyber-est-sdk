@@ -1,0 +1,21 @@
+{
+  "$comment": "The golden render (`est test`): compared with golden.f32 to within the tolerance. After changing the sound on purpose: `est test --update`, and listen.",
+  "sampleRate": 48000,
+  "frames": 48000,
+  "input": { "kind": "none" },
+  "events": [
+    { "type": "noteOn", "time": 0.0, "key": 36, "channel": 0, "port": 0, "noteId": 1, "velocity": 1.0 },
+    { "type": "noteOff", "time": 0.05, "key": 36, "channel": 0, "port": 0, "noteId": 1 },
+    { "type": "noteOn", "time": 0.25, "key": 42, "channel": 0, "port": 0, "noteId": 2, "velocity": 0.6 },
+    { "type": "noteOff", "time": 0.27, "key": 42, "channel": 0, "port": 0, "noteId": 2 },
+    { "type": "noteOn", "time": 0.5, "key": 38, "channel": 0, "port": 0, "noteId": 3, "velocity": 0.9 },
+    { "type": "noteOff", "time": 0.55, "key": 38, "channel": 0, "port": 0, "noteId": 3 },
+    { "type": "noteOn", "time": 0.625, "key": 42, "channel": 0, "port": 0, "noteId": 4, "velocity": 0.5 },
+    { "type": "noteOff", "time": 0.64, "key": 42, "channel": 0, "port": 0, "noteId": 4 },
+    { "type": "param", "time": 0.7, "id": 2, "value": 60 },
+    { "type": "noteOn", "time": 0.75, "key": 36, "channel": 0, "port": 0, "noteId": 5, "velocity": 0.8 },
+    { "type": "noteOff", "time": 0.8, "key": 36, "channel": 0, "port": 0, "noteId": 5 }
+  ],
+  "tolerance": 1e-06,
+  "render": "golden.f32"
+}

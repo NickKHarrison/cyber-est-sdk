@@ -1,0 +1,39 @@
+{
+  "est": 1,
+  "id": "org.cyber.est.synth",
+  "version": "1.0.0",
+  "name": "Broken Tail",
+  "vendor": "Cyber",
+  "description": "A broken EST fixture: EST Synth reporting a tail of one frame while its release lasts 200 ms.",
+  "license": "MIT",
+  "kind": "instrument",
+  "features": [
+    "instrument",
+    "synthesizer"
+  ],
+  "abi": {
+    "est": "1.0",
+    "clap": "1.2"
+  },
+  "module": {
+    "path": "module.wasm"
+  },
+  "audio": {
+    "inputs": [],
+    "outputs": [
+      {
+        "channels": 2
+      }
+    ]
+  },
+  "notes": {
+    "inputs": 1,
+    "outputs": 0
+  },
+  "limits": {
+    "maxLatencyFrames": 0,
+    "memoryPagesMax": 64,
+    "tailSeconds": 2
+  },
+  "permissions": []
+}

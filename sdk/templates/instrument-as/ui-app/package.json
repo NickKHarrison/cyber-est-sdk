@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "The plugin window's app (ui-app/), built into ui/ by Vite. est new --app puts this file at the folder's root.",
+  "scripts": {
+    "build:ui": "vite build --config ui-app/vite.config.ts",
+    "dev:ui": "vite --config ui-app/vite.config.ts"
+  },
+  "devDependencies": {
+    "vite": "8.3.5"
+  }
+}

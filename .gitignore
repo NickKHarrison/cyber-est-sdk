@@ -1,0 +1,12 @@
+# dependencies
+node_modules/
+# build output (the UI library's build is committed: sdk/packages/ui/build.mjs --check holds it)
+dist/
+!sdk/packages/ui/dist/
+target/
+build/
+.build/
+.est-build/
+sdk-tarballs/
+*.tsbuildinfo
+.DS_Store

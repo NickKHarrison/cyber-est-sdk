@@ -1,0 +1,24 @@
+{
+  "$schema": "../../../src/audio/est/abi/est-manifest-1.schema.json",
+  "est": 1,
+  "id": "org.example.est-cpp-gain",
+  "version": "1.0.0",
+  "name": "EST C++ Gain",
+  "vendor": "Example",
+  "description": "A smoothed gain written as a CLAP plugin in C++: the starting point for porting a C++ plugin to EST.",
+  "license": "MIT",
+  "kind": "effect",
+  "features": ["audio-effect", "utility", "stereo"],
+  "abi": { "est": "1.0", "clap": "1.2" },
+  "module": { "path": "module.wasm" },
+  "assets": [],
+  "audio": { "inputs": [{ "channels": 2 }], "outputs": [{ "channels": 2 }], "sampleRates": "any" },
+  "notes": { "inputs": 0, "outputs": 0 },
+  "limits": { "maxLatencyFrames": 0, "memoryPagesMax": 16, "tailSeconds": 0 },
+  "parameters": [
+    { "id": 0, "name": "Gain", "unit": "dB" }
+  ],
+  "stateVersion": 1,
+  "permissions": [],
+  "compat": { "host": ">=1.0.0 <2" }
+}

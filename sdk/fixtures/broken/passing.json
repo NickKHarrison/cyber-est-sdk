@@ -1,0 +1,14 @@
+[
+  {
+    "name": "init-ok",
+    "module": "wasm/init-ok.wasm"
+  },
+  {
+    "name": "rate-frames",
+    "module": "wasm/rate-frames.wasm"
+  },
+  {
+    "name": "rate-seconds",
+    "module": "wasm/rate-seconds.wasm"
+  }
+]

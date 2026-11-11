@@ -1,0 +1,57 @@
+{
+  "name": "@cyber-est/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "est: make, validate, play and pack EST plugins for Cyber (new, validate, pack, test, dev, doctor, inspect).",
+  "keywords": [
+    "est",
+    "cyber",
+    "audio-plugin",
+    "webassembly",
+    "web-audio",
+    "assemblyscript",
+    "rust",
+    "daw"
+  ],
+  "license": "MIT",
+  "author": "Cyber",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NickKHarrison/cyber-est-sdk.git",
+    "directory": "sdk/packages/cli"
+  },
+  "homepage": "https://github.com/NickKHarrison/cyber-est-sdk/tree/main/sdk#readme",
+  "bugs": {
+    "url": "https://github.com/NickKHarrison/cyber-est-sdk/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "est": "bin/est.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "assets",
+    "README.md",
+    "BUILD_AN_EST_PLUGIN.md",
+    "PROMPT_KIT.md",
+    "SHARING.md",
+    "LICENSE",
+    "THIRD_PARTY_LICENSES.md"
+  ],
+  "dependencies": {
+    "assemblyscript": "0.28.20",
+    "binaryen": "132.0.0"
+  },
+  "peerDependencies": {
+    "@playwright/test": "1.64.1"
+  },
+  "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    }
+  }
+}

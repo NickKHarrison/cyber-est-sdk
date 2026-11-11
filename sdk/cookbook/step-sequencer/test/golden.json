@@ -1,0 +1,18 @@
+{
+  "$comment": "The golden render (`est test`): the audio passes through; the notes it sends are compared with golden-notes.json exactly. Run On at 120 BPM, then a longer gate, five steps, a higher root, a note played through, and Run Off. After changing it on purpose: `est test --update`.",
+  "sampleRate": 48000,
+  "frames": 48000,
+  "input": { "kind": "noise", "seed": 7, "level": 0.5 },
+  "events": [
+    { "type": "param", "time": 0, "id": 0, "value": 1 },
+    { "type": "param", "time": 0.4, "id": 4, "value": 90 },
+    { "type": "param", "time": 0.5, "id": 3, "value": 5 },
+    { "type": "param", "time": 0.6, "id": 2, "value": 60 },
+    { "type": "noteOn", "time": 0.7, "key": 72, "channel": 0, "port": 0, "noteId": 1, "velocity": 0.6 },
+    { "type": "noteOff", "time": 0.75, "key": 72, "channel": 0, "port": 0, "noteId": 1 },
+    { "type": "param", "time": 0.9, "id": 0, "value": 0 }
+  ],
+  "tolerance": 0,
+  "render": "golden.f32",
+  "notes": "golden-notes.json"
+}

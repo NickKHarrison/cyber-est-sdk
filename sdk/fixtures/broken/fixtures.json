@@ -1,0 +1,158 @@
+[
+  {
+    "name": "forbidden-import",
+    "module": "wasm/forbidden-import.wasm",
+    "rule": "EST-W004",
+    "install": true
+  },
+  {
+    "name": "memory-cap",
+    "module": "../../../src/audio/est/fixtures/gain.wasm",
+    "rule": "EST-W009",
+    "install": true
+  },
+  {
+    "name": "instrument-no-note-input",
+    "module": "../../../src/audio/est/fixtures/gain.wasm",
+    "rule": "EST-M012",
+    "install": true
+  },
+  {
+    "name": "instrument-no-note-port",
+    "module": "../../../src/audio/est/fixtures/gain.wasm",
+    "rule": "EST-C004",
+    "install": true
+  },
+  {
+    "name": "state-drift",
+    "module": "wasm/state-drift.wasm",
+    "rule": "EST-C010",
+    "install": true
+  },
+  {
+    "name": "random",
+    "module": "wasm/random.wasm",
+    "rule": "EST-C018",
+    "install": false
+  },
+  {
+    "name": "ui-external",
+    "module": "../../../src/audio/est/fixtures/gain.wasm",
+    "rule": "EST-U002",
+    "install": false
+  },
+  {
+    "name": "trap",
+    "module": "../../../src/audio/est/fixtures/trap.wasm",
+    "rule": "EST-C013",
+    "install": true
+  },
+  {
+    "name": "spin",
+    "module": "../../../src/audio/est/fixtures/spin.wasm",
+    "rule": "EST-C013",
+    "install": true
+  },
+  {
+    "name": "start-function",
+    "module": "wasm/start.wasm",
+    "rule": "EST-W015",
+    "install": true
+  },
+  {
+    "name": "nan",
+    "module": "wasm/nan.wasm",
+    "rule": "EST-C014",
+    "install": true
+  },
+  {
+    "name": "loud",
+    "module": "wasm/loud.wasm",
+    "rule": "EST-C015",
+    "install": true
+  },
+  {
+    "name": "duplicate-param",
+    "module": "wasm/dup-param.wasm",
+    "rule": "EST-C007",
+    "install": true
+  },
+  {
+    "name": "latency",
+    "module": "wasm/latency.wasm",
+    "rule": "EST-C005",
+    "install": true
+  },
+  {
+    "name": "init-fail",
+    "module": "wasm/init-fail.wasm",
+    "rule": "EST-C001",
+    "install": true
+  },
+  {
+    "name": "params-mismatch",
+    "module": "../../../src/audio/est/fixtures/gain.wasm",
+    "rule": "EST-C008",
+    "install": true
+  },
+  {
+    "name": "ports-mismatch",
+    "module": "../../../src/audio/est/fixtures/gain.wasm",
+    "rule": "EST-C003",
+    "install": true
+  },
+  {
+    "name": "big-state",
+    "module": "wasm/big-state.wasm",
+    "rule": "EST-C009",
+    "install": true
+  },
+  {
+    "name": "state-trap",
+    "module": "wasm/state-trap.wasm",
+    "rule": "EST-C011",
+    "install": true
+  },
+  {
+    "name": "silent-instrument",
+    "module": "../../../src/audio/est/fixtures/probe.wasm",
+    "rule": "EST-C016",
+    "install": true
+  },
+  {
+    "name": "tail-short",
+    "module": "wasm/tail-short.wasm",
+    "rule": "EST-C017",
+    "install": true
+  },
+  {
+    "name": "state-refused",
+    "module": "wasm/state-refused.wasm",
+    "rule": "EST-C020",
+    "install": true
+  },
+  {
+    "name": "init-trap",
+    "module": "wasm/init-trap.wasm",
+    "rule": "EST-W016",
+    "install": true
+  },
+  {
+    "name": "wasi-type",
+    "module": "wasm/wasi-type.wasm",
+    "rule": "EST-W017",
+    "install": true
+  },
+  {
+    "name": "ui-module-script",
+    "module": "../../../src/audio/est/fixtures/gain.wasm",
+    "rule": "EST-U005",
+    "install": false
+  },
+  {
+    "name": "migrate-unknown-id",
+    "module": "../../../src/audio/est/fixtures/gain.wasm",
+    "rule": "EST-M022",
+    "install": true
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "$comment": "Which sample plays which notes. Each entry: `file` (a 16-bit PCM mono WAV in assets/), `root` (the key it sounds unpitched at), `keys` (the lowest and highest key it plays), `velocity` (the lowest and highest velocity, 0 to 1: two entries on the same keys are velocity layers) and `loop` (the frames the Loop mode repeats, start and end; absent: the whole sample). The first entry that matches a note plays it. After changing this file or a WAV, run `node tools/embed-samples.mjs`: it writes the samples into the module's source (an EST module reads no files at run time).",
+  "samples": [
+    { "file": "assets/pluck-soft.wav", "root": 60, "keys": [48, 127], "velocity": [0, 0.6] },
+    { "file": "assets/pluck-hard.wav", "root": 60, "keys": [48, 127], "velocity": [0.6, 1] },
+    { "file": "assets/drone.wav", "root": 55, "keys": [0, 47], "velocity": [0, 1], "loop": [2400, 9600] }
+  ]
+}

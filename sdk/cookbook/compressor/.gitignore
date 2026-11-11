@@ -1,0 +1,5 @@
+# Build output (est pack writes dist/, cargo target/, asc build/) and the validator's report.
+target/
+build/
+dist/
+validation.json

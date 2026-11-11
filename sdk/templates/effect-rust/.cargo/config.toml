@@ -1,0 +1,14 @@
+# EST modules are wasm32-unknown-unknown with WCLAP's shape (EST spec §3.1): an exported, growable
+# function table (the host adds its callbacks to it), a 64 KiB stack, and a declared memory maximum
+# (here 16 pages, 1 MiB) that must not exceed est.json's limits.memoryPagesMax.
+[build]
+target = "wasm32-unknown-unknown"
+
+[target.wasm32-unknown-unknown]
+rustflags = [
+  "-C", "link-arg=--export-table",
+  "-C", "link-arg=--growable-table",
+  "-C", "link-arg=-zstack-size=65536",
+  "-C", "link-arg=--initial-memory=262144",
+  "-C", "link-arg=--max-memory=1048576",
+]

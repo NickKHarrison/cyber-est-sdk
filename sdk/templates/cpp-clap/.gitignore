@@ -1,0 +1,4 @@
+# Build output (est writes build/ and dist/) and the validator's report.
+build/
+dist/
+validation.json

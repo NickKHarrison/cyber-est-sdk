@@ -1,0 +1,49 @@
+{
+  "est": 1,
+  "id": "org.cyber.est.gain",
+  "version": "1.0.0",
+  "name": "Broken Module UI",
+  "vendor": "Cyber",
+  "description": "A broken EST fixture: a custom UI that loads its script as a module, which shows a blank frame (EST-U005).",
+  "license": "MIT",
+  "kind": "effect",
+  "features": [
+    "audio-effect"
+  ],
+  "abi": {
+    "est": "1.0",
+    "clap": "1.2"
+  },
+  "module": {
+    "path": "module.wasm"
+  },
+  "audio": {
+    "inputs": [
+      {
+        "channels": 2
+      }
+    ],
+    "outputs": [
+      {
+        "channels": 2
+      }
+    ]
+  },
+  "notes": {
+    "inputs": 0,
+    "outputs": 0
+  },
+  "limits": {
+    "maxLatencyFrames": 0,
+    "memoryPagesMax": 64,
+    "tailSeconds": 0
+  },
+  "permissions": [],
+  "ui": {
+    "path": "ui/index.html",
+    "size": {
+      "w": 320,
+      "h": 160
+    }
+  }
+}

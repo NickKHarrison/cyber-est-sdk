@@ -1,0 +1,13 @@
+{
+  "$comment": "The golden render (`est test`): compared with golden.f32 to within the tolerance. After changing the sound on purpose: `est test --update`, and listen.",
+  "sampleRate": 48000,
+  "frames": 24064,
+  "input": { "kind": "noise", "seed": 9, "level": 0.4 },
+  "events": [
+    { "type": "param", "time": 0.1, "id": 0, "value": 18 },
+    { "type": "param", "time": 0.2, "id": 1, "value": 600 },
+    { "type": "param", "time": 0.3, "id": 2, "value": 1.5 }
+  ],
+  "tolerance": 1e-06,
+  "render": "golden.f32"
+}

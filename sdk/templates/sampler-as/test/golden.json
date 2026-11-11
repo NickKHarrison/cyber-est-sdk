@@ -1,0 +1,20 @@
+{
+  "$comment": "The golden render (`est test`): these notes through the plugin on Cyber's host code, compared with golden.f32 (little-endian float32, the left channel's frames then the right's) to within the tolerance. A soft and a hard note (the two velocity layers), a note past the samples' end (one-shot), then Loop with a low note on the drone, tuned down, and the releases. After changing the sound on purpose, render it again with `est test --update` and listen.",
+  "sampleRate": 48000,
+  "frames": 48000,
+  "input": { "kind": "none" },
+  "events": [
+    { "type": "noteOn", "time": 0.005, "key": 60, "channel": 0, "port": 0, "noteId": 1, "velocity": 0.4 },
+    { "type": "noteOn", "time": 0.1, "key": 67, "channel": 0, "port": 0, "noteId": 2, "velocity": 0.9 },
+    { "type": "noteOff", "time": 0.2, "key": 60, "channel": 0, "port": 0, "noteId": 1 },
+    { "type": "param", "time": 0.45, "id": 1, "value": 1 },
+    { "type": "noteOn", "time": 0.46, "key": 43, "channel": 0, "port": 0, "noteId": 3, "velocity": 0.8 },
+    { "type": "param", "time": 0.6, "id": 2, "value": -5 },
+    { "type": "noteOn", "time": 0.62, "key": 43, "channel": 0, "port": 0, "noteId": 4, "velocity": 0.5 },
+    { "type": "noteOff", "time": 0.85, "key": 43, "channel": 0, "port": 0, "noteId": 3 },
+    { "type": "noteOff", "time": 0.86, "key": 43, "channel": 0, "port": 0, "noteId": 4 },
+    { "type": "noteOff", "time": 0.9, "key": 67, "channel": 0, "port": 0, "noteId": 2 }
+  ],
+  "tolerance": 1e-6,
+  "render": "golden.f32"
+}

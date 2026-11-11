@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- est.json's ui.size comes from this (`est new --app`): Cyber draws the frame at exactly this
+     size in CSS pixels and never scales it. -->
+<meta name="est-ui-size" content="560x300">
+<title>EST Instrument Template (AS)</title>
+</head>
+<body>
+<main id="app" aria-label="EST Instrument Template (AS)"></main>
+<!-- The UI library, a classic script: `est pack` copies est-ui.js into the bundle beside this page. -->
+<script src="est-ui.js"></script>
+<!-- The app (main.ts). `npm run build:ui` bundles it into ui/assets/app.js, loaded from <head> by a classic
+     deferred script: a module script shows a blank frame (EST-U005). -->
+<script type="module" src="./main.ts"></script>
+</body>
+</html>

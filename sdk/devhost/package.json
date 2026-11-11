@@ -1,0 +1,13 @@
+{
+  "name": "@cyber-est/devhost",
+  "version": "0.1.0",
+  "description": "The EST dev host (est dev): play a plugin in Cyber's own runtime while it is being built.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": { "est-dev": "./bin/est-dev.mjs" },
+  "exports": {
+    ".": "./server.mjs",
+    "./cli": "./cli/dev.mjs"
+  }
+}

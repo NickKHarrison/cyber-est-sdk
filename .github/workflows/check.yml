@@ -1,0 +1,34 @@
+# The kit's checks on every push and pull request: build the three packages, run the kit's suites,
+# pack, check and smoke-test the tarballs (node scripts/sdk-publish.mjs without --publish publishes
+# nothing). Written by Cyber's scripts/sdk-export.mjs. Every action is pinned to a full commit SHA.
+name: Check
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - run: npm ci
+      - name: Build, test, pack, check, smoke
+        run: node scripts/sdk-publish.mjs

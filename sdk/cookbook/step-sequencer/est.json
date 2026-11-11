@@ -1,0 +1,62 @@
+{
+  "$schema": "../../../src/audio/est/abi/est-manifest-1.schema.json",
+  "est": 1,
+  "id": "org.example.cookbook-step-sequencer",
+  "version": "1.0.0",
+  "name": "Cookbook Step Sequencer",
+  "vendor": "Example",
+  "description": "A step sequencer: eight steps of notes from a root key, at a rate synced to the tempo, free or with the transport; notes played in pass through.",
+  "license": "MIT",
+  "kind": "effect",
+  "features": ["audio-effect", "note-effect", "stereo"],
+  "abi": {
+    "est": "1.0",
+    "clap": "1.2"
+  },
+  "module": {
+    "path": "module.wasm"
+  },
+  "assets": [],
+  "audio": {
+    "inputs": [
+      {
+        "channels": 2
+      }
+    ],
+    "outputs": [
+      {
+        "channels": 2
+      }
+    ],
+    "sampleRates": "any"
+  },
+  "notes": {
+    "inputs": 1,
+    "outputs": 1
+  },
+  "limits": {
+    "maxLatencyFrames": 0,
+    "memoryPagesMax": 16,
+    "tailSeconds": 0
+  },
+  "parameters": [
+    { "id": 0, "name": "Run" },
+    { "id": 1, "name": "Rate" },
+    { "id": 2, "name": "Root" },
+    { "id": 3, "name": "Steps" },
+    { "id": 4, "name": "Gate", "unit": "%" },
+    { "id": 5, "name": "Step 1", "unit": "st" },
+    { "id": 6, "name": "Step 2", "unit": "st" },
+    { "id": 7, "name": "Step 3", "unit": "st" },
+    { "id": 8, "name": "Step 4", "unit": "st" },
+    { "id": 9, "name": "Step 5", "unit": "st" },
+    { "id": 10, "name": "Step 6", "unit": "st" },
+    { "id": 11, "name": "Step 7", "unit": "st" },
+    { "id": 12, "name": "Step 8", "unit": "st" }
+  ],
+  "stateVersion": 1,
+  "permissions": [],
+  "compat": {
+    "host": ">=1.0.0 <2"
+  }
+}

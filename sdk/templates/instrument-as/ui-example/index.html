@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- `est new --ui` sizes the frame from this (est.json's ui.size); Cyber draws the frame at exactly
+     that size in CSS pixels and never scales it. -->
+<meta name="est-ui-size" content="460x290">
+<title>EST Instrument Template (AS)</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1>EST Instrument Template (AS)</h1>
+<div class="groups">
+  <fieldset>
+    <legend>Output</legend>
+    <div class="knobs">
+      <est-knob param="0" label="Level" unit="dB"></est-knob>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Filter</legend>
+    <div class="knobs">
+      <est-knob param="1" label="Cutoff" unit="Hz" scale="log"></est-knob>
+      <est-knob param="2" label="Resonance"></est-knob>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Envelope</legend>
+    <div class="knobs">
+      <est-knob param="3" label="Attack" name="Attack time" unit="ms"></est-knob>
+      <est-knob param="4" label="Decay" name="Decay time" unit="ms"></est-knob>
+      <est-knob param="5" label="Sustain" name="Sustain level" unit="%"></est-knob>
+      <est-knob param="6" label="Release" name="Release time" unit="ms"></est-knob>
+    </div>
+  </fieldset>
+</div>
+<script src="est-ui.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>

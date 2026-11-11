@@ -1,0 +1,10 @@
+[package]
+name = "est"
+version = "0.4.0"
+edition = "2021"
+license = "MIT"
+description = "The EST SDK for Rust: an effect or an instrument from one trait (CLAP 1.2's wasm32 glue, parameters, state, events, the transport) and the DSP library. No dependencies."
+publish = false
+
+[lib]
+path = "src/lib.rs"

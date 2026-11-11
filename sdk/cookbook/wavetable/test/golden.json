@@ -1,0 +1,17 @@
+{
+  "$comment": "The golden render (`est test`): compared with golden.f32 to within the tolerance. After changing the sound on purpose: `est test --update`, and listen.",
+  "sampleRate": 48000,
+  "frames": 38400,
+  "input": { "kind": "none" },
+  "events": [
+    { "type": "noteOn", "time": 0.005, "key": 48, "channel": 0, "port": 0, "noteId": 1, "velocity": 0.9 },
+    { "type": "noteOn", "time": 0.005, "key": 55, "channel": 0, "port": 0, "noteId": 2, "velocity": 0.7 },
+    { "type": "param", "time": 0.1, "id": 1, "value": 1.5 },
+    { "type": "param", "time": 0.3, "id": 1, "value": 3 },
+    { "type": "noteOff", "time": 0.5, "key": 48, "channel": 0, "port": 0, "noteId": 1 },
+    { "type": "noteOff", "time": 0.5, "key": 55, "channel": 0, "port": 0, "noteId": 2 },
+    { "type": "param", "time": 0.5, "id": 3, "value": 120 }
+  ],
+  "tolerance": 1e-06,
+  "render": "golden.f32"
+}

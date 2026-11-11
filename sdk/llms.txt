@@ -1,0 +1,40 @@
+# The EST developer kit
+
+> EST is how a plugin runs in Cyber: a CLAP 1.2 plugin compiled to WebAssembly (wasm32, no imports), packed with its manifest into a `.est` bundle that the host validates, meters and runs in a sandbox, its UI (if any) a page in a sandboxed frame. This is the kit's index for a coding agent: the docs, the templates and the cookbook, all in this folder (`sdk/` in the Cyber clone the kit runs from). Inside a plugin folder made by `est new`, read its own AGENTS.md and llms.txt first.
+
+## Docs
+
+- [docs/BUILD_AN_EST_PLUGIN.md](docs/BUILD_AN_EST_PLUGIN.md): start here: from nothing to a working effect with npm alone, the code inline, the rules, and what to paste into an assistant
+- [docs/PROMPT_KIT.md](docs/PROMPT_KIT.md): ready-to-paste prompts for an AI coding assistant: one per template family and cookbook recipe, and the common follow-ups (presets, a look, a click, EST-W004)
+- [docs/SHARING.md](docs/SHARING.md): sharing what you made: loading your own plugin in Cyber, a song with it, a listen link, what viewers see, what waits for Community publishing, etiquette
+- [README.md](README.md): what the kit is and the loop (`est new`, `est validate`, `est test`, `est pack`, `est dev`)
+- [docs/for-agents.md](docs/for-agents.md): the page for coding agents: the loop, the files, the limits
+- [docs/templates.md](docs/templates.md): which template to start from
+- [docs/cookbook.md](docs/cookbook.md): ten short tested plugins, each with a prompt
+- [docs/getting-started.md](docs/getting-started.md), [docs/concepts.md](docs/concepts.md), [docs/dsp-library.md](docs/dsp-library.md), [docs/ui.md](docs/ui.md), [docs/dev-host.md](docs/dev-host.md)
+- [docs/manifest.md](docs/manifest.md) and [docs/validator-rules.md](docs/validator-rules.md): generated from the schema and the rules table
+
+## Templates (`est new <name> <folder>`)
+
+- [templates/effect-rust/](templates/effect-rust/), [templates/effect-as/](templates/effect-as/): an audio effect
+- [templates/instrument-rust/](templates/instrument-rust/), [templates/instrument-as/](templates/instrument-as/): a synthesizer
+- [templates/sampler-rust/](templates/sampler-rust/), [templates/sampler-as/](templates/sampler-as/): a sampler, its WAVs in the module
+- [templates/midi-effect-rust/](templates/midi-effect-rust/), [templates/midi-effect-as/](templates/midi-effect-as/): a note effect (an arpeggiator and a chord memory)
+- [templates/visualiser-rust/](templates/visualiser-rust/), [templates/visualiser-as/](templates/visualiser-as/): a plugin whose point is its page, drawn from the host's meters
+
+## Cookbook (`est new <name> <folder>`; AssemblyScript)
+
+- [cookbook/compressor/](cookbook/compressor/): a peak compressor, channels linked
+- [cookbook/chorus/](cookbook/chorus/): two modulated delays, a quarter-turn apart
+- [cookbook/bitcrusher/](cookbook/bitcrusher/): fewer bits and a lower sample rate
+- [cookbook/wavetable/](cookbook/wavetable/): an instrument morphing four single-cycle waves
+- [cookbook/drum-synth/](cookbook/drum-synth/): an instrument: kick, snare and hat from sines and noise
+- [cookbook/ring-mod/](cookbook/ring-mod/): the input times a sine
+- [cookbook/widener/](cookbook/widener/): mid and side, the side scaled
+- [cookbook/auto-wah/](cookbook/auto-wah/): an envelope follower sweeping a band-pass
+- [cookbook/schroeder-reverb/](cookbook/schroeder-reverb/): four combs and two all-passes per channel
+- [cookbook/step-sequencer/](cookbook/step-sequencer/): a note effect: eight steps synced to the tempo
+
+## The contract, machine-readable
+
+- `../src/audio/est/abi/est-manifest-1.schema.json`, `est-validator-rules.json`, `est-abi-1.0.json` (copied into every folder `est new` makes)

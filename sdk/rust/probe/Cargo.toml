@@ -1,0 +1,22 @@
+[package]
+name = "est-probe"
+version = "0.4.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "Not a plugin: each DSP block of the est crate behind a plain export, so Cyber's suite can render the Rust and AssemblyScript builds of a block and compare them (sdk/tests/dsp.test.ts)."
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+est = { path = "../est" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false

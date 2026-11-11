@@ -1,0 +1,18 @@
+{
+  "targets": {
+    "release": {
+      "outFile": "build/probe.wasm",
+      "optimizeLevel": 3,
+      "shrinkLevel": 0,
+      "converge": false,
+      "noAssert": true
+    }
+  },
+  "options": {
+    "path": [".."],
+    "runtime": "../est/runtime",
+    "initialMemory": 8,
+    "use": ["abort=index/abort"],
+    "disable": ["gc", "exception-handling", "relaxed-simd", "threads", "tail-calls"]
+  }
+}

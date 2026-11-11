@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../src/audio/est/abi/est-manifest-1.schema.json",
+  "est": 1,
+  "id": "org.example.est-sampler-template-as",
+  "version": "1.0.0",
+  "name": "EST Sampler Template (AS)",
+  "vendor": "Example",
+  "description": "Samples mapped to keys and velocity layers, one-shot or looped, with an ADSR: the starting point for an EST sampler in AssemblyScript.",
+  "license": "MIT",
+  "kind": "instrument",
+  "features": ["instrument", "sampler", "stereo"],
+  "abi": { "est": "1.0", "clap": "1.2" },
+  "module": { "path": "module.wasm" },
+  "assets": [],
+  "audio": { "inputs": [], "outputs": [{ "channels": 2 }], "sampleRates": "any" },
+  "notes": { "inputs": 1, "outputs": 0 },
+  "limits": { "maxLatencyFrames": 0, "memoryPagesMax": 16, "tailSeconds": 5 },
+  "parameters": [
+    { "id": 0, "name": "Level", "unit": "dB" },
+    { "id": 1, "name": "Mode" },
+    { "id": 2, "name": "Tune", "unit": "st" },
+    { "id": 3, "name": "Attack", "unit": "ms" },
+    { "id": 4, "name": "Decay", "unit": "ms" },
+    { "id": 5, "name": "Sustain", "unit": "%" },
+    { "id": 6, "name": "Release", "unit": "ms" }
+  ],
+  "stateVersion": 1,
+  "permissions": [],
+  "compat": { "host": ">=1.0.0 <2" }
+}

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="est-ui-size" content="520x240">
+<title>Level visualiser</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="top">
+  <h1>Level</h1>
+  <p class="readout" id="readout" aria-live="polite">Waiting for the host's meters…</p>
+</div>
+<canvas id="scope" width="480" height="140" role="img" aria-label="The output level over the last seconds, left channel above, right below"></canvas>
+<div class="knobs">
+  <est-knob param="0" label="Trim" unit="dB"></est-knob>
+  <est-knob param="1" label="History" unit="s"></est-knob>
+</div>
+<script src="est-ui.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>

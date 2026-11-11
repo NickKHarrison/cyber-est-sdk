@@ -1,0 +1,13 @@
+{
+  "$comment": "The golden render (`est test`): the input through the plugin on Cyber's host code, compared with golden.f32 to within the tolerance. The audio passes through, trimmed down 6 dB and back up to +3 dB (smoothed). The page draws from the host's meters, which no golden render holds: check it with `est dev`.",
+  "sampleRate": 48000,
+  "frames": 24064,
+  "input": { "kind": "noise", "seed": 5, "level": 0.5 },
+  "events": [
+    { "type": "param", "time": 0.1, "id": 0, "value": -6 },
+    { "type": "param", "time": 0.3, "id": 0, "value": 3 },
+    { "type": "param", "time": 0.4, "id": 1, "value": 12 }
+  ],
+  "tolerance": 1e-6,
+  "render": "golden.f32"
+}

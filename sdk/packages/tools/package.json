@@ -1,0 +1,41 @@
+{
+  "name": "@cyber-est/tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The EST plugin validator, packer and inspector: Cyber's own install code, run in Node.",
+  "keywords": [
+    "est",
+    "cyber",
+    "audio-plugin",
+    "webassembly",
+    "validator"
+  ],
+  "license": "MIT",
+  "author": "Cyber",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NickKHarrison/cyber-est-sdk.git",
+    "directory": "sdk/packages/tools"
+  },
+  "homepage": "https://github.com/NickKHarrison/cyber-est-sdk/tree/main/sdk#readme",
+  "bugs": {
+    "url": "https://github.com/NickKHarrison/cyber-est-sdk/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./pack": "./dist/pack.mjs"
+  },
+  "files": [
+    "dist",
+    "assets",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "binaryen": "132.0.0"
+  }
+}

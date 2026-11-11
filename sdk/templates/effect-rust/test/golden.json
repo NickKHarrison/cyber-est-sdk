@@ -1,0 +1,17 @@
+{
+  "$comment": "The golden render (`est test`): this input and these events through the plugin on Cyber's host code, compared with golden.f32 (little-endian float32, the left channel's frames then the right's) to within the tolerance. After changing the sound on purpose, render it again with `est test --update` and check that it sounds right.",
+  "sampleRate": 48000,
+  "frames": 12288,
+  "input": { "kind": "noise", "seed": 1, "level": 0.5 },
+  "events": [
+    { "type": "param", "time": 0, "id": 1, "value": 800 },
+    { "type": "param", "time": 0.04, "id": 2, "value": 0.6 },
+    { "type": "param", "time": 0.08, "id": 3, "value": 2 },
+    { "type": "param", "time": 0.12, "id": 0, "value": -6 },
+    { "type": "param", "time": 0.16, "id": 3, "value": 1 },
+    { "type": "param", "time": 0.18, "id": 1, "value": 4000 },
+    { "type": "param", "time": 0.22, "id": 3, "value": 3 }
+  ],
+  "tolerance": 1e-6,
+  "render": "golden.f32"
+}

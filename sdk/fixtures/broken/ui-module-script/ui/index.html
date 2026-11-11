@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Broken Module UI</title>
+<!-- EST-U005: a bundler's default page. The frame's origin is opaque, so a module script, a
+     crossorigin load and a module preload are CORS requests the plugin origin never answers. -->
+<script type="module" crossorigin src="app.js"></script>
+<link rel="modulepreload" href="app.js">
+</head>
+<body>
+<p id="gain">Gain</p>
+</body>
+</html>

@@ -1,0 +1,33 @@
+# EST plugin: an EST note effect in AssemblyScript
+
+> An EST plugin is a CLAP 1.2 plugin compiled to WebAssembly (wasm32, no imports), packed with its manifest into a `.est` bundle that a host such as Cyber validates, meters and runs in a sandbox. Start with AGENTS.md in this folder. Every link below is a file in this folder (made by `est new`) or a page of the kit's documentation (`sdk/docs/` in the Cyber clone the kit runs from: `<cyber>/sdk/docs/…`).
+
+## This plugin
+
+- [AGENTS.md](AGENTS.md): the layout, the commands, the allocation and determinism rules, the identity and state rules, the rule ids, and the loop: build, `est validate`, read dist/validation.json, fix
+- [est.json](est.json): the manifest (its `$schema` is the schema below)
+- [assembly/index.ts](assembly/index.ts): the plugin
+- [test/golden-notes.json](test/golden-notes.json): the notes the golden render must send
+- [test/golden.json](test/golden.json): the golden render's spec (its events name parameters by id)
+
+## The contract, machine-readable (in this folder)
+
+- [est-manifest-1.schema.json](est-manifest-1.schema.json): the manifest's JSON Schema (2020-12)
+- [est-validator-rules.json](est-validator-rules.json): every validator rule: its id (EST-M, -B, -W, -C, -U, -P), title, explanation, fix and severity
+- [est-abi-1.0.json](est-abi-1.0.json): the ABI: every CLAP struct's size and offsets on wasm32 and every constant (only for code written without the SDK's runtime)
+- [est-ui.d.ts](est-ui.d.ts): the types of the UI library (`window.EstUI`), for a custom UI
+
+## The SDK
+
+- [est/index.ts](est/index.ts): this plugin's copy of the SDK's AssemblyScript library, made by `est new` (its header lists how it differs from the Rust crate; the blocks in `est/dsp/`)
+- sdk/docs/getting-started.md: the loop, the validate report (block, peak, deterministic), the golden render
+- sdk/docs/concepts.md: blocks, events, parameters, identity, state and its magic, the sandbox
+- sdk/docs/dsp-library.md: the blocks in both languages, the allocation rule, the cost of smoothing
+- sdk/docs/ui.md: the UI library, `@est/ui`, with a complete example and what a UI may load
+- sdk/docs/dev-host.md: `est dev`, and `est dev --json` (commands, `ui` lines, ports, how long it runs)
+- sdk/docs/manifest.md and sdk/docs/validator-rules.md: the same as the two JSON files above, as pages
+- sdk/docs/for-agents.md: the page for coding agents
+
+## Optional
+
+- `<cyber>/docs/est/EST_SPECIFICATION_DRAFT.md`: the EST specification (the module's shape, the manifest, events, state, the sandbox): background, not needed to write a plugin

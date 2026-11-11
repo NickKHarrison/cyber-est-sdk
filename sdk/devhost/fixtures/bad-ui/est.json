@@ -1,0 +1,1 @@
+{ "id": "org.example.bad-ui", "version": "0.0.1", "name": "Bad UI", "ui": { "path": "ui/index.html", "size": { "w": 300, "h": 120 } } }

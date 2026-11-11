@@ -1,0 +1,20 @@
+[
+ {"type":"noteOn","frame":0,"key":48,"channel":0,"velocity":0.8},
+ {"type":"noteOff","frame":3000,"key":48,"channel":0,"velocity":0},
+ {"type":"noteOn","frame":6000,"key":60,"channel":0,"velocity":0.8},
+ {"type":"noteOff","frame":9000,"key":60,"channel":0,"velocity":0},
+ {"type":"noteOn","frame":12000,"key":55,"channel":0,"velocity":0.8},
+ {"type":"noteOff","frame":15000,"key":55,"channel":0,"velocity":0},
+ {"type":"noteOn","frame":18000,"key":51,"channel":0,"velocity":0.8},
+ {"type":"noteOff","frame":21000,"key":51,"channel":0,"velocity":0},
+ {"type":"noteOn","frame":24000,"key":48,"channel":0,"velocity":0.8},
+ {"type":"noteOff","frame":29400,"key":48,"channel":0,"velocity":0},
+ {"type":"noteOn","frame":30000,"key":60,"channel":0,"velocity":0.8},
+ {"type":"noteOn","frame":33600,"key":72,"channel":0,"velocity":0.6},
+ {"type":"noteOff","frame":35400,"key":60,"channel":0,"velocity":0},
+ {"type":"noteOff","frame":36000,"key":72,"channel":0,"velocity":0.8},
+ {"type":"noteOn","frame":36000,"key":72,"channel":0,"velocity":0.8},
+ {"type":"noteOff","frame":41400,"key":72,"channel":0,"velocity":0},
+ {"type":"noteOn","frame":42000,"key":67,"channel":0,"velocity":0.8},
+ {"type":"noteOff","frame":43200,"key":67,"channel":0,"velocity":0}
+]
