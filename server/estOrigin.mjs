@@ -12,7 +12,9 @@
 // EST_ORIGIN_HOST: a host with a port (`127.0.0.1:4447`, matched exactly) or without one
 // (`est.example.dev`, matched on any port). EST_ORIGIN_DIR: the folder of bundles by hash.
 // EST_APP_ORIGIN: the CSP source list allowed to frame these pages (default APP_ORIGIN, else
-// https://cyber-audio.fly.dev), e.g. `http://localhost:*` in tests.
+// https://cyber-audio.fly.dev), e.g. `http://localhost:*` in tests. 1.473: its callers pass the
+// public origin and the origins still accepted during a move (PUBLIC_ORIGIN, PUBLIC_ORIGIN_ALSO:
+// server/collab.mjs, server/estOriginServer.mjs `estAppAncestors`), so this file reads neither.
 //
 // EST Phase 5a (5-B, D-45): with a developer-UI key (EST_DEV_UI_PUBLIC_KEY, or EST_DEV_UI_KEY when the
 // app and this host are one server), also `/est/dev/<sha256>`: an admin's device POSTs a developer

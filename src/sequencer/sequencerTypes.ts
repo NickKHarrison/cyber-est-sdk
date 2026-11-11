@@ -1,5 +1,7 @@
 import { sanitiseTuning, type SongTuning } from './tuning';
 import { sanitiseNoteMpe, type NoteMpe } from './noteMpe';
+import { sanitiseStepClip } from './stepClip/sanitise';
+import type { StepClipData } from './stepClip/stepTypes';
 import { sanitiseScale, type Scale } from './scales';
 import { songRules } from './songRules';
 import { fitOutputs, withOutput } from './routing';
@@ -66,8 +68,9 @@ export const MAX_RETURNS = 8;
  */
 export const MIN_TRACK_DELAY_MS = -100;
 export const MAX_TRACK_DELAY_MS = 100;
-/** Rows on the pads track: the SAMPLE page's 64 pads (sampleTypes' PAD_COUNT; a pad's index is its row). */
-export const PAD_ROWS = 64;
+/** Rows on the pads track: the SAMPLE page's pads (sampleTypes' PAD_COUNT, 128 since 1.480; a pad's index is its row). */
+// A literal, so this light module needs no import of sampleTypes; sampleTypes.test.ts checks it equals PAD_COUNT.
+export const PAD_ROWS = 128;
 export const MIN_TEMPO = 40;
 export const MAX_TEMPO = 240;
 export const MIN_VOLUME_DB = -48;
@@ -167,6 +170,12 @@ export interface Clip {
    * (`externalControlPlayback.ts`); other instruments ignore it. Absent: none.
    */
   program?: ClipProgram;
+  /**
+   * 1.482 (Cyber_Step_Sequencer_Work_Order.md): set, the clip is a **Step Sequencer clip**: it plays
+   * from these rows (`stepClip/expand.ts`, through `playedNotesOf`), never its `notes` (kept, not
+   * played). Absent: an ordinary MIDI clip. A Session MIDI clip carries it too (`SessionClip`).
+   */
+  steps?: StepClipData;
   /**
    * 1.109 (take lanes): set, the clip is a **take** (its number, 1…MAX_TAKE, the take lane it is
    * on): it is drawn on its track's take lanes only and never plays, renders or exports
@@ -1191,6 +1200,8 @@ export function sanitiseClip(raw: unknown, tracks: readonly Track[]): Clip | nul
   const envelopes = sanitiseClipEnvelopes(raw.envelopes);
   const groove = sanitiseGrooveRef(raw.groove);
   const program = track.kind === 'synth' ? sanitiseClipProgram(raw.program) : undefined;
+  // 1.482: a Step Sequencer clip's rows (pad rows on a track that plays a kit).
+  const steps = sanitiseStepClip(raw.steps, noteKindOf(track) === 'pads' ? PAD_ROWS - 1 : 127);
   const notes: Note[] = [];
   const seen = new Set<string>();
   if (Array.isArray(raw.notes)) {
@@ -1209,6 +1220,7 @@ export function sanitiseClip(raw: unknown, tracks: readonly Track[]): Clip | nul
     ...(envelopes ? { envelopes } : {}),
     ...(groove ? { groove } : {}),
     ...(program ? { program } : {}),
+    ...(steps ? { steps } : {}),
     ...sanitiseTakeFields(raw),
   };
 }

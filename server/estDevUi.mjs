@@ -16,6 +16,10 @@
 //    admin's device installed), reads the stored ZIP and keeps only the files under the UI page's
 //    folder, **in memory**, for `DEV_UI_KEEP_MS` after their last use (a restart forgets them: the
 //    client uploads again), within a per-bundle and a total size cap (the oldest go first).
+//    1.454: and within a per-account share (`DEV_UI_MAX_ACCOUNT_BYTES`), by the ticket's signed
+//    account tag (`a`, `accountTagOf`): an account's own least recently used UIs go first, so no one
+//    account can push more than its share of everyone else's out; one upload past the share alone is
+//    refused in words (413).
 // 3. GET/HEAD /est/dev/<sha256>/<path> serves them with exactly the `/est/b/` headers (the strict CSP
 //    with `sandbox allow-scripts`, `frame-ancestors` the app, nosniff, no cookies), `no-store`.
 //
@@ -33,6 +37,26 @@ export const DEV_UI_MAX_BUNDLE_BYTES = 32 * 1024 * 1024;
 export const DEV_UI_MAX_UI_BYTES = 8 * 1024 * 1024;
 /** Every developer UI it holds together, at most (the least recently used go first). */
 export const DEV_UI_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+/**
+ * 1.454 (the security review of 1.412–1.435, "For the independent reviewer" 2): one account's share of
+ * that store. A quarter of the total, 64 MB / 4 = 16 MB, which is two of the largest UIs
+ * (`DEV_UI_MAX_UI_BYTES`, 8 MB): an account iterating on one plugin (each rebuild a new hash) keeps
+ * its newest two at the largest size, and however many bundles it claims (20 an hour, EST_ACCOUNT_LIMITS)
+ * it holds at most 16 MB at once, so it can push at most 16 MB of anyone else's out; at least
+ * four accounts are needed to fill the store.
+ */
+export const DEV_UI_MAX_ACCOUNT_BYTES = DEV_UI_MAX_TOTAL_BYTES / 4;
+/** 1.457: the Plugin Studio's store (`/est/studio/`, its own store beside the developers') holds as much, 64 MB. */
+export const STUDIO_UI_MAX_TOTAL_BYTES = DEV_UI_MAX_TOTAL_BYTES;
+/**
+ * 1.457 (closing 1.454's note): one account's share of the Studio's store, as the developers': a
+ * quarter of its total, 64 MB / 4 = 16 MB, two of the largest UIs (`DEV_UI_MAX_UI_BYTES`, 8 MB) and
+ * about eighty of a Studio UI made only of the agent's files (`STUDIO_LIMITS.filesBytes`, 200 KB).
+ * The Studio's ticket route mints a ticket per ask (its turns are limited, its tickets are not), so
+ * without a share one account could churn every other account's Studio UIs out; with it, it can
+ * push at most 16 MB of theirs out, and at least four accounts are needed to fill the store.
+ */
+export const STUDIO_UI_MAX_ACCOUNT_BYTES = STUDIO_UI_MAX_TOTAL_BYTES / 4;
 /** A bundle's UI is forgotten this long after it was last uploaded or served. */
 export const DEV_UI_KEEP_MS = 12 * 60 * 60 * 1000;
 /** The most entries a bundle may have (as the client's reader: BUNDLE_MAX_ENTRIES). */
@@ -66,16 +90,29 @@ export function devUiKeysOf(env) {
   return { signKey, verifyKey };
 }
 
-/** A ticket for one upload of bundle `hash`. */
-export function signTicket(key, hash, now = Date.now(), kind = 'dev') {
+const ACCOUNT_TAG_RE = /^[0-9a-f]{16}$/;
+/**
+ * 1.454: the account a ticket is for, as the plugin origin sees it: 16 hex of SHA-256 over the
+ * account's id, so the ticket (which the browser carries in the clear) never names the account.
+ * @param {string} sub
+ */
+export const accountTagOf = (sub) => createHash('sha256').update(`cyber-est-dev-ui:${sub}`).digest('hex').slice(0, 16);
+
+/**
+ * A ticket for one upload of bundle `hash`. 1.454: `account` (an `accountTagOf` tag), signed in it as
+ * `a`, so the plugin origin holds the account to its share.
+ * @param {any} key  an Ed25519 private key @param {string} hash @param {number} [now] @param {'dev' | 'studio'} [kind] @param {string | null} [account]
+ */
+export function signTicket(key, hash, now = Date.now(), kind = 'dev', account = null) {
   // 1.320 (DEV-B): a Plugin Studio ticket says so (`k: 'studio'`), and is good only on /est/studio/.
-  const payload = b64url(JSON.stringify({ h: hash, exp: now + DEV_UI_TICKET_MS, n: randomBytes(16).toString('hex'), ...(kind === 'studio' ? { k: 'studio' } : {}) }));
+  const a = typeof account === 'string' && ACCOUNT_TAG_RE.test(account) ? { a: account } : {};
+  const payload = b64url(JSON.stringify({ h: hash, exp: now + DEV_UI_TICKET_MS, n: randomBytes(16).toString('hex'), ...(kind === 'studio' ? { k: 'studio' } : {}), ...a }));
   return `v1.${payload}.${b64url(edSign(null, Buffer.from(`v1.${payload}`), key))}`;
 }
 
 /**
- * A ticket checked: its signature, its shape, the hash it names and its expiry. `{ ok: true, nonce, exp }`
- * or `{ ok: false, why }`. (Whether it was used is the store's.)
+ * A ticket checked: its signature, its shape, the hash it names and its expiry. `{ ok: true, nonce, exp, account }`
+ * or `{ ok: false, why }` (`account`: the signed tag, or null for a ticket without one). (Whether it was used is the store's.)
  */
 export function checkTicket(key, token, hash, now = Date.now(), kind = 'dev') {
   if (typeof token !== 'string' || token.length > 512) return { ok: false, why: 'no ticket' };
@@ -92,7 +129,7 @@ export function checkTicket(key, token, hash, now = Date.now(), kind = 'dev') {
   if ((p.k === 'studio' ? 'studio' : 'dev') !== kind) return { ok: false, why: 'a ticket for another kind of upload' };
   if (p.exp <= now) return { ok: false, why: 'an expired ticket' };
   if (p.exp > now + DEV_UI_TICKET_MS + 60_000) return { ok: false, why: 'not a ticket' };
-  return { ok: true, nonce: p.n, exp: p.exp };
+  return { ok: true, nonce: p.n, exp: p.exp, account: typeof p.a === 'string' && ACCOUNT_TAG_RE.test(p.a) ? p.a : null };
 }
 
 /** A path inside a bundle as the client's reader takes it (`pathRefusal` in src/audio/est/install/bundle.ts). */
@@ -146,10 +183,13 @@ export function readStoredEntries(buf) {
 /**
  * The plugin origin's store of developer UIs (in memory).
  * 1.320 (DEV-B): `kind` `'studio'` is the Plugin Studio's store (/est/studio/), taking Studio tickets only.
- * @param {{ verifyKey: import('node:crypto').KeyObject, kind?: 'dev' | 'studio', now?: () => number, maxUiBytes?: number, maxTotalBytes?: number, keepMs?: number }} o
+ * 1.454: `maxAccountBytes`, one account's share (by the ticket's `a`; a ticket without one, such as
+ * one signed before 1.454 (1.457 for the Studio's) during a deploy, is held to the total only, as before).
+ * 1.457: the Studio's store defaults to `STUDIO_UI_MAX_TOTAL_BYTES` and `STUDIO_UI_MAX_ACCOUNT_BYTES`.
+ * @param {{ verifyKey: import('node:crypto').KeyObject, kind?: 'dev' | 'studio', now?: () => number, maxUiBytes?: number, maxTotalBytes?: number, maxAccountBytes?: number, keepMs?: number }} o
  */
-export function createDevUiStore({ verifyKey, kind = 'dev', now = () => Date.now(), maxUiBytes = DEV_UI_MAX_UI_BYTES, maxTotalBytes = DEV_UI_MAX_TOTAL_BYTES, keepMs = DEV_UI_KEEP_MS }) {
-  /** @type {Map<string, { files: Map<string, Buffer>, bytes: number, used: number, page: string }>} by hash, oldest use first */
+export function createDevUiStore({ verifyKey, kind = 'dev', now = () => Date.now(), maxUiBytes = DEV_UI_MAX_UI_BYTES, maxTotalBytes = kind === 'studio' ? STUDIO_UI_MAX_TOTAL_BYTES : DEV_UI_MAX_TOTAL_BYTES, maxAccountBytes = kind === 'studio' ? STUDIO_UI_MAX_ACCOUNT_BYTES : DEV_UI_MAX_ACCOUNT_BYTES, keepMs = DEV_UI_KEEP_MS }) {
+  /** @type {Map<string, { files: Map<string, Buffer>, bytes: number, used: number, page: string, account: string | null }>} by hash, oldest use first */
   const bundles = new Map();
   /** Tickets used, by nonce, until they expire. */
   const used = new Map();
@@ -169,7 +209,13 @@ export function createDevUiStore({ verifyKey, kind = 'dev', now = () => Date.now
     const t = checkTicket(verifyKey, ticket, hash, now(), kind);
     if (!t.ok) return { ok: false, status: 403, why: t.why };
     if (used.has(t.nonce)) return { ok: false, status: 403, why: 'a ticket already used' };
-    return { ok: true, nonce: t.nonce, exp: t.exp };
+    return { ok: true, nonce: t.nonce, exp: t.exp, account: t.account };
+  };
+  /** 1.454: the bytes an account holds now (`but`: a hash left out, the one being replaced). */
+  const accountBytes = (account, but) => {
+    let n = 0;
+    for (const [h, b] of bundles) if (b.account === account && h !== but) n += b.bytes;
+    return n;
   };
 
   return {
@@ -209,9 +255,19 @@ export function createDevUiStore({ verifyKey, kind = 'dev', now = () => Date.now
         files.set(name, Buffer.from(data)); // a copy: the upload's buffer is let go
       }
       if (bytes > maxUiBytes) return { ok: false, status: 413, why: `the UI is ${bytes} bytes, over ${maxUiBytes}` };
+      const account = t.account;
+      if (account !== null) {
+        // 1.454: one account's share. Past it alone, refused; else its own least recently used go first.
+        if (bytes > maxAccountBytes) return { ok: false, status: 413, why: `the UI is ${bytes} bytes, over one account's share of ${maxAccountBytes}` };
+        while (accountBytes(account, hash) + bytes > maxAccountBytes) {
+          const oldest = [...bundles].find(([h, x]) => x.account === account && h !== hash);
+          if (!oldest) break;
+          forget(oldest[0]);
+        }
+      }
       forget(hash);
       while (total + bytes > maxTotalBytes && bundles.size) forget(bundles.keys().next().value);
-      const b = { files, bytes, used: now(), page };
+      const b = { files, bytes, used: now(), page, account };
       bundles.set(hash, b);
       total += bytes;
       return { ok: true, files: [...files.keys()] };
@@ -230,9 +286,21 @@ export function createDevUiStore({ verifyKey, kind = 'dev', now = () => Date.now
       touch(hash, b);
       return data;
     },
-    /** What it holds (tests). */
-    stats: () => ({ bundles: bundles.size, bytes: total, tickets: used.size }),
+    /** What it holds (tests); 1.454: `account`, one account's bytes. @param {string | null} [account] */
+    stats: (account = null) => ({ bundles: bundles.size, bytes: total, tickets: used.size, ...(account ? { account: accountBytes(account, null) } : {}) }),
   };
+}
+
+/**
+ * 1.457: the app's Plugin Studio tickets (POST /studio/ui-ticket, server/studio.mjs): kind `studio`,
+ * and the asking account's tag (`accountTagOf`) signed in, so the plugin origin's `/est/studio/`
+ * store holds the account to `STUDIO_UI_MAX_ACCOUNT_BYTES`. Null without a key.
+ * @param {import('node:crypto').KeyObject | null} signKey @param {() => number} [now]
+ * @returns {{ sign: (hash: string, sub: string) => string } | null}
+ */
+export function studioUiTickets(signKey, now = () => Date.now()) {
+  if (!signKey) return null;
+  return { sign: (hash, sub) => signTicket(signKey, hash, now(), 'studio', accountTagOf(String(sub))) };
 }
 
 /**
@@ -271,7 +339,8 @@ export function createEstDevTickets({ auth, signKey, origin, now = () => Date.no
         const ownOnly = !!devTools.ownRefusal && !!devTools.refusal(user);
         const go = () => {
           const t = now();
-          json(res, 200, { ticket: signTicket(signKey, hash, t), url: `${origin}/est/dev/${hash}`, expiresAt: t + DEV_UI_TICKET_MS });
+          // 1.454: the account's tag in the ticket, so the plugin origin holds it to its share.
+          json(res, 200, { ticket: signTicket(signKey, hash, t, 'dev', accountTagOf(String(user.sub))), url: `${origin}/est/dev/${hash}`, expiresAt: t + DEV_UI_TICKET_MS });
         };
         if (!ownOnly) { go(); return; }
         Promise.resolve(holdsOwn ? holdsOwn(String(user.sub), hash) : false).then((held) => {
