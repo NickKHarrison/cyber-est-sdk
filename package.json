@@ -1,7 +1,7 @@
 {
   "name": "cyber-est-sdk",
   "private": true,
-  "version": "1.492.0",
+  "version": "1.492.1",
   "description": "The EST plugin kit for Cyber: the sources of @cyber-est/cli, @cyber-est/tools and @cyber-est/ui. Mirrored from Cyber's repository.",
   "license": "MIT",
   "type": "module",
