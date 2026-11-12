@@ -6,7 +6,7 @@ New to all this? Read [Build an EST plugin](BUILD_AN_EST_PLUGIN.md) first: it is
 
 ## How to use it
 
-Every prompt starts with `npx @cyber-est/cli`, Cyber's plugin kit on npm. Until the kit is published there (coming soon), that command answers 404 (not found): keep this page for then.
+Every prompt starts with `npx @cyber-est/cli`, Cyber's plugin kit on npm.
 
 1. You need Node 20 or newer. Make an empty folder for your plugins and open your assistant there.
 2. Pick the prompt below closest to what you want, replace the `<…>` parts, and paste it.

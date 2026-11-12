@@ -12,7 +12,7 @@ cd my-chorus && npm install --save-dev --save-exact @cyber-est/cli
 npx est doctor
 ```
 
-(The first release, 0.1.0, is built and checked; until the owner publishes it, `npx @cyber-est/cli` finds nothing and the clone below is the way.) In a folder with the kit installed `npx est` is the command; anywhere else write `npx @cyber-est/cli`, because a bare `npx est` fetches npm's unrelated package called `est`. `est validate <dir>` runs that folder's own build (`cargo`, or its `node_modules/.bin/asc`) before it checks anything, so validating a cloned repository runs its build: validate only folders you trust (Cyber and its server check only `.est` bytes).
+(0.1.0 is on npm since 11 November 2026, published from the public mirror with provenance.) In a folder with the kit installed `npx est` is the command; anywhere else write `npx @cyber-est/cli`, because a bare `npx est` fetches npm's unrelated package called `est`. `est validate <dir>` runs that folder's own build (`cargo`, or its `node_modules/.bin/asc`) before it checks anything, so validating a cloned repository runs its build: validate only folders you trust (Cyber and its server check only `.est` bytes).
 
 **Or from a clone**, to work on the kit itself or before the first release, once, at the clone's root (the public repository, or Cyber's own: the paths are the same):
 

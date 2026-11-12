@@ -13,8 +13,6 @@ npm install --save-dev --save-exact @cyber-est/cli@0.1.0
 npx est doctor
 ```
 
-Until the kit is on npm (coming soon), `npx @cyber-est/cli` answers 404 (not found).
-
 The first line makes the folder `my-fx` from the `effect-as` template: an effect written in AssemblyScript (TypeScript's syntax, compiled straight to WebAssembly, so there is no other toolchain to install). The id is yours: a reversed domain you own, or `com.example.…` while you try things out. It never changes once you share the plugin.
 
 The `npm install` puts `est` and the compiler in the folder. From then on, in this folder, `npx est <command>` is the kit. **Never type a bare `npx est` in a folder without it**: npm would fetch an unrelated package called `est`. Elsewhere, write `npx @cyber-est/cli <command>`. `npx est doctor` says if anything is missing, with the command that fixes it.
