@@ -51,7 +51,8 @@ import {
  * Nothing while the frame does not have the page's focus. Exported for tests.
  */
 export function playFrameKey(el: HTMLIFrameElement | null, k: FrameKey): boolean {
-  if (!el || typeof document === 'undefined' || document.activeElement !== el) return false;
+  // 1.495: the frame's own document (a popped-out window's popup for a frame drawn there).
+  if (!el || typeof document === 'undefined' || el.ownerDocument.activeElement !== el) return false;
   el.dispatchEvent(new KeyboardEvent(k.down ? 'keydown' : 'keyup', {
     key: k.key, code: k.code, shiftKey: k.shift, repeat: k.repeat, bubbles: true, cancelable: true, composed: true,
   }));
@@ -261,7 +262,10 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
         if (ok) post(spectrumMessage(nonce, db, rms));
       }, Math.ceil(1000 / perSecond));
     }
-    window.addEventListener('message', onMessage);
+    // 1.495: the frame posts to its parent, the window it is drawn in: a popped-out window's popup
+    // for one there (the same origin as the page). Its own messages only (`e.source` above).
+    const host = el?.ownerDocument.defaultView ?? window;
+    host.addEventListener('message', onMessage);
     // Version 2: the theme once a second (sent when it changed), the meters at most 30 a second.
     const themeTimer = setInterval(() => {
       if (ver.current < 2 || !theme.current) return;
@@ -284,7 +288,7 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
       post(m);
     }, Math.ceil(1000 / METER_PER_SECOND));
     return () => {
-      window.removeEventListener('message', onMessage);
+      host.removeEventListener('message', onMessage);
       el?.removeEventListener('load', sendInit);
       clearInterval(themeTimer);
       clearInterval(meterTimer);

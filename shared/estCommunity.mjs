@@ -203,6 +203,17 @@ export function publishNameRefusal(manifest, { namespaces, owner = false }) {
 export function developerSignedBytes(payload) {
   return new TextEncoder().encode(`est-developer/1 version\n${canonicalJson(payload)}`);
 }
+/**
+ * 1.506: what a developer signs for a publish, in one place for the CLI (`est sign --developer`,
+ * sdk/packages/tools/src/publishClient.mjs) and the browser (src/components/est/store/publish/sign.ts):
+ * the payload `{ id, version, contentHash, publishedAt }` and the bytes its signature covers.
+ * @param {{ id: string, version: string }} manifest @param {string} contentHash the bundle's SHA-256, hex @param {string} publishedAt an ISO time
+ * @returns {{ payload: { id: string, version: string, contentHash: string, publishedAt: string }, bytes: Uint8Array }}
+ */
+export function developerSigningInput(manifest, contentHash, publishedAt) {
+  const payload = { id: String(manifest.id), version: String(manifest.version), contentHash: String(contentHash), publishedAt: String(publishedAt) };
+  return { payload, bytes: developerSignedBytes(payload) };
+}
 /** What the community index's signature covers. @param {unknown} obj */
 export function communitySignedBytes(obj) {
   return new TextEncoder().encode(`est-registry/1 community\n${canonicalJson(obj)}`);
@@ -260,8 +271,13 @@ export function sanitiseCommunityRoot(raw) {
     developers.push({ id: d.id, name: typeof d.name === 'string' && !displayRefusal(d.name, 'name') ? d.name : d.id, keys: dk, namespaces, ...(d.blocked === true ? { blocked: true } : {}) });
   }
   // 1.401 (D-60): the developer-root key(s) the owner signed, at most two (rotation overlap).
+  // 1.513 (stream 9, found by the Community dry run): and the list this function returns, so it is
+  // idempotent. The client sanitises the root twice (`sanitiseIndex`, then `trustedCommunityRoot`), and
+  // the second pass dropped the list, so no device ever took the delegation and no `dev.<10 hex>`
+  // developer's plugin was offered.
   const dr = isObj(raw.developerRoot) ? raw.developerRoot : null;
-  const developerRoot = (dr ? (Array.isArray(dr.keys) ? dr.keys.slice(0, 2) : dr.publicKey ? [dr] : []) : []).map(key).filter(Boolean).map((k) => { const { revoked, ...rest } = k; void revoked; return rest; });
+  const drList = Array.isArray(raw.developerRoot) ? raw.developerRoot.slice(0, 2) : dr ? (Array.isArray(dr.keys) ? dr.keys.slice(0, 2) : dr.publicKey ? [dr] : []) : [];
+  const developerRoot = drList.map(key).filter(Boolean).map((k) => { const { revoked, ...rest } = k; void revoked; return rest; });
   return keys.length ? { keys, developers, ...(developerRoot.length ? { developerRoot } : {}) } : null;
 }
 

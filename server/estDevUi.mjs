@@ -101,12 +101,12 @@ export const accountTagOf = (sub) => createHash('sha256').update(`cyber-est-dev-
 /**
  * A ticket for one upload of bundle `hash`. 1.454: `account` (an `accountTagOf` tag), signed in it as
  * `a`, so the plugin origin holds the account to its share.
- * @param {any} key  an Ed25519 private key @param {string} hash @param {number} [now] @param {'dev' | 'studio'} [kind] @param {string | null} [account]
+ * @param {any} key  an Ed25519 private key @param {string} hash @param {number} [now] @param {'dev' | 'studio' | 'community'} [kind] @param {string | null} [account]
  */
 export function signTicket(key, hash, now = Date.now(), kind = 'dev', account = null) {
   // 1.320 (DEV-B): a Plugin Studio ticket says so (`k: 'studio'`), and is good only on /est/studio/.
   const a = typeof account === 'string' && ACCOUNT_TAG_RE.test(account) ? { a: account } : {};
-  const payload = b64url(JSON.stringify({ h: hash, exp: now + DEV_UI_TICKET_MS, n: randomBytes(16).toString('hex'), ...(kind === 'studio' ? { k: 'studio' } : {}), ...a }));
+  const payload = b64url(JSON.stringify({ h: hash, exp: now + DEV_UI_TICKET_MS, n: randomBytes(16).toString('hex'), ...(kind === 'studio' || kind === 'community' ? { k: kind } : {}), ...a }));
   return `v1.${payload}.${b64url(edSign(null, Buffer.from(`v1.${payload}`), key))}`;
 }
 
@@ -126,7 +126,8 @@ export function checkTicket(key, token, hash, now = Date.now(), kind = 'dev') {
   if (!p || typeof p !== 'object' || typeof p.h !== 'string' || typeof p.n !== 'string' || !Number.isFinite(p.exp)) return { ok: false, why: 'not a ticket' };
   if (p.h !== hash) return { ok: false, why: 'a ticket for another bundle' };
   // 1.320 (DEV-B): a developer ticket never opens the Studio's store, nor a Studio ticket the developer's.
-  if ((p.k === 'studio' ? 'studio' : 'dev') !== kind) return { ok: false, why: 'a ticket for another kind of upload' };
+  // 1.513 (stream 9): nor either the community store (`k: 'community'`, server/estUiAllow.mjs), nor a community ticket theirs.
+  if ((p.k === 'studio' || p.k === 'community' ? p.k : 'dev') !== kind) return { ok: false, why: 'a ticket for another kind of upload' };
   if (p.exp <= now) return { ok: false, why: 'an expired ticket' };
   if (p.exp > now + DEV_UI_TICKET_MS + 60_000) return { ok: false, why: 'not a ticket' };
   return { ok: true, nonce: p.n, exp: p.exp, account: typeof p.a === 'string' && ACCOUNT_TAG_RE.test(p.a) ? p.a : null };
@@ -186,7 +187,8 @@ export function readStoredEntries(buf) {
  * 1.454: `maxAccountBytes`, one account's share (by the ticket's `a`; a ticket without one, such as
  * one signed before 1.454 (1.457 for the Studio's) during a deploy, is held to the total only, as before).
  * 1.457: the Studio's store defaults to `STUDIO_UI_MAX_TOTAL_BYTES` and `STUDIO_UI_MAX_ACCOUNT_BYTES`.
- * @param {{ verifyKey: import('node:crypto').KeyObject, kind?: 'dev' | 'studio', now?: () => number, maxUiBytes?: number, maxTotalBytes?: number, maxAccountBytes?: number, keepMs?: number }} o
+ * 1.513 (stream 9): `kind` `'community'` is an allowed community version's UI (/est/community/), community tickets only, sized as the developers'.
+ * @param {{ verifyKey: import('node:crypto').KeyObject, kind?: 'dev' | 'studio' | 'community', now?: () => number, maxUiBytes?: number, maxTotalBytes?: number, maxAccountBytes?: number, keepMs?: number }} o
  */
 export function createDevUiStore({ verifyKey, kind = 'dev', now = () => Date.now(), maxUiBytes = DEV_UI_MAX_UI_BYTES, maxTotalBytes = kind === 'studio' ? STUDIO_UI_MAX_TOTAL_BYTES : DEV_UI_MAX_TOTAL_BYTES, maxAccountBytes = kind === 'studio' ? STUDIO_UI_MAX_ACCOUNT_BYTES : DEV_UI_MAX_ACCOUNT_BYTES, keepMs = DEV_UI_KEEP_MS }) {
   /** @type {Map<string, { files: Map<string, Buffer>, bytes: number, used: number, page: string, account: string | null }>} by hash, oldest use first */

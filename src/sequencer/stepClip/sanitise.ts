@@ -44,9 +44,22 @@ export function sanitiseStep(raw: unknown, room: number): Step | null {
   return out;
 }
 
+/**
+ * The rows and clip data this sanitiser returned, with the `size|maxPitch` (and for a clip's data,
+ * the `maxPitch`) they were made for. Its output is a fixed point (sanitising it again gives an equal
+ * value) and the song's objects are never changed in place (every edit copies), so one it made is
+ * handed back as it is: an edit keeps every other row's object, and the Step editor (rows memoised by
+ * their object, the canvas repainting only changed rows) redraws one row, not all of them. Until
+ * this, every write made 64 new rows at 128 × 64, which re-rendered every row and repainted the
+ * whole page in the edit's task (`e2e/step-editor.spec.ts`' long-task bound).
+ */
+const cleanRows = new WeakMap<object, string>();
+const cleanData = new WeakMap<object, number>();
+
 /** One row in range, or null (no id, or a pitch outside 0…maxPitch). */
 export function sanitiseStepRow(raw: unknown, size: StepSize, maxPitch: number): StepRow | null {
   if (!isObj(raw) || typeof raw.id !== 'string' || !ROW_ID_RE.test(raw.id)) return null;
+  if (cleanRows.get(raw) === `${size}|${maxPitch}`) return raw as unknown as StepRow;
   if (!finite(raw.pitch)) return null;
   const pitch = Math.round(raw.pitch);
   if (pitch < 0 || pitch > maxPitch) return null;
@@ -70,6 +83,7 @@ export function sanitiseStepRow(raw: unknown, size: StepSize, maxPitch: number):
   };
   if (raw.muted === true) row.muted = true;
   if (raw.soloed === true) row.soloed = true;
+  cleanRows.set(row, `${size}|${maxPitch}`);
   return row;
 }
 
@@ -79,6 +93,7 @@ export function sanitiseStepRow(raw: unknown, size: StepSize, maxPitch: number):
  */
 export function sanitiseStepClip(raw: unknown, maxPitch = 127): StepClipData | undefined {
   if (!isObj(raw)) return undefined;
+  if (cleanData.get(raw) === maxPitch) return raw as unknown as StepClipData;
   const size = isStepSize(raw.size) ? raw.size : DEFAULT_STEP_SIZE;
   const rows: StepRow[] = [];
   const seen = new Set<string>();
@@ -89,5 +104,7 @@ export function sanitiseStepClip(raw: unknown, maxPitch = 127): StepClipData | u
       if (row && !seen.has(row.id)) { seen.add(row.id); rows.push(row); }
     }
   }
-  return { size, rows, ...(raw.fold === true ? { fold: true } : {}) };
+  const out: StepClipData = { size, rows, ...(raw.fold === true ? { fold: true } : {}) };
+  cleanData.set(out, maxPitch);
+  return out;
 }

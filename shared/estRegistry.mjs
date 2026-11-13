@@ -28,6 +28,7 @@
 // community key may sign only `community` records, D-54) waits for the dynamic registry (DEV-C):
 // there is one key today, so `tier` is signed but not held to a key.
 
+import { sanitisePackIndex } from './storePack.mjs';
 import { sanitiseCommunityRoot } from './estCommunity.mjs';
 
 /** The protocol's version (the `v1` in the path, `est: 1` in the files). */
@@ -72,7 +73,7 @@ export function canonicalJson(v) {
   throw new Error('a registry file holds a value JSON cannot carry');
 }
 
-/** The bytes a signature of `kind` covers. @param {'index' | 'blocklist' | 'version'} kind @param {unknown} obj */
+/** The bytes a signature of `kind` covers (1.515: a sound pack's record, 'pack'). @param {'index' | 'blocklist' | 'version' | 'pack'} kind @param {unknown} obj */
 export function signedBytes(kind, obj) {
   return new TextEncoder().encode(`est-registry/1 ${kind}\n${canonicalJson(obj)}`);
 }
@@ -245,6 +246,8 @@ export function sanitiseIndex(raw) {
     blocklist: sanitiseBlocklist(raw.blocklist),
     // 1.322 (DEV-C, D-54): the community keys and developers' keys the owner signed into the root, or null.
     community: sanitiseCommunityRoot(raw.community),
+    // 1.515 (EST Store Phase C, stream 1): the sound packs the registry signs (shared/storePack.mjs), [] for none.
+    packs: sanitisePackIndex(raw.packs),
   };
 }
 

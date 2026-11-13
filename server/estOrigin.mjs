@@ -27,6 +27,8 @@
 // page (it fetches them all). A version's files (`plugins/<id>/<version>/…`) never change, so they are
 // immutable; the index, the blocklist, their signatures and a plugin's meta.json are cached briefly
 // (`REGISTRY_SHORT_CACHE`), so a blocklist entry reaches hosts within minutes of a deploy.
+// 1.515: a sound pack's version (`packs/<id>/<version>/{pack.json, signature.json, files/<sha256>.pack}`)
+// is immutable too; its `.pack` files are served as bytes (octet-stream, nosniff), never as a page.
 //
 // 1.314 (LR-8b stream B; EST-03, EST-04, EST-07): every `.html` served under `/est/b/` and `/est/dev/`
 // carries the **frame guard** as its first script (`estFrameGuard.mjs`, served at
@@ -60,14 +62,17 @@ const MIME = {
   '.est': 'application/octet-stream',
   // Phase 5b: the registry's detached signatures (`index.sig`, `blocklist.sig`: JSON).
   '.sig': 'application/json',
+  // 1.515: a sound pack's file (`packs/<id>/<version>/files/<sha256>.pack`), fetched by the app's server and hash-checked.
+  '.pack': 'application/octet-stream',
 };
 
 /** Phase 5b: how long the registry's index, blocklist and meta.json may be cached (a version's files are immutable). */
 export const REGISTRY_SHORT_CACHE = 'public, max-age=300';
 const REGISTRY_RE = /^\/est\/v1\/(.+)$/;
 /** A version's own files: content addressed by the index, so cached forever. */
-const REGISTRY_VERSION_RE = /^plugins\/[a-z0-9][a-z0-9.-]{1,118}[a-z0-9]\/\d{1,6}\.\d{1,6}\.\d{1,6}(?:[-+][0-9A-Za-z.-]{1,40})?\/(?:bundle\.est|est\.json|signature\.json)$/;
-const REGISTRY_EXT = new Set(['.json', '.sig', '.est']);
+const REGISTRY_VERSION_RE = /^(?:plugins\/[a-z0-9][a-z0-9.-]{1,118}[a-z0-9]\/\d{1,6}\.\d{1,6}\.\d{1,6}(?:[-+][0-9A-Za-z.-]{1,40})?\/(?:bundle\.est|est\.json|signature\.json)|packs\/[a-z0-9][a-z0-9.-]{1,118}[a-z0-9]\/\d{1,6}\.\d{1,6}\.\d{1,6}(?:[-+][0-9A-Za-z.-]{1,40})?\/(?:pack\.json|signature\.json|files\/[0-9a-f]{64}\.pack))$/;
+/** 1.515: `.pack`, a sound pack's file (audio or JSON, never run: served as bytes with nosniff). */
+const REGISTRY_EXT = new Set(['.json', '.sig', '.est', '.pack']);
 
 /** Phase 2: the files the app's page reads with fetch() during an install (frames need no CORS). */
 const FETCHED = new Set(['.est', '.json', '.wasm']);
@@ -142,6 +147,17 @@ const DEV_FILE_RE = /^\/est\/dev\/([0-9a-f]{64})\/(.+)$/;
  */
 const STUDIO_UPLOAD_RE = /^\/est\/studio\/([0-9a-f]{64})$/;
 const STUDIO_FILE_RE = /^\/est\/studio\/([0-9a-f]{64})\/(.+)$/;
+/**
+ * 1.513 (EST Store Phase B, stream 9; DEV-C §2b): an allowed **community** version's own UI, on this
+ * origin only: `/est/community/<sha256>` takes an upload with a community ticket (`k: 'community'`,
+ * POST /account/est-community-ui on the app, minted only for a Reviewed or admin-allowed version the
+ * account installed: server/estUiAllow.mjs), `/est/community/<sha256>/<path>` serves its files exactly
+ * as `/est/dev/`'s (`pluginCsp`, the frame guard first, a page only as `ui.path` and only to a frame),
+ * and the app frames only its wrapper, `/est/frame/community/<sha256>/<ui.path>`. Its own store, so
+ * neither the developers' nor the Studio's uploads push it out, nor it theirs.
+ */
+const COMMUNITY_UPLOAD_RE = /^\/est\/community\/([0-9a-f]{64})$/;
+const COMMUNITY_FILE_RE = /^\/est\/community\/([0-9a-f]{64})\/(.+)$/;
 const DEFAULT_APP_ORIGIN = 'https://cyber-audio.fly.dev';
 
 /** The plugin origin's CSP (security document §4), framed only by `ancestors`. */
@@ -189,8 +205,10 @@ function hostOf(hostHeader) {
 
 /**
  * @param {{ EST_ORIGIN_HOST?: string, EST_ORIGIN_DIR?: string, EST_REGISTRY_DIR?: string, EST_APP_ORIGIN?: string, APP_ORIGIN?: string, EST_DEV_UI_KEY?: string, EST_DEV_UI_PUBLIC_KEY?: string }} env
- * @param {{ anyHost?: boolean }} [o] Phase 2 (2-B, D-29): `anyHost`, every request is the plugin
+ * @param {{ anyHost?: boolean, paidGate?: ReturnType<typeof import('./storeDelivery.mjs').createPaidGate> | null }} [o] Phase 2 (2-B, D-29): `anyHost`, every request is the plugin
  *   origin's whatever its Host (server/estOriginServer.mjs, the `cyber-est` app, which is nothing else).
+ *   1.514: `paidGate` (server/storeDelivery.mjs), a paid version's bundle bytes only with a store ticket;
+ *   none, nothing is gated (no version is paid).
  * @returns {null | { handle(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): boolean, refuseUpgrade(req: import('node:http').IncomingMessage, socket: import('node:stream').Duplex): boolean }}
  */
 export function createEstOrigin(env, o = {}) {
@@ -203,6 +221,7 @@ export function createEstOrigin(env, o = {}) {
   const { verifyKey } = devUiKeysOf(env);
   const devUi = verifyKey ? createDevUiStore({ verifyKey }) : null;
   const studioUi = verifyKey ? createDevUiStore({ verifyKey, kind: 'studio' }) : null;
+  const communityUi = verifyKey ? createDevUiStore({ verifyKey, kind: 'community' }) : null;
   /** 1.314 (EST-04): each hash's UI page from its est.json, read once (null: none). @type {Map<string, string | null>} */
   const pages = new Map();
   const pageOf = (hash) => {
@@ -213,6 +232,22 @@ export function createEstOrigin(env, o = {}) {
     return page;
   };
   let uploadsInFlight = 0;
+  const gate = o.paidGate ?? null;
+  /** Answers carrying a paid version's bytes. @type {WeakSet<import('node:http').ServerResponse>} */
+  const paidAnswers = new WeakSet();
+  /** 1.514: a paid version's bytes without a good ticket: refused, `no-store`. @returns {boolean} whether it was refused */
+  const gated = (req, res, what) => {
+    if (!gate) return false;
+    let u;
+    try { u = new URL(req.url ?? '/', 'http://plugin.invalid'); } catch { refuse(res, 404); return true; }
+    const r = gate.allow(u, what);
+    if (r.ok) { if (r.paid) paidAnswers.add(res); return false; }
+    res.writeHead(r.status, { ...baseHeaders(), ...corsOf(req), 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(r.status === 404 ? 'Not found' : `Refused: ${r.why}`);
+    return true;
+  };
+  /** The cache header of a file answer: `no-store` for a paid version's bytes (served once, with a ticket). */
+  const cacheOf = (res, normal) => (paidAnswers.has(res) ? 'no-store' : normal);
 
   /** @param {import('node:http').IncomingMessage} req */
   const matches = (req) => {
@@ -306,12 +341,15 @@ export function createEstOrigin(env, o = {}) {
     if (!registryDir || !REGISTRY_EXT.has(ext) || rel.includes('\0') || rel.split('/').some(p => p === '' || p === '.' || p === '..')) { refuse(res, 404); return; }
     const file = path.resolve(registryDir, rel);
     if (!file.startsWith(registryDir + path.sep)) { refuse(res, 404); return; }
+    // 1.514: a paid version's bundle only with a store ticket.
+    const pv = /^plugins\/([^/]+)\/([^/]+)\/bundle\.est$/.exec(rel);
+    if (pv && gated(req, res, { id: pv[1], version: pv[2] })) return;
     fs.stat(file, (err, stat) => {
       if (err || !stat.isFile()) { refuse(res, 404); return; }
       res.writeHead(200, {
         ...baseHeaders(), ...corsOf(req),
         'content-type': MIME[ext], 'content-length': stat.size,
-        'cache-control': REGISTRY_VERSION_RE.test(rel) ? 'public, max-age=31536000, immutable' : REGISTRY_SHORT_CACHE,
+        'cache-control': cacheOf(res, REGISTRY_VERSION_RE.test(rel) ? 'public, max-age=31536000, immutable' : REGISTRY_SHORT_CACHE),
       });
       if (req.method === 'HEAD') { res.end(); return; }
       const rs = fs.createReadStream(file);
@@ -322,14 +360,14 @@ export function createEstOrigin(env, o = {}) {
   };
 
   /**
-   * 1.413: `/est/frame/<b|dev|studio>/<sha256>/<ui.path>`, the frame wrapper (server/estFrameWrap.mjs):
+   * 1.413: `/est/frame/<b|dev|studio|community>/<sha256>/<ui.path>` (1.513: `community`), the frame wrapper (server/estFrameWrap.mjs):
    * only for a UI page this origin would serve (the bundle's `ui.path`, to a frame, as `htmlAllowed`),
    * its CSP's `frame-src` exactly that page on the host the request named.
    */
   const wrapRoute = (req, res, m) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') { refuse(res, 405); return; }
     const [, kind, hash, rel] = m;
-    const page = kind === 'b' ? pageOf(hash) : kind === 'dev' ? devUi?.page(hash) ?? null : studioUi?.page(hash) ?? null;
+    const page = kind === 'b' ? pageOf(hash) : kind === 'dev' ? devUi?.page(hash) ?? null : kind === 'community' ? communityUi?.page(hash) ?? null : studioUi?.page(hash) ?? null;
     const host = hostOf(req.headers.host).full;
     if (!WRAP_REL_RE.test(rel) || !WRAP_HOST_RE.test(host) || !htmlAllowed(req, rel, page)) { refuse(res, 404); return; }
     const body = Buffer.from(FRAME_WRAP_HTML, 'utf8');
@@ -350,6 +388,7 @@ export function createEstOrigin(env, o = {}) {
       if (wrap) { req.resume(); wrapRoute(req, res, wrap); return true; }
       if (devUi && (DEV_UPLOAD_RE.test(pathname) || DEV_FILE_RE.test(pathname))) { devRoute(req, res, pathname); return true; }
       if (studioUi && (STUDIO_UPLOAD_RE.test(pathname) || STUDIO_FILE_RE.test(pathname))) { devRoute(req, res, pathname, studioUi, STUDIO_UPLOAD_RE, STUDIO_FILE_RE); return true; }
+      if (communityUi && (COMMUNITY_UPLOAD_RE.test(pathname) || COMMUNITY_FILE_RE.test(pathname))) { devRoute(req, res, pathname, communityUi, COMMUNITY_UPLOAD_RE, COMMUNITY_FILE_RE); return true; }
       req.resume();
       if (req.method !== 'GET' && req.method !== 'HEAD') { refuse(res, 405); return true; }
       // 1.314 (EST-03): the host's own guard, the first script of every page served here.
@@ -369,6 +408,8 @@ export function createEstOrigin(env, o = {}) {
       // 1.314 (EST-04): a page only as the bundle's own (est.json's ui.path) and only to a frame.
       if (ext === '.html' && !htmlAllowed(req, m[2], pageOf(m[1]))) { refuse(res, 404); return true; }
       if (ext === '.svg' && !svgAllowed(req)) { refuse(res, 404); return true; }
+      // 1.514: a paid version's archive and DSP module only with a store ticket.
+      if ((ext === '.est' || ext === '.wasm') && gated(req, res, { hash: m[1] })) return true;
       fs.stat(file, (err, stat) => {
         if (err || !stat.isFile()) { refuse(res, 404); return; }
         const origin = req.headers.origin;
@@ -391,7 +432,7 @@ export function createEstOrigin(env, o = {}) {
           ...cors,
           'content-type': MIME[ext],
           'content-length': stat.size,
-          'cache-control': 'public, max-age=31536000, immutable',
+          'cache-control': cacheOf(res, 'public, max-age=31536000, immutable'),
         });
         if (req.method === 'HEAD') { res.end(); return; }
         const rs = fs.createReadStream(file);

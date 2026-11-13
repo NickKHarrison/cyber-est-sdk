@@ -1169,6 +1169,19 @@ export function estProcessorMain() {
       return !!ok;
     }
 
+    /** Drop every queued transport event, keeping the rest in order (outside process()). */
+    dropTransports() {
+      const q = this.q;
+      let w = 0;
+      for (let r = 0; r < this.qLen; r++) {
+        const b = r * EV;
+        if (q[b + 1]! === K_TR) continue;
+        if (w !== r) q.copyWithin(w * EV, b, b + EV);
+        w++;
+      }
+      this.qLen = w;
+    }
+
     /** Drop the queued parameter events of parameter `id` (every parameter's for -1), keeping the rest in order. */
     cancelParams(id: number) {
       this.cancelKind(K_PARAM, id);
@@ -1228,7 +1241,10 @@ export function estProcessorMain() {
     queue(e: InEvent) {
       const timed = typeof e.time === 'number' && e.time > 0;
       if (e.type === 'transport' && !timed) {
-        // Phase 1's shape (and a stopped transport): in force from this block on.
+        // Phase 1's shape (and a stopped transport): in force from this block on. A stop also drops the
+        // transport windows still queued (posted ahead by the look-ahead), else they would turn playing
+        // back on after it and a plugin's own sequencer would run on (1.503).
+        if (!e.playing) this.dropTransports();
         this.transportRow(e, this.tr, 0);
         this.tr[4] = currentFrame;
         this.trSet = true;

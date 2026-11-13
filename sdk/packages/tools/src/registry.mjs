@@ -13,9 +13,10 @@
 // publish, and its first `publishedAt` is kept. The private key never enters the repository: it is
 // read from a file or `EST_REGISTRY_SIGNING_KEY` and `keygen` refuses to write one inside it.
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign as edSign } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { canonicalJson, catalogueOf, hasInvisible, REGISTRY_EXPIRES_DAYS, REGISTRY_TIERS, REGISTRY_VERSION, sanitiseBlocklist, signedBytes } from '../../../../shared/estRegistry.mjs';
+import { checkPack, cleanPackPath, fileTypeOf, packBase, packFilePath, packIndexEntry, PACK_JSON_MAX_BYTES, sniffPackAudio } from '../../../../shared/storePack.mjs';
 
 /**
  * 1.314 (EST-14): names only Cyber's own plugins may carry: the vendor "Cyber" (case-folded) and ids
@@ -102,9 +103,12 @@ const writeCanonical = (file, obj) => { mkdirSync(dirname(file), { recursive: tr
  * when there is one): the community keys the owner trusts to sign Community records and each
  * developer's public keys (the app's GET /admin/est-developers/export), signed into the root so the
  * online key's authority is bounded.
- * @param {{ distDir: string, sourceDir: string, outDir: string, privateKey: any, now?: Date, blocklist?: { id: string, version?: string, hash?: string, reason: string, at: string }[], expiresDays?: number, ownerKeyIds?: string[] | null, community?: { keys: any[], developers?: any[] } }} o
+ * 1.515 (EST Store Phase C, stream 1): the **sound packs** in `<sourceDir>/packs/<id>/pack.json` (`publishPacks`),
+ * their files read from `packsRoot` (default: the repository, two folders above `sourceDir`), signed
+ * into the index's `packs`. No pack folder: the index is as before (no `packs` member).
+ * @param {{ distDir: string, sourceDir: string, outDir: string, privateKey: any, now?: Date, blocklist?: { id: string, version?: string, hash?: string, reason: string, at: string }[], expiresDays?: number, ownerKeyIds?: string[] | null, community?: { keys: any[], developers?: any[] }, packsRoot?: string }} o
  */
-export function publishRegistry({ distDir, sourceDir, outDir, privateKey, now = new Date(), blocklist = [], expiresDays = REGISTRY_EXPIRES_DAYS, ownerKeyIds = null, community = undefined }) {
+export function publishRegistry({ distDir, sourceDir, outDir, privateKey, now = new Date(), blocklist = [], expiresDays = REGISTRY_EXPIRES_DAYS, ownerKeyIds = null, community = undefined, packsRoot = resolve(sourceDir, '..', '..') }) {
   const key = typeof privateKey === 'string' ? signingKeyOf(privateKey) : privateKey;
   const { keyId } = keyFacts(key);
   const owner = !ownerKeyIds || ownerKeyIds.includes(keyId);
@@ -170,6 +174,7 @@ export function publishRegistry({ distDir, sourceDir, outDir, privateKey, now = 
     });
     return { ...p, latest: newest(p.versions), versions: p.versions.map(({ superseded: _s, ...v }) => v).sort((a, b) => cmp(b.version, a.version)) };
   });
+  const packs = publishPacks({ sourceDir, packsRoot, v1, before, at, key, owner });
   const communityRoot = community ?? readJson(join(sourceDir, 'community.json'), null);
   const block = sanitiseBlocklist([...readJson(join(sourceDir, 'blocklist.json'), []), ...blocklist]);
   const index = {
@@ -177,6 +182,7 @@ export function publishRegistry({ distDir, sourceDir, outDir, privateKey, now = 
     registry: { name: String(source.name ?? 'Cyber EST registry'), url: String(source.url ?? ''), keyId, updatedAt: at, expiresAt },
     plugins, blocklist: block,
     ...(communityRoot ? { community: communityRoot } : {}),
+    ...(packs.length ? { packs } : {}),
   };
   writeCanonical(join(v1, 'index.json'), index);
   writeCanonical(join(v1, 'index.sig'), { alg: 'ed25519', keyId, sig: signRegistry('index', index, key) });
@@ -184,6 +190,89 @@ export function publishRegistry({ distDir, sourceDir, outDir, privateKey, now = 
   writeCanonical(join(v1, 'blocklist.json'), bl);
   writeCanonical(join(v1, 'blocklist.sig'), { alg: 'ed25519', keyId, sig: signRegistry('blocklist', bl, key) });
   return { index, dir: v1, keyId, versions: plugins.reduce((n, p) => n + p.versions.length, 0) };
+}
+
+/**
+ * 1.515: a pack version's countersignature (`signature.json`), as a plugin version's: the record's
+ * hash under the registry key, in the `pack` kind's bytes.
+ */
+export function packSignature(payload, privateKey) {
+  const { keyId } = keyFacts(privateKey);
+  return { alg: 'ed25519', keyId, payload, sig: signRegistry('pack', payload, privateKey) };
+}
+
+/**
+ * 1.515 (EST Store Phase C, stream 1): sign the sound packs into `v1/`. Each source folder
+ * `<sourceDir>/packs/<id>/` holds a `pack.json`:
+ *
+ *   { id, version, kind, name, summary, tags, licence, preview?: <path>, files: [{ path, src }] }
+ *
+ * `path` is the file's name inside the pack (what the person sees in the Browser), `src` where its
+ * bytes are, relative to `packsRoot` and never outside it. Every file is read, hashed and checked:
+ * audio must sniff as audio (an upload's rule), a `program.json` must be a PAD program, a preset must be
+ * JSON; anything else is refused, so a pack never holds code. The record (shared/storePack.mjs
+ * `checkPack`) goes to `v1/packs/<id>/<version>/pack.json` in canonical JSON, its signature beside it,
+ * and each file to `files/<sha256>.pack`. **A published pack version never changes**: one already in
+ * the index with another record refuses the publish, and its first `publishedAt` is kept. Cyber's own
+ * names (`org.cyber.*`, `reservedName`) are the owner key's alone. Returns the index's `packs` lines.
+ */
+/** @param {{ sourceDir: string, packsRoot: string, v1: string, before?: any, at: string, key: any, owner?: boolean }} o @returns {any[]} */
+export function publishPacks({ sourceDir, packsRoot, v1, before = null, at, key, owner = true }) {
+  const dir = join(sourceDir, 'packs');
+  if (!existsSync(dir)) return [];
+  const prev = new Map((Array.isArray(before?.packs) ? before.packs : []).map((p) => [`${p.id}@${p.version}`, p]));
+  const out = [];
+  for (const name of readdirSync(dir).sort()) {
+    const file = join(dir, name, 'pack.json');
+    if (!existsSync(file)) continue;
+    const src = JSON.parse(readFileSync(file, 'utf8'));
+    if (src.id !== name) throw new Error(`packs/${name}/pack.json names ${src.id}: the folder is its id`);
+    const reserved = reservedName(src.id, '');
+    if (reserved && !owner) throw new Error(`pack ${src.id}: ${reserved}: only the owner key publishes it`);
+    if (!Array.isArray(src.files)) throw new Error(`pack ${src.id}: it lists no files`);
+    const bytesOf = new Map();
+    const files = src.files.map((f) => {
+      const p = cleanPackPath(f?.path);
+      if (!p) throw new Error(`pack ${src.id}: ${JSON.stringify(f?.path)} is not a plain relative path`);
+      const type = fileTypeOf(p);
+      if (!type) throw new Error(`pack ${src.id}: ${p} is not audio, a program.json or preset JSON`);
+      const from = resolve(packsRoot, String(f.src ?? ''));
+      if (!inside(packsRoot, from)) throw new Error(`pack ${src.id}: ${p}'s src is outside the packs' root`);
+      const bytes = readFileSync(from);
+      if (type === 'audio' && !sniffPackAudio(bytes)) throw new Error(`pack ${src.id}: ${p} is not audio Cyber reads`);
+      if (type !== 'audio') {
+        if (bytes.length > PACK_JSON_MAX_BYTES) throw new Error(`pack ${src.id}: ${p} is too large`);
+        let doc;
+        try { doc = JSON.parse(bytes.toString('utf8')); } catch { throw new Error(`pack ${src.id}: ${p} is not JSON`); }
+        if (type === 'program' && !(doc?.app === 'cyber' && doc?.kind === 'padProgram')) throw new Error(`pack ${src.id}: ${p} is not a PAD program`);
+      }
+      const hash = sha256(bytes);
+      bytesOf.set(hash, bytes);
+      return { path: p, hash, bytes: bytes.length, type };
+    });
+    const preview = src.preview === undefined ? undefined : files.find((f) => f.path === src.preview)?.hash;
+    if (src.preview !== undefined && !preview) throw new Error(`pack ${src.id}: its preview ${src.preview} is not one of its files`);
+    for (const [field, v] of [['name', src.name], ['summary', src.summary], ['licence', src.licence]]) {
+      if (typeof v === 'string' && hasInvisible(v)) throw new Error(`pack ${src.id}: its ${field} has a zero-width or direction character`);
+    }
+    const checked = checkPack({ id: src.id, version: src.version, kind: src.kind, name: src.name, summary: src.summary ?? '', tags: src.tags ?? [], licence: src.licence, files, ...(preview ? { previewHash: preview } : {}) });
+    if (!checked.ok) throw new Error(`pack ${checked.error}`);
+    const pack = checked.pack;
+    const record = Buffer.from(`${canonicalJson(pack)}\n`);
+    const recordHash = sha256(record);
+    const was = prev.get(`${pack.id}@${pack.version}`);
+    if (was && was.recordHash !== recordHash) throw new Error(`pack ${pack.id} ${pack.version} was published with another record: a published pack never changes; give it a new version`);
+    const publishedAt = was?.publishedAt || at;
+    const base = join(v1, packBase(pack.id, pack.version));
+    mkdirSync(join(base, 'files'), { recursive: true });
+    writeFileSync(join(base, 'pack.json'), record);
+    writeCanonical(join(base, 'signature.json'), packSignature({ id: pack.id, version: pack.version, recordHash, publishedAt }, key));
+    for (const f of pack.files) writeFileSync(join(v1, packFilePath(pack.id, pack.version, f.hash)), bytesOf.get(f.hash));
+    out.push(packIndexEntry(pack, { recordHash, publishedAt }));
+  }
+  // Every version of a pack published before stays listed (as a plugin's versions do).
+  for (const [k, p] of prev) if (!out.some((o) => `${o.id}@${o.version}` === k) && existsSync(join(v1, p.recordUrl))) out.push(p);
+  return out.sort((a, b) => a.id.localeCompare(b.id) || cmp(a.version, b.version));
 }
 
 /** Semver order of the numbers (as the client's `compareEstVersions`, enough for the registry's own). */

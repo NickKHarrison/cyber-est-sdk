@@ -15,7 +15,7 @@ import { createHash, sign as edSign } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { developerSignedBytes } from '../../../../shared/estCommunity.mjs';
+import { developerSigningInput } from '../../../../shared/estCommunity.mjs';
 import { metaTextRefusal, screenshotRefusal, SCREENSHOTS_MAX } from '../../../../shared/estPluginMeta.mjs';
 import { keyFacts, signingKeyOf } from './registry.mjs';
 
@@ -33,8 +33,9 @@ const sha256 = (b) => createHash('sha256').update(b).digest('hex');
  */
 export function developerSignature(bytes, manifest, privateKey, { publishedAt = new Date().toISOString() } = {}) {
   const key = typeof privateKey === 'string' ? signingKeyOf(privateKey) : privateKey;
-  const payload = { id: manifest.id, version: manifest.version, contentHash: sha256(bytes), publishedAt };
-  return { alg: 'ed25519', keyId: keyFacts(key).keyId, payload, sig: edSign(null, Buffer.from(developerSignedBytes(payload)), key).toString('base64') };
+  // 1.506: the one signing input, shared with the browser's publish (src/components/est/store/publish/sign.ts).
+  const input = developerSigningInput(manifest, sha256(bytes), publishedAt);
+  return { alg: 'ed25519', keyId: keyFacts(key).keyId, payload: input.payload, sig: edSign(null, Buffer.from(input.bytes), key).toString('base64') };
 }
 
 /** A URL without a trailing slash; only http(s). @param {string} raw */

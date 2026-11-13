@@ -32,7 +32,8 @@
 import { createHash } from 'node:crypto';
 
 /** `/est/frame/<kind>/<sha256>/<path>`: the wrapper of the UI page at `/est/<kind>/<sha256>/<path>`. */
-export const FRAME_WRAP_RE = /^\/est\/frame\/(b|dev|studio)\/([0-9a-f]{64})\/(.+)$/;
+/** 1.513 (stream 9): and `community`, an allowed community version's UI (server/estUiAllow.mjs). */
+export const FRAME_WRAP_RE = /^\/est\/frame\/(b|dev|studio|community)\/([0-9a-f]{64})\/(.+)$/;
 /** A UI page path the wrapper takes: plain segments only, so its URL and its CSP path are the same text. */
 export const WRAP_REL_RE = /^(?:[A-Za-z0-9_~-][A-Za-z0-9._~-]*\/)*[A-Za-z0-9_~-][A-Za-z0-9._~-]*\.html$/;
 /** A Host header the wrapper's CSP may name (a DNS name or IPv4, an optional port; nothing else). */

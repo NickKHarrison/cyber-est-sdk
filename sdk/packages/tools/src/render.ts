@@ -47,6 +47,11 @@ export interface Rendered {
   right: Float32Array;
   /** Whether the plugin stopped (a trap or an error), and how. */
   error: string | null;
+  /**
+   * 1.520: the fuel its blocks used, as shares of a block's budget (`BLOCK_FUEL`, the processor's own):
+   * the heaviest block's and the mean (the store's automatic review flags a plugin over 75 %).
+   */
+  fuel: { peak: number; mean: number };
 }
 
 function fill(input: RenderInput, l: Float32Array, r: Float32Array, start: number, sr: number, rng: () => number) {
@@ -94,7 +99,10 @@ export async function render(bytes: Uint8Array, spec: RenderSpec = {}): Promise<
   const inst = standInInstance({ module, shim, manifest: bundle.manifest }, sr);
   const left = new Float32Array(frames), right = new Float32Array(frames);
   const err = inst.boot.find(m => m.type === 'error');
-  if (!inst.boot.some(m => m.type === 'ready')) return { sampleRate: sr, frames, left, right, error: err ? `${String(err.phase)}: ${String(err.message)}` : 'it did not start' };
+  if (!inst.boot.some(m => m.type === 'ready')) return { sampleRate: sr, frames, left, right, error: err ? `${String(err.phase)}: ${String(err.message)}` : 'it did not start', fuel: { peak: 0, mean: 0 } };
+  // The processor's own budget and fuel left (a metered module), read after each block.
+  const proc = inst.proc as unknown as { blockFuel?: number; fuelLeft?: (() => number) | null };
+  let fuelPeak = 0, fuelSum = 0, fuelBlocks = 0;
   if (spec.events?.length) inst.send({ type: 'events', events: spec.events.map(e => ({ time: 0, ...e })) });
   const rng = rngOf(spec.input ?? { kind: 'silence' });
   const inL = new Float32Array(FRAMES), inR = new Float32Array(FRAMES);
@@ -105,12 +113,18 @@ export async function render(bytes: Uint8Array, spec: RenderSpec = {}): Promise<
     const { out, posted } = inst.block(inL, inR, at);
     const e = posted.find(m => m.type === 'error');
     if (e) { error = `frame ${at}: ${String(e.phase)}: ${String(e.message)}`; break; }
+    if (proc.fuelLeft && proc.blockFuel) {
+      const share = (proc.blockFuel - proc.fuelLeft()) / proc.blockFuel;
+      if (share > fuelPeak) fuelPeak = share;
+      fuelSum += share;
+      fuelBlocks++;
+    }
     const n = Math.min(FRAMES, frames - at);
     left.set(out[0].subarray(0, n), at);
     right.set(out[1].subarray(0, n), at);
   }
   inst.send({ type: 'dispose' });
-  return { sampleRate: sr, frames, left, right, error };
+  return { sampleRate: sr, frames, left, right, error, fuel: { peak: fuelPeak, mean: fuelBlocks ? fuelSum / fuelBlocks : 0 } };
 }
 
 /**
