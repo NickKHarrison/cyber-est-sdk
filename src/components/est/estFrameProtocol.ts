@@ -293,3 +293,8 @@ export function tokenHex(raw: string): string | null {
   const f = (n: number) => { const k = (n + h / 30) % 12; return 255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))); };
   return hex([f(0), f(8), f(4)]);
 }
+
+/** 1.630: the frame wrapper's hello (server/estFrameWrap.mjs), the first message it posts: proof the frame loaded from the plugin origin, never counted or refused. */
+export const WRAP_HELLO = 'est:wrap';
+/** 1.630: whether a message is the wrapper's hello. */
+export const isWrapHello = (d: unknown): boolean => !!d && typeof d === 'object' && (d as { type?: unknown }).type === WRAP_HELLO;

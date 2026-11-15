@@ -3,9 +3,11 @@ import type { EstParam } from '../../audio/est/EstNode';
 import type { EstInstalled } from '../../audio/est/library';
 import type { EstEdit } from './estHooks';
 import {
-  DEFAULT_THEME, METER_PER_SECOND, bundleUiUrl, checkFrameMessage, checkKeyMessage, frameWrapUrl, initMessage, meterMessage, newNonce, paramMessage, rateGate,
+  DEFAULT_THEME, METER_PER_SECOND, isWrapHello, bundleUiUrl, checkFrameMessage, checkKeyMessage, frameWrapUrl, initMessage, meterMessage, newNonce, paramMessage, rateGate,
   spectrumMessage, themeMessage, themeOf, tokenHex, withFragment, type EstUiTheme, type EstUiVersion, type FrameKey,
 } from './estFrameProtocol';
+import { postFrom } from '../../lib/realmPost';
+import { noteEstOriginBlocked, noteEstOriginOk, probeEstOrigin, type EstProbeCode } from '../../audio/est/originReach';
 
 /**
  * EST Phase 2, stream 2-C (docs/est/EST_Phase2_Work_Order.md §3 "The window"; EST_SECURITY_ARCHITECTURE.md
@@ -68,6 +70,12 @@ export const QUIET_MS = 300;
  * there are at most four `edit.write`s a second and the last value always lands.
  */
 export const COMMIT_MS = 250;
+/**
+ * 1.630 (docs/launch/network-filters.md): how long the frame has to prove it loaded (its wrapper's
+ * first message from exactly the plugin origin) before a failed probe of the origin counts as a
+ * network that blocks it. A cross-origin `load` is no proof: Chromium fires it for its own refused page.
+ */
+export const HANDSHAKE_MS = 4000;
 /** How often the theme tokens are read again (a change is sent as `est:theme`). */
 export const THEME_CHECK_MS = 1000;
 
@@ -130,7 +138,7 @@ export interface EstReadout { read: () => readonly EstParam[] | null; subscribe:
 /** CLAP's read-only flag (clap/ext/params.h). */
 const READONLY = 8;
 
-export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, rate = null, meters = null, audio = null, readout = null }: {
+export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, rate = null, meters = null, audio = null, readout = null, onBlocked = null }: {
   installed: EstInstalled; params: readonly EstParam[]; edit: EstEdit; origin: string; title: string;
   /** The UI page's address without a fragment (`uiUrlFor`); default the bundle's on the plugin origin. */
   uiUrl?: string | null;
@@ -142,6 +150,8 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
   audio?: EstAudioTap | null;
   /** 1.330: the running instance's values, for the plugin's read-only parameters (`EstReadout`). */
   readout?: EstReadout | null;
+  /** 1.630: the frame never answered and the plugin origin could not be read (`HANDSHAKE_MS`, `probeEstOrigin`). */
+  onBlocked?: ((code: EstProbeCode) => void) | null;
 }) {
   const ui = installed.manifest.ui!;
   const [nonce] = useState(newNonce);
@@ -169,8 +179,23 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
   /** The theme the frame was last given (version 2). */
   const theme = useRef<EstUiTheme | null>(null);
   const sendInitRef = useRef<() => void>(() => {});
+  // 1.630: the handshake. The wrapper's first message from exactly the plugin origin proves the frame
+  // loaded (its hello, or any message it relays: an older wrapper says no hello). Until then a probe
+  // of the origin runs; a redirect or a timeout falls back at once, a failed read at `HANDSHAKE_MS`.
+  const [blocked, setBlocked] = useState<EstProbeCode | null>(null);
+  const handshaken = useRef(false);
+  const onBlockedRef = useRef(onBlocked);
+  onBlockedRef.current = onBlocked;
+  const handshakeRef = useRef<() => void>(() => {});
 
-  const post = (m: unknown) => { const o = frameOriginRef.current; if (o) frame.current?.contentWindow?.postMessage(m, o); };
+  // 1.551: posted as the code of the window the frame is drawn in (a popped-out window's popup), so
+  // the message's `source` is the frame's parent, which is all the wrapper relays (`realmPost.ts`).
+  const post = (m: unknown) => {
+    const o = frameOriginRef.current;
+    const el = frame.current;
+    const target = el?.contentWindow;
+    if (o && el && target) postFrom(el.ownerDocument.defaultView, target, m, o);
+  };
 
   useEffect(() => {
     const gate = rateGate();
@@ -225,7 +250,11 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
     const onMessage = (e: MessageEvent) => {
       const win = frame.current?.contentWindow;
       if (!win || e.source !== win) return; // not this frame's: not ours to count
-      if (!frameOriginRef.current || e.origin !== frameOriginRef.current || !gate()) { refuse(); return; }
+      if (!frameOriginRef.current || e.origin !== frameOriginRef.current) { refuse(); return; }
+      // 1.630: anything from the wrapper, on the plugin origin, is the handshake; its hello is only that.
+      handshakeRef.current();
+      if (isWrapHello(e.data)) return;
+      if (!gate()) { refuse(); return; }
       // 1.346: a key the frame guard hands back: played as the page's own key, only while the frame
       // has the focus (so a plugin cannot press keys while the person is elsewhere).
       const key = checkKeyMessage(e.data, nonce);
@@ -298,6 +327,41 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
     };
   }, [nonce]);
 
+  // 1.630: the handshake's clock and the probe (see above), for each address the frame loads.
+  useEffect(() => {
+    if (!src) return;
+    let done = false;
+    handshaken.current = false;
+    setBlocked(null);
+    const fail = (code: EstProbeCode) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      noteEstOriginBlocked(origin, code, true);
+      setBlocked(code);
+      onBlockedRef.current?.(code);
+    };
+    handshakeRef.current = () => {
+      if (handshaken.current) return;
+      handshaken.current = true;
+      done = true;
+      clearTimeout(timer);
+      noteEstOriginOk(origin);
+    };
+    // review2 C-1: the frame's address is the wrapper's (`frameWrapUrl`: /est/frame/b/<hash>/…), so the bundle's hash is read there.
+    const kindB = /\/est\/(?:frame\/)?b\/([0-9a-f]{64})\//.exec(src)?.[1] ?? null;
+    const probe = probeEstOrigin(origin, kindB);
+    void probe.then(r => { if (r.code === 'filter-redirect' || r.code === 'timeout') fail(r.code); });
+    const timer = setTimeout(() => {
+      void probe.then(r => {
+        if (done) return;
+        if (r.code === 'ok') { done = true; return; } // the origin reads: a quiet plugin page, kept
+        fail(r.code);
+      });
+    }, HANDSHAKE_MS);
+    return () => { done = true; clearTimeout(timer); handshakeRef.current = () => {}; };
+  }, [src, origin]);
+
   // A new sample rate (the engine's context made again): a version-2 frame hears it in a fresh est:init.
   const sentRate = useRef(rate);
   useEffect(() => {
@@ -339,7 +403,7 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
 
   return (
     <div ref={hostEl} className="flex min-h-0 flex-1 items-start justify-center overflow-auto bg-cyber-0" data-testid="est-frame-host" data-rejected={rejected} data-ui-version={version}>
-      {src ? <iframe
+      {blocked ? <p className="p-4 text-sm" data-testid="est-frame-blocked" data-probe={blocked}>Your network blocked this plugin&apos;s own window. Sound and saving work as usual.</p> : src ? <iframe
         ref={frame}
         src={src}
         sandbox="allow-scripts allow-same-origin"

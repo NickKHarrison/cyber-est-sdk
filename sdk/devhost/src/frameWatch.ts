@@ -7,7 +7,7 @@
  * are visible only to the browser driver: headless.mjs reports those.
  */
 import type { EstParam } from '@/audio/est/EstNode';
-import { AUDIO_FFT_SIZES, AUDIO_PER_SECOND, checkFrameMessage, checkKeyMessage, FRAME_KEYS, FRAME_TYPES, MAX_MESSAGE_BYTES, MAX_PER_SECOND, messageSize, rateGate, UI_SIZE_BOUNDS } from '@/components/est/estFrameProtocol';
+import { isWrapHello, AUDIO_FFT_SIZES, AUDIO_PER_SECOND, checkFrameMessage, checkKeyMessage, FRAME_KEYS, FRAME_TYPES, MAX_MESSAGE_BYTES, MAX_PER_SECOND, messageSize, rateGate, UI_SIZE_BOUNDS } from '@/components/est/estFrameProtocol';
 
 /**
  * Why `checkFrameMessage` refuses `raw` (null when it takes it). The sender is already checked.
@@ -86,6 +86,8 @@ export function watchFrame(host: HTMLElement, params: () => readonly EstParam[],
   const onMessage = (e: MessageEvent) => {
     if (!frame.contentWindow || e.source !== frame.contentWindow) return;
     if (e.origin !== origin) { refuse(`from origin ${e.origin}, not the plugin origin's frame wrapper ${origin}`, e.data); return; }
+    // 1.630: the wrapper's hello says it loaded; nothing to log or refuse.
+    if (isWrapHello(e.data)) return;
     if (!gate()) { refuse(`more than ${MAX_PER_SECOND} messages in a second`, e.data); return; }
     const why = explainFrameMessage(e.data, nonce, params(), resizable, audio);
     if (why) { refuse(why, e.data); return; }

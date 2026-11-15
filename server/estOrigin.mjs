@@ -40,11 +40,89 @@
 // a proxy that stripped them: whether Fly's does is unverified) falls back to the `ui.path` rule
 // alone. A developer upload's ticket is checked **before** its body is read (at most two uploads in
 // flight; a refusal closes the connection), so an unauthenticated POST never buffers 32 MB.
+//
+// 1.625 (launch capacity; docs/releases/1.625.md): the files under `/est/b/` and `/est/v1/` are read
+// through `o.files`, server/staticFiles.mjs' in-memory file cache made by the caller (`ORIGIN_CACHE`:
+// a file of at most 8 MB and 64 MB in all held after its first read, a larger one or one past the
+// budget streamed from disk as before; not imported here, so the SDK's dev host, which serves with
+// this file, reads the disk each time as before), and a guarded page or script is guarded once per
+// body read (`guardedOf`). Every
+// file answer carries an **ETag** (a strong one from the bytes sent, or a weak one from the size and
+// time when streamed) and answers `If-None-Match` with a 304 with the same headers and no body, so a
+// client revalidating the index or the blocklist (the app's fetch uses `cache: 'no-cache'`: never
+// older than the server's copy) costs a few hundred bytes. The `cyber-est` app, whose files are baked
+// into its image, keeps a content-addressed file for the process's life (`estOriginHashed`); the app's
+// in-process origin (tests, local development) checks a file's size and time on every request, so a
+// file changed on the disk is served changed. A paid version's bytes carry no ETag and never answer
+// 304 (`no-store`, served once with a ticket).
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createDevUiStore, devUiKeysOf, readUpload } from './estDevUi.mjs';
 import { FRAME_GUARD_JS, FRAME_GUARD_PATH, guardScript, injectFrameGuard } from './estFrameGuard.mjs';
 import { FRAME_WRAP_HTML, FRAME_WRAP_RE, WRAP_HOST_RE, WRAP_REL_RE, wrapCsp } from './estFrameWrap.mjs';
+
+/**
+ * 1.625: what the plugin origin keeps in memory (server/staticFiles.mjs' options, passed by its
+ * callers: server/estOriginServer.mjs, server/collab.mjs). 8 MB a file holds the
+ * largest catalogue bundle (6.7 MB at 1.625); 64 MB in all holds every latest catalogue bundle (35 MB
+ * for 70 plugins) and the windows' files that are opened, on a 512 MB machine with room to spare
+ * (the release file's arithmetic). `recheckMs` is for the files that are not content addressed (the
+ * index, the blocklist, their signatures, a plugin's meta.json) in the immutable mode.
+ */
+export const ORIGIN_CACHE = Object.freeze({ maxFileBytes: 8 * 1024 * 1024, maxTotalBytes: 64 * 1024 * 1024, recheckMs: 1000 });
+/** 1.625: the frame guard's own ETag (it changes only with the code). */
+const GUARD_BODY = Buffer.from(FRAME_GUARD_JS, 'utf8');
+const WRAP_BODY = Buffer.from(FRAME_WRAP_HTML, 'utf8');
+
+/** @type {WeakMap<Buffer, string>} */
+const etags = new WeakMap();
+/** 1.625: a strong ETag from a body's bytes, computed once per body. @param {Buffer} body */
+export function etagOfBody(body) {
+  let t = etags.get(body);
+  if (!t) { t = `"${createHash('sha256').update(body).digest('base64url').slice(0, 27)}"`; etags.set(body, t); }
+  return t;
+}
+const GUARD_ETAG = etagOfBody(GUARD_BODY);
+
+/**
+ * 1.625: whether `If-None-Match` names `etag` (the weak comparison of RFC 9110 §13.1.2, or `*`).
+ * @param {import('node:http').IncomingMessage} req @param {string} etag
+ */
+export function notModified(req, etag) {
+  const raw = req.headers['if-none-match'];
+  if (typeof raw !== 'string' || !raw) return false;
+  const bare = (/** @type {string} */ t) => t.trim().replace(/^W\//, '');
+  const want = bare(etag);
+  return raw.split(',').some((t) => t.trim() === '*' || bare(t) === want);
+}
+
+/**
+ * 1.625: whether a file is content addressed (every file under a bundle's hash in EST_ORIGIN_DIR, a
+ * registry version's in EST_REGISTRY_DIR), for the caller's `isImmutable`.
+ * @param {{ EST_ORIGIN_DIR?: string, EST_REGISTRY_DIR?: string }} env
+ * @returns {(file: string) => boolean}
+ */
+export function estOriginHashed(env) {
+  const dir = env.EST_ORIGIN_DIR ? path.resolve(env.EST_ORIGIN_DIR) : null;
+  const registryDir = env.EST_REGISTRY_DIR ? path.resolve(env.EST_REGISTRY_DIR) : null;
+  return (file) => {
+    if (dir && file.startsWith(dir + path.sep)) return true;
+    if (registryDir && file.startsWith(registryDir + path.sep)) return REGISTRY_VERSION_RE.test(path.relative(registryDir, file).split(path.sep).join('/'));
+    return false;
+  };
+}
+
+/**
+ * 1.625: without `o.files`, the disk every time (as before 1.625): a file's size and time, its body streamed.
+ * @type {{ lookup(file: string): Promise<{ file: { path: string, size: number, mtimeMs: number, body: Buffer | null } } | null>, bodyOf(v: { body: Buffer | null }): Promise<Buffer | null> }}
+ */
+const DISK_FILES = {
+  lookup: (file) => new Promise((resolve) => {
+    fs.stat(file, (err, st) => resolve(err || !st.isFile() ? null : { file: { path: file, size: st.size, mtimeMs: st.mtimeMs, body: null } }));
+  }),
+  bodyOf: async () => null,
+};
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -205,7 +283,9 @@ function hostOf(hostHeader) {
 
 /**
  * @param {{ EST_ORIGIN_HOST?: string, EST_ORIGIN_DIR?: string, EST_REGISTRY_DIR?: string, EST_APP_ORIGIN?: string, APP_ORIGIN?: string, EST_DEV_UI_KEY?: string, EST_DEV_UI_PUBLIC_KEY?: string }} env
- * @param {{ anyHost?: boolean, paidGate?: ReturnType<typeof import('./storeDelivery.mjs').createPaidGate> | null }} [o] Phase 2 (2-B, D-29): `anyHost`, every request is the plugin
+ * @param {{ anyHost?: boolean, files?: typeof DISK_FILES, paidGate?: ReturnType<typeof import('./storeDelivery.mjs').createPaidGate> | null }} [o] Phase 2 (2-B, D-29): `anyHost`, every request is the plugin
+ *   1.625: `files`, where `/est/b/` and `/est/v1/` are read (server/staticFiles.mjs' `createStaticFiles`
+ *   with `ORIGIN_CACHE`); none, the disk each time.
  *   origin's whatever its Host (server/estOriginServer.mjs, the `cyber-est` app, which is nothing else).
  *   1.514: `paidGate` (server/storeDelivery.mjs), a paid version's bundle bytes only with a store ticket;
  *   none, nothing is gated (no version is paid).
@@ -232,6 +312,15 @@ export function createEstOrigin(env, o = {}) {
     return page;
   };
   let uploadsInFlight = 0;
+  const files = o.files ?? DISK_FILES;
+  /** 1.625: a page or script with the guard, made once per body read. @type {WeakMap<Buffer, Buffer>} */
+  const guarded = new WeakMap();
+  /** @param {Buffer} raw @param {string} ext */
+  const guardedOf = (raw, ext) => {
+    let g = guarded.get(raw);
+    if (!g) { g = ext === '.html' ? injectFrameGuard(raw) : guardScript(raw); guarded.set(raw, g); }
+    return g;
+  };
   const gate = o.paidGate ?? null;
   /** Answers carrying a paid version's bytes. @type {WeakSet<import('node:http').ServerResponse>} */
   const paidAnswers = new WeakSet();
@@ -274,6 +363,41 @@ export function createEstOrigin(env, o = {}) {
   const corsOf = (req) => {
     const origin = req.headers.origin;
     return allowedOrigin(ancestors, typeof origin === 'string' ? origin : undefined) ? { 'access-control-allow-origin': /** @type {string} */ (origin), vary: 'Origin' } : { vary: 'Origin' };
+  };
+
+  /**
+   * 1.625: one file of `/est/b/` or `/est/v1/` (the caller checked its path and its rules): from
+   * memory when held, else streamed; an ETag on every answer but a paid version's, and a 304 for a
+   * matching `If-None-Match`. `guard`: a page or script, sent with the frame guard (always whole).
+   * @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res
+   * @param {string} file @param {{ ext: string, cors: import('node:http').OutgoingHttpHeaders, cache: string, guard?: boolean }} how
+   */
+  const serveFile = async (req, res, file, how) => {
+    let entry;
+    try { entry = await files.lookup(file); } catch { entry = null; }
+    if (!entry) { refuse(res, 404); return; }
+    let body = await files.bodyOf(entry.file);
+    if (how.guard) {
+      if (!body) {
+        try { body = await fs.promises.readFile(file); } catch { refuse(res, 404); return; }
+      }
+      body = guardedOf(body, how.ext);
+    }
+    const paid = paidAnswers.has(res);
+    const etag = paid ? null : body ? etagOfBody(body) : `W/"${entry.file.size.toString(36)}-${Math.floor(entry.file.mtimeMs).toString(36)}"`;
+    const headers = { ...baseHeaders(), ...how.cors, 'cache-control': cacheOf(res, how.cache), ...(etag ? { etag } : {}) };
+    if (etag && notModified(req, etag)) { res.writeHead(304, headers); res.end(); return; }
+    if (body) {
+      res.writeHead(200, { ...headers, 'content-type': MIME[how.ext], 'content-length': body.length });
+      res.end(req.method === 'HEAD' ? undefined : body);
+      return;
+    }
+    res.writeHead(200, { ...headers, 'content-type': MIME[how.ext], 'content-length': entry.file.size });
+    if (req.method === 'HEAD') { res.end(); return; }
+    const rs = fs.createReadStream(file);
+    rs.on('error', () => res.destroy());
+    res.on('close', () => rs.destroy());
+    rs.pipe(res);
   };
 
   /** 5-B: `/est/dev/…` (only with a key): OPTIONS and POST of an upload, GET and HEAD of its files. */
@@ -326,7 +450,10 @@ export function createEstOrigin(env, o = {}) {
     const store = which;
     let data = ext in MIME ? store.file(m[1], m[2]) : null;
     // 1.314 (EST-04, EST-03): a page only as the bundle's own, to a frame, with the guard first.
-    if (data && ext === '.html') data = htmlAllowed(req, m[2], store.page(m[1])) ? injectFrameGuard(data) : null;
+    // 1.628: a HEAD of the bundle's own page from anywhere: it carries no body, so it can never run as a
+    // page, and it is the client's "already uploaded?" probe (src/audio/est/uiUrl.ts), a fetch, never a
+    // frame; refused, every open of a window uploaded its whole bundle again.
+    if (data && ext === '.html') data = (req.method === 'HEAD' ? m[2] === store.page(m[1]) : htmlAllowed(req, m[2], store.page(m[1]))) ? injectFrameGuard(data) : null;
     if (data && ext === '.svg' && !svgAllowed(req)) data = null;
     // The review of #449 (EST-03): every script with the guard at its head.
     if (data && SCRIPT_EXT.has(ext)) data = guardScript(data);
@@ -344,19 +471,7 @@ export function createEstOrigin(env, o = {}) {
     // 1.514: a paid version's bundle only with a store ticket.
     const pv = /^plugins\/([^/]+)\/([^/]+)\/bundle\.est$/.exec(rel);
     if (pv && gated(req, res, { id: pv[1], version: pv[2] })) return;
-    fs.stat(file, (err, stat) => {
-      if (err || !stat.isFile()) { refuse(res, 404); return; }
-      res.writeHead(200, {
-        ...baseHeaders(), ...corsOf(req),
-        'content-type': MIME[ext], 'content-length': stat.size,
-        'cache-control': cacheOf(res, REGISTRY_VERSION_RE.test(rel) ? 'public, max-age=31536000, immutable' : REGISTRY_SHORT_CACHE),
-      });
-      if (req.method === 'HEAD') { res.end(); return; }
-      const rs = fs.createReadStream(file);
-      rs.on('error', () => res.destroy());
-      res.on('close', () => rs.destroy());
-      rs.pipe(res);
-    });
+    void serveFile(req, res, file, { ext, cors: corsOf(req), cache: REGISTRY_VERSION_RE.test(rel) ? 'public, max-age=31536000, immutable' : REGISTRY_SHORT_CACHE }).catch(() => res.destroy()); // serveFile answers its own failures; this only ends a socket on a throw
   };
 
   /**
@@ -370,7 +485,7 @@ export function createEstOrigin(env, o = {}) {
     const page = kind === 'b' ? pageOf(hash) : kind === 'dev' ? devUi?.page(hash) ?? null : kind === 'community' ? communityUi?.page(hash) ?? null : studioUi?.page(hash) ?? null;
     const host = hostOf(req.headers.host).full;
     if (!WRAP_REL_RE.test(rel) || !WRAP_HOST_RE.test(host) || !htmlAllowed(req, rel, page)) { refuse(res, 404); return; }
-    const body = Buffer.from(FRAME_WRAP_HTML, 'utf8');
+    const body = WRAP_BODY;
     res.writeHead(200, {
       ...baseHeaders(),
       'content-security-policy': wrapCsp(ancestors, `${host}/est/${kind}/${hash}/${rel}`),
@@ -393,8 +508,10 @@ export function createEstOrigin(env, o = {}) {
       if (req.method !== 'GET' && req.method !== 'HEAD') { refuse(res, 405); return true; }
       // 1.314 (EST-03): the host's own guard, the first script of every page served here.
       if (pathname === FRAME_GUARD_PATH) {
-        res.writeHead(200, { ...baseHeaders(), 'content-type': MIME['.js'], 'content-length': Buffer.byteLength(FRAME_GUARD_JS), 'cache-control': PAGE_CACHE });
-        res.end(req.method === 'HEAD' ? undefined : FRAME_GUARD_JS);
+        const headers = { ...baseHeaders(), 'cache-control': PAGE_CACHE, etag: GUARD_ETAG };
+        if (notModified(req, GUARD_ETAG)) { res.writeHead(304, headers); res.end(); return true; }
+        res.writeHead(200, { ...headers, 'content-type': MIME['.js'], 'content-length': GUARD_BODY.length });
+        res.end(req.method === 'HEAD' ? undefined : GUARD_BODY);
         return true;
       }
       const reg = REGISTRY_RE.exec(pathname);
@@ -410,36 +527,14 @@ export function createEstOrigin(env, o = {}) {
       if (ext === '.svg' && !svgAllowed(req)) { refuse(res, 404); return true; }
       // 1.514: a paid version's archive and DSP module only with a store ticket.
       if ((ext === '.est' || ext === '.wasm') && gated(req, res, { hash: m[1] })) return true;
-      fs.stat(file, (err, stat) => {
-        if (err || !stat.isFile()) { refuse(res, 404); return; }
-        const origin = req.headers.origin;
-        const cors = FETCHED.has(ext) && allowedOrigin(ancestors, typeof origin === 'string' ? origin : undefined)
-          ? { 'access-control-allow-origin': /** @type {string} */ (origin), vary: 'Origin' }
-          : FETCHED.has(ext) ? { vary: 'Origin' } : {};
-        if (ext === '.html' || SCRIPT_EXT.has(ext)) {
-          // 1.314 (EST-03): the page with the guard first, and (the review of #449) every script with
-          // the guard at its head (the file under the hash is unchanged).
-          fs.readFile(file, (e2, raw) => {
-            if (e2) { refuse(res, 404); return; }
-            const page = ext === '.html' ? injectFrameGuard(raw) : guardScript(raw);
-            res.writeHead(200, { ...baseHeaders(), ...cors, 'content-type': MIME[ext], 'content-length': page.length, 'cache-control': PAGE_CACHE });
-            res.end(req.method === 'HEAD' ? undefined : page);
-          });
-          return;
-        }
-        res.writeHead(200, {
-          ...baseHeaders(),
-          ...cors,
-          'content-type': MIME[ext],
-          'content-length': stat.size,
-          'cache-control': cacheOf(res, 'public, max-age=31536000, immutable'),
-        });
-        if (req.method === 'HEAD') { res.end(); return; }
-        const rs = fs.createReadStream(file);
-        rs.on('error', () => res.destroy());
-        res.on('close', () => rs.destroy());
-        rs.pipe(res);
-      });
+      const origin = req.headers.origin;
+      const cors = FETCHED.has(ext) && allowedOrigin(ancestors, typeof origin === 'string' ? origin : undefined)
+        ? { 'access-control-allow-origin': /** @type {string} */ (origin), vary: 'Origin' }
+        : FETCHED.has(ext) ? { vary: 'Origin' } : {};
+      // 1.314 (EST-03): a page with the guard first, and (the review of #449) every script with the
+      // guard at its head (the file under the hash is unchanged); 1.625: both from memory, guarded once.
+      const guard = ext === '.html' || SCRIPT_EXT.has(ext);
+      void serveFile(req, res, file, { ext, cors, cache: guard ? PAGE_CACHE : 'public, max-age=31536000, immutable', guard }).catch(() => res.destroy()); // as registryRoute's
       return true;
     },
     refuseUpgrade(req, socket) {

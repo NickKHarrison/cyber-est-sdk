@@ -12,7 +12,8 @@ import { describe, expect, it } from 'vitest';
 import { EST_RULES } from '../../src/audio/est/install/rules';
 import { repo } from './helpers';
 
-const DOCS = ['sdk/docs/PROMPT_KIT.md', 'sdk/docs/SHARING.md'] as const;
+// 1.549: the EST Store publishing guide is held to the same rule.
+const DOCS = ['sdk/docs/PROMPT_KIT.md', 'sdk/docs/SHARING.md', 'sdk/docs/PUBLISH_ON_THE_EST_STORE.md'] as const;
 const text = (p: string) => readFileSync(repo(p), 'utf8');
 const ts = (dir: string) => readdirSync(repo(dir)).filter(f => /\.ts$/.test(f) && !/\.test\.ts$/.test(f)).map(f => f.replace(/\.ts$/, ''));
 

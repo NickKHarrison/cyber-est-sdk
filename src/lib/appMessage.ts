@@ -10,6 +10,13 @@ export function showAppError(text: string): void {
   window.dispatchEvent(new CustomEvent<string>(APP_ERROR_EVENT, { detail: text }));
 }
 
+/** 1.622: a notice with one action (the headroom warning's Freeze): App shows the text and the button for it. */
+export const APP_NOTICE_ACTION_EVENT = 'cyber:notice-action';
+export interface AppNoticeAction { text: string; label: string; run: () => void; testId?: string }
+export function showAppNoticeAction(a: AppNoticeAction): void {
+  window.dispatchEvent(new CustomEvent<AppNoticeAction>(APP_NOTICE_ACTION_EVENT, { detail: a }));
+}
+
 export function showAppNotice(text: string): void {
   window.dispatchEvent(new CustomEvent<string>(APP_NOTICE_EVENT, { detail: text }));
 }

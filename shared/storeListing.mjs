@@ -18,6 +18,10 @@
 // at `/store/dev/demo/<id>/<hash>`, the only URL shape kept) and `links` the developer's https links,
 // both from the store page they write in My plugins; null and {} for a plugin without them.
 //
+// 1.605: a curated listing's `demo` is its first-party demo (shared/storeDemo.mjs: rendered at build time
+// by scripts/est-demo-clips.mjs, `/est-demos/<id>.mp3?v=<hash8>`, 20–40 s), only when it was rendered
+// from the listing's latest version; `cleanStoreDemo` takes either shape.
+//
 // 1.508: `reviewApproved` is true while an admin's approval of a Community listing's version waits for
 // the owner to sign it into the registry (server/estReview.mjs): the store says "Review approved,
 // waiting to be published". Only a Community listing can be waiting; a signed Reviewed one is `tier`.
@@ -37,14 +41,15 @@
 // 1.515 (Phase C, stream 1): every listing says what it is, `type: 'plugin' | 'pack'`: a plugin's here,
 // a sound pack's in shared/storePack.mjs (`StorePackListing`), listed by GET /store/packs beside these.
 import { cleanStoreArt } from './storeArt.mjs';
+import { cleanStoreDemo, DEV_DEMO_URL_RE } from './storeDemo.mjs';
 
 /** As `src/audio/est/slot.ts`. */
 export const STORE_ID_RE = /^[a-z0-9](?:[a-z0-9.-]{1,118})[a-z0-9]$/;
 export const STORE_VERSION_RE = /^\d{1,6}\.\d{1,6}\.\d{1,6}(?:[-+][0-9A-Za-z.-]{1,40})?$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
 const TAG_RE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
-/** 1.505: a demo clip's URL, the store's own route only. */
-export const STORE_DEMO_URL_RE = /^\/store\/dev\/demo\/[a-z0-9](?:[a-z0-9.-]{1,118})[a-z0-9]\/[0-9a-f]{64}$/;
+/** 1.505: a developer's demo clip's URL, the store's own route only (1.605: a first-party demo's is shared/storeDemo.mjs'). */
+export const STORE_DEMO_URL_RE = DEV_DEMO_URL_RE;
 /** 1.505: the links a listing may carry (shared/estPluginMeta.mjs `META_LINKS`). */
 export const STORE_LINKS = Object.freeze(['homepage', 'source', 'support']);
 /** An https link kept (no credentials, at most 300 characters), else null. @param {unknown} raw */
@@ -54,13 +59,8 @@ function httpsLink(raw) {
   try { u = new URL(raw); } catch { return null; }
   return u.protocol === 'https:' && !u.username && !u.password && u.hostname.includes('.') && ![...raw].some((c) => !shown(/** @type {number} */ (c.codePointAt(0)))) ? u.href : null;
 }
-/** @param {unknown} d @returns {{ url: string, seconds: number } | null} */
-function demoOf(d) {
-  if (!d || typeof d !== 'object') return null;
-  const x = /** @type {any} */ (d);
-  const seconds = Number(x.seconds);
-  return typeof x.url === 'string' && STORE_DEMO_URL_RE.test(x.url) && Number.isFinite(seconds) && seconds > 0 && seconds <= 31 ? { url: x.url, seconds: Math.round(seconds * 10) / 10 } : null;
-}
+/** A developer's demo clip (≤ 30 s) or, 1.605, a first-party demo (≤ 40 s): shared/storeDemo.mjs. @param {unknown} d @returns {{ url: string, seconds: number } | null} */
+const demoOf = (d) => cleanStoreDemo(d);
 /** @param {unknown} l @returns {Record<string, string>} */
 function linksOf(l) {
   /** @type {Record<string, string>} */
@@ -261,7 +261,14 @@ export function filterListings(list, { q = '', kind = '', tier = '', tag = '', e
     .filter((p) => !words.length || words.every((w) => fold(`${p.name} ${p.vendor} ${p.developer.name} ${p.summary} ${p.tags.join(' ')} ${p.id}`).includes(w)));
 }
 
-const newestOf = (p) => Date.parse(p.latest.publishedAt) || 0;
+/** 1.535: each publication time parsed once (sorts compare them n log n times a request). @type {Map<string, number>} */
+const parsedAt = new Map();
+const newestOf = (p) => {
+  const s = p.latest.publishedAt;
+  let t = parsedAt.get(s);
+  if (t === undefined) { t = Date.parse(s) || 0; if (parsedAt.size >= 10_000) parsedAt.clear(); parsedAt.set(s, t); }
+  return t;
+};
 const byName = (a, b) => a.name.localeCompare(b.name, 'en') || a.id.localeCompare(b.id);
 
 /** The listings in an order (a copy). Ties go by name, then id, so a page boundary never moves. @param {StoreListing[]} list @param {string} sort */
@@ -306,13 +313,20 @@ export function weeklyPick(list, now) {
   return own.length ? /** @type {StoreListing} */ (own[weekOf(now) % own.length]) : null;
 }
 
+/** 1.530: a plugin's shelves at most, by default (shared/storeFront.mjs: an admin's 1–4). */
+export const MAX_SHELF_REPEATS = 2;
+/** 1.530: a shelf is never cut below this many (or all its candidates, if fewer) by spreading. */
+export const SHELF_MIN = 4;
+/** 1.530: the largest shelf an admin may set (shared/storeFront.mjs). */
+export const SHELF_SIZE_MAX = 24;
+
 /**
- * The front page's shelves (`STORE_SHELVES`, in order), each at most `SHELF_SIZE` ids; a shelf with
- * nothing on it is left out. Early plugins sit on no shelf.
+ * 1.530: each shelf of `STORE_SHELVES`, in order, with its whole ranked candidate list (not cut to a
+ * size, empty ones kept). Early plugins sit on no shelf.
  * @param {StoreListing[]} list @param {number} now
  * @returns {{ id: string, title: string, ids: string[] }[]}
  */
-export function shelvesOf(list, now) {
+export function shelfCandidatesOf(list, now) {
   const shown = list.filter((p) => !p.early);
   /** @type {Record<string, (l: StoreListing[]) => StoreListing[]>} */
   const pick = {
@@ -322,13 +336,115 @@ export function shelvesOf(list, now) {
     instruments: (l) => sortListings(l.filter((p) => p.kind === 'instrument'), 'plays'),
     effects: (l) => sortListings(l.filter((p) => p.kind === 'effect'), 'plays'),
   };
-  const out = [];
-  for (const s of STORE_SHELVES) {
-    const rows = s.tag ? sortListings(shown.filter((p) => p.tags.includes(/** @type {string} */ (s.tag))), 'plays') : (pick[s.id]?.(shown) ?? []);
-    const ids = rows.slice(0, SHELF_SIZE).map((p) => p.id);
-    if (ids.length) out.push({ id: s.id, title: s.title, ids });
+  return STORE_SHELVES.map((s) => ({
+    id: s.id, title: s.title,
+    ids: (s.tag ? sortListings(shown.filter((p) => p.tags.includes(/** @type {string} */ (s.tag))), 'plays') : (pick[s.id]?.(shown) ?? [])).map((p) => p.id),
+  }));
+}
+
+/**
+ * 1.530: the shelves **spread**, so the same plugins do not fill every shelf. Each `{ id, title, ids,
+ * size?, pinned? }` (ids its whole ranked candidates) is cut to its size (`SHELF_SIZE` by default) with
+ * every plugin on at most `maxRepeats` shelves (never clamped to one by default). Every (shelf, plugin)
+ * candidate is ranked by its place relative to its shelf (rank ÷ the shelf's size) and taken best first,
+ * so a plugin stays where it ranks best and a shelf whose plugin is spent elsewhere takes its own next
+ * candidates. `featured` (the carousel's ids) each count as one appearance; `pinned` ids go first and
+ * are exempt (neither limited nor counted). A shelf never drops below `SHELF_MIN` (or every candidate,
+ * when fewer) because of spreading: it is topped up from its own candidates, those on the fewest rows so
+ * far first (1.531; then by rank), repeats and all. Then (1.531, `distinctRows`) a row holding exactly an earlier row's plugins takes its next-ranked
+ * candidates instead, or is left out (returned empty) when it has none. 1.531 spreads every plugin row
+ * the front draws through this one function (shared/storeFront.mjs `applyFront`: the charts' rows too).
+ * Pure and deterministic (ties: the shelf's order, then its rank).
+ * @param {{ id: string, title: string, ids: string[], size?: number, pinned?: string[] }[]} shelves
+ * @param {{ maxRepeats?: number, featured?: string[], min?: number }} [o]
+ * @returns {{ id: string, title: string, ids: string[] }[]}
+ */
+export function spreadShelves(shelves, { maxRepeats = MAX_SHELF_REPEATS, featured = [], min = SHELF_MIN } = {}) {
+  /** @type {Map<string, number>} */
+  const uses = new Map();
+  for (const id of featured) uses.set(id, 1);
+  const state = shelves.map((s) => {
+    const size = Math.max(0, Math.min(SHELF_SIZE_MAX, Math.floor(s.size ?? SHELF_SIZE)));
+    const pinned = (s.pinned ?? []).filter((id, i, a) => a.indexOf(id) === i).slice(0, size);
+    return { s, size, pinned, room: size - pinned.length, rest: s.ids.filter((id, i, a) => !pinned.includes(id) && a.indexOf(id) === i), took: /** @type {Set<string>} */ (new Set()), dropped: false };
+  });
+  const entries = [];
+  state.forEach((st, si) => {
+    const scale = Math.max(1, Math.min(st.rest.length, st.room));
+    st.rest.forEach((id, rank) => entries.push({ si, id, rank, score: rank / scale }));
+  });
+  entries.sort((a, b) => a.score - b.score || a.si - b.si || a.rank - b.rank);
+  for (const e of entries) {
+    const st = /** @type {typeof state[number]} */ (state[e.si]);
+    if (st.took.size >= st.room) continue;
+    const n = uses.get(e.id) ?? 0;
+    if (n >= maxRepeats) continue;
+    st.took.add(e.id);
+    uses.set(e.id, n + 1);
   }
-  return out;
+  for (const st of state) {
+    const floor = Math.min(Math.max(0, Math.min(min, st.size) - st.pinned.length), st.rest.length, st.room);
+    // 1.531: topped up with the candidates on the fewest rows so far (then by rank), so a floor repeats as little as it can.
+    const order = st.rest.filter((id) => !st.took.has(id)).map((id, rank) => ({ id, rank })).sort((a, b) => (uses.get(a.id) ?? 0) - (uses.get(b.id) ?? 0) || a.rank - b.rank);
+    for (const { id } of order) { if (st.took.size >= floor) break; st.took.add(id); uses.set(id, (uses.get(id) ?? 0) + 1); }
+  }
+  distinctRows(state, featured, maxRepeats);
+  return state.map((st) => ({ id: st.s.id, title: st.s.title, ids: st.dropped ? [] : [...st.pinned, ...st.rest.filter((id) => st.took.has(id))] }));
+}
+
+/** Whether two id lists hold the same plugins (whatever their order). @param {Set<string>} a @param {Set<string>} b */
+const samePlugins = (a, b) => a.size === b.size && [...a].every((id) => b.has(id));
+
+/**
+ * 1.531: **no two rows the same plugins.** A small catalogue can leave two rows holding exactly the same
+ * plugins after spreading (the charts' Top 10 and New and notable once did, in the same order). Walking
+ * the rows in order, a row whose plugins (as a set, so the same order too) equal an earlier row's takes
+ * as many of its candidates again, those on the fewest earlier rows first (then under `maxRepeats`, then
+ * on the fewest rows, then its own rank), so its next-ranked candidates come in for the shared ones; it
+ * keeps its length and is drawn in its own ranked order. A row that still holds an earlier row's plugins
+ * (it has no other candidates) is left out of the front (`dropped`). A row with pinned plugins is an admin's choice
+ * and is left as it is. Mutates `state` (spreadShelves' own).
+ * @param {{ pinned: string[], rest: string[], took: Set<string>, dropped?: boolean }[]} state
+ * @param {string[]} featured @param {number} maxRepeats
+ */
+function distinctRows(state, featured, maxRepeats) {
+  /** @type {Map<string, number>} */
+  const uses = new Map();
+  for (const id of featured) uses.set(id, 1);
+  for (const st of state) for (const id of st.took) uses.set(id, (uses.get(id) ?? 0) + 1);
+  /** @type {Set<string>[]} */
+  const kept = [];
+  for (const st of state) {
+    if (!st.took.size) continue;
+    if (st.pinned.length) { kept.push(new Set(st.took)); continue; }
+    if (kept.some((k) => samePlugins(k, st.took))) {
+      // Rebuilt from its candidates: those on the fewest earlier rows first, then under the limit, then fewest uses, then rank.
+      const onRows = (id) => kept.filter((k) => k.has(id)).length;
+      const order = st.rest.map((id, rank) => ({ id, rank, rows: onRows(id), over: (uses.get(id) ?? 0) - (st.took.has(id) ? 1 : 0) >= maxRepeats ? 1 : 0 }))
+        .sort((a, b) => a.rows - b.rows || a.over - b.over || (uses.get(a.id) ?? 0) - (uses.get(b.id) ?? 0) || a.rank - b.rank);
+      const next = new Set(order.slice(0, st.took.size).map((x) => x.id));
+      for (const id of st.took) if (!next.has(id)) uses.set(id, (uses.get(id) ?? 1) - 1);
+      for (const id of next) if (!st.took.has(id)) uses.set(id, (uses.get(id) ?? 0) + 1);
+      st.took = next;
+      if (kept.some((k) => samePlugins(k, st.took))) {
+        st.dropped = true;
+        for (const id of st.took) uses.set(id, (uses.get(id) ?? 1) - 1);
+        continue;
+      }
+    }
+    kept.push(new Set(st.took));
+  }
+}
+
+/**
+ * The front page's shelves (`STORE_SHELVES`, in order), each at most `SHELF_SIZE` ids, spread (1.530,
+ * `spreadShelves`); a shelf with nothing on it is left out. Early plugins sit on no shelf. GET
+ * /store/front applies an admin's overrides on top (shared/storeFront.mjs `applyFront`).
+ * @param {StoreListing[]} list @param {number} now @param {{ maxRepeats?: number, featured?: string[] }} [o]
+ * @returns {{ id: string, title: string, ids: string[] }[]}
+ */
+export function shelvesOf(list, now, o = {}) {
+  return spreadShelves(shelfCandidatesOf(list, now), o).filter((s) => s.ids.length > 0);
 }
 
 /**
@@ -339,11 +455,12 @@ export function shelvesOf(list, now) {
  */
 export function cleanWishlist(raw) {
   if (!Array.isArray(raw)) return { ok: false, error: 'send { ids: [...] }' };
-  const ids = [];
+  // 1.534 (pre-launch review 3, P3-A1): a Set, and refused as soon as it passes the cap (an includes() loop over a 96 KB body held the event loop ~120 ms).
+  const seen = new Set();
   for (const id of raw) {
     if (typeof id !== 'string' || !STORE_ID_RE.test(id)) return { ok: false, error: 'bad plugin id' };
-    if (!ids.includes(id)) ids.push(id);
+    seen.add(id);
+    if (seen.size > WISHLIST_MAX) return { ok: false, error: `A wishlist holds at most ${WISHLIST_MAX} plugins.` };
   }
-  if (ids.length > WISHLIST_MAX) return { ok: false, error: `A wishlist holds at most ${WISHLIST_MAX} plugins.` };
-  return { ok: true, ids };
+  return { ok: true, ids: [...seen] };
 }

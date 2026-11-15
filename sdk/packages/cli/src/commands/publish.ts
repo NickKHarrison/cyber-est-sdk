@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { publishAsDeveloper, publishFiles } from '../developerKit';
 import { publishRegistry, signingKeyOf, keyFacts } from '../../../tools/src/registry.mjs';
+import { REGISTRY_EXPIRES_DAYS } from '../../../../../shared/estRegistry.mjs';
 import { flagString, REPO_DIR, type EstCommand } from '../command';
 
 /**
@@ -37,7 +38,7 @@ const command: EstCommand = {
     '  --dist    the bundles (default est-plugins/dist)',
     '  --source  the registry\'s source folder (default est-plugins/registry)',
     '  --out     where v1/ is written (default est-plugins/registry-dist)',
-    '  --expires-days  how long the index and the blocklist stay good (default 7; 1.314, EST-11): republish within it',
+    '  --expires-days  how long the index and the blocklist stay good (default 14 since the n572 integration, 7 before; 1.314, EST-11): republish within it, weekly',
     '',
     'A published version never changes: one already in --out with other bytes refuses the publish.',
     'Then: commit --out, deploy cyber-est, and check https://cyber-est.fly.dev/est/v1/index.json.',
@@ -51,7 +52,7 @@ const command: EstCommand = {
     const raw = keyFile ? readFileSync(resolve(ctx.cwd, keyFile), 'utf8') : process.env.EST_REGISTRY_SIGNING_KEY;
     const key = signingKeyOf(raw);
     const at = (f: string, d: string) => resolve(flagString(args, f) ? ctx.cwd : REPO_DIR, flagString(args, f) ?? d);
-    const days = Number(flagString(args, 'expires-days') ?? 7);
+    const days = Number(flagString(args, 'expires-days') ?? REGISTRY_EXPIRES_DAYS);
     if (!Number.isFinite(days) || days < 1 || days > 365) throw new Error('--expires-days is a whole number of days, 1 to 365');
     const r = publishRegistry({ distDir: at('dist', 'est-plugins/dist'), sourceDir: at('source', 'est-plugins/registry'), outDir: at('out', 'est-plugins/registry-dist'), privateKey: key, expiresDays: Math.floor(days) });
     const facts = keyFacts(key);

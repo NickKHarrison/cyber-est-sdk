@@ -2,7 +2,7 @@
  * Review 1.36 A-9: a processor lives until its context closes unless it is told to stop. Every
  * Cyber processor (`cyber-limiter`, `cyber-compressor`, `cyber-guard`, `cyber-synth`,
  * `cyber-recorder`, `cyber-wave`, `cyber-fm`, `cyber-mic-recorder`, `cyber-saturator` and, since
- * 1.311, `cyber-bitcrusher`) handles `{ type: 'dispose' }`
+ * 1.311, `cyber-bitcrusher`; 1.578 `cyber-clipper` and `cyber-transient`; 1.601 `cyber-loopgrab`, which also lets its ring go) handles `{ type: 'dispose' }`
  * by returning false from `process()` from then on, so the audio thread lets it go.
  *
  * `disposeWorkletNode` posts that message and closes the node's port. Call it once the node is

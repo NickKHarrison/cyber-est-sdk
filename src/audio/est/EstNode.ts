@@ -230,6 +230,8 @@ export interface EstNotesOut { notes: EstNoteOut[]; dropped: number }
 
 export interface EstNodeOptions {
   pluginId?: string;
+  /** 1.622: the strip and slot the instance plays for (a live insert's, or a track's `EST_TRACK_SLOT`), named in its health row. */
+  owner?: { stripId: string; slotId: string };
   maxMemoryPages?: number;
   copyOnly?: boolean;
   statsIntervalMs?: number;
@@ -299,11 +301,30 @@ export function wrapEstNode(node: AudioWorkletNode, port: PortLike, started: num
       for (const cb of listeners.param) cb(m.changes as { id: number; value: number }[]);
     } else if (m.type === 'stats') {
       // 1.338 (R-G): the per-instance health table (an offline render's node is never a row).
-      noteEstStats(node, m as unknown as EstStats, { pluginId: opts.pluginId, pages: opts.maxMemoryPages ?? EST_DEFAULT_PAGES, offline: opts.renderMode === 'offline' });
+      noteEstStats(node, m as unknown as EstStats, { pluginId: opts.pluginId, owner: opts.owner, pages: opts.maxMemoryPages ?? EST_DEFAULT_PAGES, offline: opts.renderMode === 'offline' });
       for (const cb of listeners.stats) cb(m as unknown as EstStats);
     } else if (m.type === 'notes') {
       for (const cb of listeners.notes) cb(m as unknown as EstNotesOut);
     }
+  };
+
+  /**
+   * 1.622 (CPU headroom with many plugins): a live instance's events within one task go as one
+   * `events` message, posted in a microtask (the processor queues each event by its time, so one list
+   * plays as several did). A scheduler window's transport, its notes and its lanes' values were a
+   * message each, to every instance. Any other message posts the waiting events first, so the order
+   * the processor sees is the order they were asked in. An offline render's node posts at once.
+   */
+  const batching = opts.renderMode !== 'offline';
+  let batch: EstEvent[] | null = null;
+  const flushEvents = () => {
+    const ev = batch;
+    batch = null;
+    if (ev && ev.length && !disposed) port.postMessage({ type: 'events', events: ev });
+  };
+  const post = (m: Record<string, unknown>, transfer?: Transferable[]) => {
+    flushEvents();
+    if (transfer) port.postMessage(m, transfer); else port.postMessage(m);
   };
 
   const request = (msg: Record<string, unknown>, transfer: Transferable[] = []) => new Promise<Record<string, unknown>>((resolve, reject) => {
@@ -311,7 +332,7 @@ export function wrapEstNode(node: AudioWorkletNode, port: PortLike, started: num
     if (failed) { reject(new Error(failed.message)); return; }
     const req = nextReq++;
     pending.set(req, { resolve, reject });
-    port.postMessage({ ...msg, req }, transfer);
+    post({ ...msg, req }, transfer);
   });
 
   const make = (r: EstReady): EstNode => {
@@ -319,16 +340,21 @@ export function wrapEstNode(node: AudioWorkletNode, port: PortLike, started: num
     const est: EstNode = {
       node, params, ready: r,
       instantiateMs: (typeof performance !== 'undefined' ? performance.now() : Date.now()) - started,
-      scheduleEvents(events) { if (!disposed && events.length) port.postMessage({ type: 'events', events }); },
+      scheduleEvents(events) {
+        if (disposed || !events.length) return;
+        if (!batching) { port.postMessage({ type: 'events', events }); return; }
+        if (!batch) { batch = []; queueMicrotask(flushEvents); }
+        for (const e of events) batch.push(e);
+      },
       setParam(id, value, time) {
         const p = params.find(x => x.id === id);
         if (p) p.value = value;
         est.scheduleEvents([{ type: 'param', id, value, time }]);
       },
-      cancel(id) { if (!disposed) port.postMessage({ type: 'cancel', id }); },
-      cancelMods(id) { if (!disposed) port.postMessage({ type: 'cancelMods', id }); },
-      cancelNotes(from) { if (!disposed) port.postMessage({ type: 'cancelNotes', from }); },
-      clearNotes() { if (!disposed) port.postMessage({ type: 'clearNotes' }); },
+      cancel(id) { if (!disposed) post({ type: 'cancel', id }); },
+      cancelMods(id) { if (!disposed) post({ type: 'cancelMods', id }); },
+      cancelNotes(from) { if (!disposed) post({ type: 'cancelNotes', from }); },
+      clearNotes() { if (!disposed) post({ type: 'clearNotes' }); },
       async getParams() {
         const m = await request({ type: 'params:get' });
         const values = m.values as { id: number; value: number }[];
@@ -343,17 +369,18 @@ export function wrapEstNode(node: AudioWorkletNode, port: PortLike, started: num
       on(type: 'error' | 'param' | 'stats' | 'notes', cb: (x: never) => void) {
         const set = listeners[type] as Set<(x: never) => void>;
         // DEV-F (1.321): the processor keeps and posts a note effect's notes only while someone listens.
-        if (type === 'notes' && set.size === 0 && !disposed) port.postMessage({ type: 'notes:on' });
+        if (type === 'notes' && set.size === 0 && !disposed) post({ type: 'notes:on' });
         set.add(cb);
         return () => {
           if (!set.delete(cb)) return;
-          if (type === 'notes' && set.size === 0 && !disposed) port.postMessage({ type: 'notes:off' });
+          if (type === 'notes' && set.size === 0 && !disposed) post({ type: 'notes:off' });
         };
       },
       error: () => failed,
       dispose() {
         if (disposed) return;
         disposed = true;
+        batch = null;
         for (const [, p] of pending) p.reject(new Error('the instance was disposed'));
         pending.clear();
         try { node.disconnect(); } catch { /* not connected */ }

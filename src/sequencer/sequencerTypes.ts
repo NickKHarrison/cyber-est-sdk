@@ -21,6 +21,7 @@ import { sanitiseMeterMap } from './meterMap';
 import { sanitiseGrooveAmount, sanitiseGrooveRef, sanitiseGrooves, type Groove } from './groove';
 import { sanitiseEstBlock, type EstSlotBlock } from '../audio/est/slot';
 import { defaultRackPatch, rackHashes, sanitiseRackPatch, type RackPatch } from '../audio/rack/rackTypes';
+import { findFxDeep } from '../audio/rack/fxRackTypes';
 import type { ChainModule, DynamicsParams, EQParams, MaximizerParams, ModuleId, SaturationParams } from '../audio/types';
 import {
   DIVISIONS, divisionBeats, defaultArpState, defaultSynthPatch, sanitiseArp, sanitiseSynthPatch,
@@ -148,6 +149,13 @@ export interface Clip {
   contentLength: number;
   /** Where in the content the clip starts playing (a trimmed start), 0 ≤ offset < contentLength. */
   offset: number;
+  /**
+   * 1.528 (Live's Loop switch, M55): set, an arranged clip's **Loop is off**: it plays its content
+   * once from `offset` to `contentLength` and the rest of its length is silent (`clipPlayEnd`, the one
+   * rule every reader asks). Absent: Loop on, the content repeats to fill `length` (every song before
+   * 1.528). A Session clip ignores it: its Loop is its launch's (`launchSpanOf`), so the sanitiser drops it there.
+   */
+  loopOff?: true;
   notes: Note[];
   muted: boolean;
   /** The clip's scale, for the piano roll's highlighting and fold (1.5); absent: none. */
@@ -505,8 +513,19 @@ export interface AudioClip {
    * in the reversed source's seconds (0 = the original's end). `reverseAudioClip` mirrors them.
    */
   reverse: boolean;
-  /** 1.11: the content's loop, in content beats (warped clips only; ignored while unwarped). */
+  /**
+   * 1.11: the content's loop, in content beats (warped clips only). `loop.on` is the clip's one
+   * Loop switch (1.544, M55): a warped clip loops `loop`, an unwarped one `loopS` (`audioClipLoops`).
+   */
   loop: AudioLoop;
+  /**
+   * 1.544 (M55, Live's Loop with Warp off): an unwarped clip's loop region in source seconds (the
+   * clip's direction's seconds, as `offsetS`), [start, end). With `loop.on` and Warp off the clip plays
+   * from its start marker to `end`, then repeats [start, end) at its own speed for as long as it
+   * lasts (`unwarpedSourceAt`). Absent: an unwarped clip never loops (every song before 1.544,
+   * whatever its `loop.on`). Ignored while warped.
+   */
+  loopS?: AudioLoopS;
   /**
    * Review 1.36 S-6: an unwarped clip's length in seconds, set by the first tempo change that
    * rescales it (`rescaleUnwarped`), so its length in beats is worked out from the seconds each
@@ -549,6 +568,19 @@ export interface AudioWarp {
 }
 /** A clip's content loop (1.11): `start` and `length` in content beats. */
 export interface AudioLoop { on: boolean; start: number; length: number }
+/** 1.544: an unwarped clip's loop region, source seconds [start, end). */
+export interface AudioLoopS { start: number; end: number }
+/** 1.544: an unwarped loop region's shortest length, source seconds. */
+export const MIN_AUDIO_LOOP_S = 0.05;
+
+/**
+ * 1.544 (M55): whether an arranged audio clip's Loop switch is on as it plays: a warped clip's
+ * `loop.on`; an unwarped clip's `loop.on` with its `loopS` region (an older unwarped clip whose
+ * `loop.on` was left over from Warp has none, so it plays once, as it always did).
+ */
+export function audioClipLoops(c: Pick<AudioClip, 'warp' | 'loop' | 'loopS'>): boolean {
+  return c.warp ? c.loop.on : c.loop.on && !!c.loopS;
+}
 export const BEATS_PRESERVE: readonly BeatsPreserve[] = ['transients', '1', '1/2', '1/4', '1/8', '1/16', '1/32'];
 export const TRANSIENT_LOOP_MODES: readonly TransientLoopMode[] = ['off', 'forward', 'pingpong'];
 export const DEFAULT_BEATS_WARP: AudioWarp['beats'] = { preserve: 'transients', loopMode: 'forward', envelope: 100 };
@@ -876,6 +908,41 @@ export function velocityDb(velocity: number): number {
 
 export function clipEnd(c: Pick<Clip, 'start' | 'length'>): number {
   return c.start + c.length;
+}
+
+/** 1.528 (M55): whether an arranged MIDI clip loops its content (Live's Loop switch; absent `loopOff`: on). */
+export function clipLoops(c: Pick<Clip, 'loopOff'>): boolean {
+  return c.loopOff !== true;
+}
+
+/**
+ * 1.528 (M55): **the one rule** for where an arranged MIDI clip stops sounding (song beats): its end
+ * when it loops; with Loop off, the end of one pass of its content from its start marker
+ * (`start - offset + contentLength`), or its end when that comes first. Past it the clip is silent:
+ * no notes (`notesInWindow`), no envelope (`sampleEnvelope`), no repeat drawn. Every reader that plays,
+ * renders, draws or cuts a MIDI clip's notes asks this, never `clipEnd` with its own Loop test.
+ */
+export function clipPlayEnd(c: Pick<Clip, 'start' | 'length' | 'offset' | 'contentLength' | 'loopOff'>): number {
+  const end = c.start + c.length;
+  return c.loopOff === true ? Math.min(end, c.start - c.offset + c.contentLength) : end;
+}
+
+/**
+ * 1.528 (M55): a MIDI clip whose start moves `d` beats later in its content (a split's right half, a
+ * crop, a trim of the start), every note keeping its song position. A looping clip's offset wraps in
+ * its content; a clip with Loop off moves on in it, and a piece that starts at or past its content's
+ * end (`clipPlayEnd`) is silent: no notes, rows or envelopes, offset 0 (so it never plays again).
+ */
+export function shiftClipContent<C extends Clip>(c: C, d: number): C {
+  const cl = c.contentLength;
+  if (c.loopOff !== true) {
+    const off = tk((((c.offset + d) % cl) + cl) % cl);
+    return { ...c, offset: off >= cl ? 0 : off };
+  }
+  const off = tk(Math.max(0, c.offset + d));
+  if (off < cl) return { ...c, offset: off };
+  const { steps: _s, envelopes: _e, ...rest } = c;
+  return { ...rest, offset: 0, notes: [] } as unknown as C;
 }
 
 /** Where the last clip (of notes or audio) ends (beats), or 0. */
@@ -1221,6 +1288,8 @@ export function sanitiseClip(raw: unknown, tracks: readonly Track[]): Clip | nul
     ...(groove ? { groove } : {}),
     ...(program ? { program } : {}),
     ...(steps ? { steps } : {}),
+    // 1.528: Loop off kept only when off (absent: on, every older song unchanged).
+    ...(raw.loopOff === true ? { loopOff: true as const } : {}),
     ...sanitiseTakeFields(raw),
   };
 }
@@ -1477,6 +1546,7 @@ export function sanitiseAudioClip(raw: unknown, tracks: readonly Track[]): Audio
     detune: Math.round(num(raw.detune, -MAX_DETUNE, MAX_DETUNE, 0)),
     reverse: bool(raw.reverse, false),
     loop: sanitiseAudioLoop(raw.loop),
+    ...withLoopS(sanitiseAudioLoopS(raw.loopS)),
     ...withEnvelopes(sanitiseClipEnvelopes(raw.envelopes)),
     ...(typeof raw.sourceSeconds === 'number' && Number.isFinite(raw.sourceSeconds) && raw.sourceSeconds > 0 && raw.sourceSeconds <= MAX_BEATS * 60 / MIN_TEMPO
       ? { sourceSeconds: raw.sourceSeconds } : {}),
@@ -1536,6 +1606,15 @@ export function sanitiseWarp(raw: unknown): AudioWarp | null {
 }
 
 const withEnvelopes = (envelopes: ClipEnvelope[] | undefined) => (envelopes ? { envelopes } : {});
+const withLoopS = (loopS: AudioLoopS | undefined) => (loopS ? { loopS } : {});
+
+/** 1.544: an unwarped clip's loop region in range (source seconds, at least MIN_AUDIO_LOOP_S long), or undefined (absent or unreadable: none). */
+export function sanitiseAudioLoopS(raw: unknown): AudioLoopS | undefined {
+  if (!isObj(raw) || typeof raw.start !== 'number' || typeof raw.end !== 'number' || !Number.isFinite(raw.start) || !Number.isFinite(raw.end)) return undefined;
+  const start = Math.max(0, Math.min(MAX_AUDIO_SOURCE_S, raw.start));
+  const end = Math.min(MAX_AUDIO_SOURCE_S + MIN_AUDIO_LOOP_S, raw.end);
+  return end - start >= MIN_AUDIO_LOOP_S - 1e-9 ? { start, end } : undefined;
+}
 
 /** A clip's loop in range (content beats; the length at least a 32nd). */
 export function sanitiseAudioLoop(raw: unknown): AudioLoop {
@@ -1578,7 +1657,9 @@ export function sanitiseAutomationTarget(raw: unknown, tracks: readonly Track[])
     }
     case 'fx': {
       const fxId = id(raw.fxId), p = param(raw.param);
-      if (!track || !fxId || !p || !track.fx.some(f => f.id === fxId)) return null;
+      // 1.561: an insert inside an Audio Effect Rack too (`findFxDeep`, as the lanes' playback finds it), so a
+      // device grouped with its lane keeps it on a reload and at every peer (1.569 made the same fix for Import Live Set).
+      if (!track || !fxId || !p || !findFxDeep(track.fx, fxId)) return null;
       return { kind: 'fx', trackId: track.id, fxId, param: p };
     }
     case 'synth': {
@@ -2126,6 +2207,20 @@ export const DEFAULT_CLIP_LAUNCH: ClipLaunch = { mode: 'trigger', quantize: 'glo
 export const launchOf = (c: { launch?: ClipLaunch }): ClipLaunch => c.launch ?? DEFAULT_CLIP_LAUNCH;
 
 /**
+ * 1.528 (M55): Live has one Loop switch a clip. A slot's Loop is its launch's (`launchSpanOf`), an
+ * arranged clip's is `loopOff` (`clipPlayEnd`): a clip moved or copied between them carries it. This
+ * is the slot's Loop as an arranged clip's field.
+ */
+export function loopOffFromLaunch(launch: ClipLaunch | undefined): { loopOff?: true } {
+  return launch?.loop === false ? { loopOff: true } : {};
+}
+/** 1.528: and back, an arranged clip's Loop as a slot's launch (Loop off kept only when off; else the launch as it was). */
+export function launchWithLoop(launch: ClipLaunch | undefined, loopOff: boolean | undefined): ClipLaunch | undefined {
+  if (!loopOff) return launch;
+  return { ...(launch ?? DEFAULT_CLIP_LAUNCH), loop: false };
+}
+
+/**
  * A MIDI clip in a slot: a `Clip` whose `start` and `offset` are 0 and whose `length` is its
  * `contentLength` (its loop), on a synth or pads track, in scene `sceneId`. 1.26: `launch`.
  */
@@ -2291,7 +2386,7 @@ export const isSessionClip = (c: Clip | AudioClip): c is SessionClip | SessionAu
 export function sanitiseSessionClip(raw: unknown, tracks: readonly Track[], sceneIds: ReadonlySet<string>): SessionClip | null {
   if (!isObj(raw) || typeof raw.sceneId !== 'string' || !sceneIds.has(raw.sceneId)) return null;
   // 1.109: a slot's clip is never a take.
-  const c = sanitiseClip({ ...raw, start: 0, offset: 0, take: undefined, takeGroup: undefined }, tracks);
+  const c = sanitiseClip({ ...raw, start: 0, offset: 0, take: undefined, takeGroup: undefined, loopOff: undefined }, tracks);
   if (!c) return null;
   const launch = sanitiseLaunchLoop(sanitiseClipLaunch(raw.launch), raw.launch, c.contentLength);
   return { ...c, start: 0, offset: 0, length: c.contentLength, sceneId: raw.sceneId, ...(launch ? { launch } : {}) };

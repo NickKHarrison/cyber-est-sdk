@@ -9,6 +9,12 @@ export function json(res, status, body, extra = {}) {
   res.end(JSON.stringify(body));
 }
 
+/** 1.535: a JSON answer already serialised (a held answer), with exactly `json`'s headers. @param {string} text */
+export function jsonText(res, status, text, extra = {}) {
+  res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...extra });
+  res.end(text);
+}
+
 /** Whether a request's Origin is this host (refuses cross-site writes). */
 export function sameOrigin(req) {
   const origin = req.headers.origin;

@@ -96,7 +96,7 @@ const writeCanonical = (file, obj) => { mkdirSync(dirname(file), { recursive: tr
  * Build and sign the registry. `distDir`: the bundles (reference.json and `<sha256>/`); `sourceDir`:
  * the registry's source folder (with `catalogue.json` since 1.344: bundles in `distDir` that are not reference ones); `outDir`: where `v1/` is written. `now`: the publish time (tests).
  * `blocklist`: extra entries (tests). Returns what was written.
- * 1.314: `expiresDays` (default 7, EST-11) sets the signed `expiresAt` of the index and the blocklist:
+ * 1.314: `expiresDays` (default `REGISTRY_EXPIRES_DAYS`, 14 since the n572 integration; 7 before, EST-11) sets the signed `expiresAt` of the index and the blocklist:
  * a registry must be republished within it or hosts show it as out of date; `ownerKeyIds` (EST-14)
  * names the owner key(s), the only ones that may publish Cyber's reserved names.
  * 1.322 (DEV-C, D-54): `community` `{ keys, developers }` (else `community.json` in the source folder,

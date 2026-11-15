@@ -20,7 +20,7 @@
 // of its SHA-256) and show its fingerprint (all 64, in groups of four).
 //
 // 1.314 (LR-8b stream C; EST-05, EST-11, EST-14): the index and `blocklist.json` carry a signed
-// `registry.expiresAt` (7 days from the publish): a host refuses an expired index from the network
+// `registry.expiresAt` (14 days from the publish since the n572 integration, 7 before): a host refuses an expired index from the network
 // and shows a held one as out of date, so a withheld index cannot freeze the blocklist. A host may
 // pin **two keys** (current and next, `pinnedKeysOf`): a file signed by either verifies, so a key
 // rotation overlaps rather than cuts over. Display text drops zero-width and bidirectional
@@ -51,8 +51,12 @@ export const hasInvisible = (s) => { INVISIBLE_RE.lastIndex = 0; return INVISIBL
 /** `s` without them. @param {string} s */
 export const stripInvisible = (s) => s.replace(INVISIBLE_RE, '');
 const text = (v, max) => (typeof v === 'string' ? stripInvisible(v).slice(0, max) : '');
-/** 1.314 (EST-11): how long a published index or blocklist is good for (`expiresAt`), unless the publish says otherwise. */
-export const REGISTRY_EXPIRES_DAYS = 7;
+/**
+ * 1.314 (EST-11): how long a published index or blocklist is good for (`expiresAt`), unless the publish says otherwise.
+ * 14 since the n572 integration (the owner's delegated decision of 2026-11-14; 7 before): re-signed weekly in the
+ * Sunday deploy window, an index always has 7 days or more left, so the 5-day warning means a missed Sunday.
+ */
+export const REGISTRY_EXPIRES_DAYS = 14;
 
 /**
  * Canonical JSON: object keys sorted, no whitespace, `undefined` members left out; throws on a

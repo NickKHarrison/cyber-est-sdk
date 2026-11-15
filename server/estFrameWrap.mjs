@@ -21,6 +21,10 @@
 // exactly as before (`estOrigin.mjs`: the frame guard first, only as the bundle's `ui.path`, only to
 // a frame) and stays opaque (its own `sandbox allow-scripts`).
 //
+// 1.630: its first message is a hello to its parent (`{ type: 'est:wrap', v: 1 }`, targetOrigin the `p`
+// the app wrote): the app's proof that the frame loaded from the plugin origin, not a network filter's
+// refused page (EstPluginFrame's handshake; a cross-origin `load` proves nothing). It carries nothing.
+//
 // Why the wrapper itself is not opaque (`sandbox allow-scripts allow-same-origin`, and the app's
 // iframe the same): Chromium (153, measured) refuses any `frame-ancestors` list, `*` included, for a
 // frame whose ancestor is an opaque document, so under an opaque wrapper the plugin page could keep
@@ -65,6 +69,7 @@ export const FRAME_WRAP_JS = `(function () {
   if (host) {
     var frag = hash.replace(/(^|&)p=[^&]*/, '$1p=' + encodeURIComponent(location.origin));
     inner.src = location.pathname.replace(/^\\/est\\/frame\\//, '/est/') + '#' + frag;
+    try { parent.postMessage({ type: 'est:wrap', v: 1 }, host); } catch (err) { /* no parent to tell */ }
   }
   document.body.appendChild(inner);
 })();

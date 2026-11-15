@@ -5,8 +5,10 @@
  * is a number, described once in FX_DEFS; a choice is an index into its `choices`.
  */
 
+import { LOOPGRAB_LENGTHS, LOOPGRAB_REPEATS } from './loopGrabCore';
 import { CYBER_NAMES, CYBER_PARAMS, CYBER_TYPES, type CyberType } from './cyberDefs';
 import { sanitiseEstBlock, type EstSlotBlock } from '../est/slot';
+import { FX_RACK_MACROS, FX_RACK_MAX_BANDS, FX_RACK_MAX_MACROS, FX_RACK_SEL_MAX, FX_RACK_XOVER_MAX, FX_RACK_XOVER_MIN, defaultCrossovers, fxRackBands, fxRackDefaultParams, fxRackXoverKey, makeFxChain, sanitiseFxRackModel, slotCrossovers, type FxRackModel } from '../rack/fxRackTypes';
 
 /**
  * 1.374 (Cyber_Instruments_MIDI_Work_Order_3.md stream 7): Live 12's modulators as inserts. An
@@ -51,7 +53,7 @@ export function sanitiseModTargets(raw: unknown): ModTarget[] {
  * 1.33: the five Cyber inserts (cyberDefs.ts) come last: the MASTER chain's EQ, Compressor,
  * Saturation and Limiter, and the Vectorscope, each opening in a floating window.
  */
-export const FX_TYPES = ['eq', 'filter', 'compressor', 'distortion', 'chorus', 'phaser', 'delay', 'reverb', 'utility', 'ducker', 'limiter', 'bitcrusher', ...CYBER_TYPES, ...MODULATOR_TYPES, 'est'] as const;
+export const FX_TYPES = ['eq', 'filter', 'compressor', 'distortion', 'chorus', 'phaser', 'delay', 'reverb', 'utility', 'ducker', 'limiter', 'bitcrusher', 'clipper', 'transientShaper', 'loopGrab', ...CYBER_TYPES, ...MODULATOR_TYPES, 'fxRack', 'est'] as const;
 export type FxType = (typeof FX_TYPES)[number];
 /**
  * EST Phase 2 (docs/est/EST_Phase2_Work_Order.md §1): `'est'`, last, is an installed EST plugin
@@ -60,6 +62,17 @@ export type FxType = (typeof FX_TYPES)[number];
  * offered to a person (the add menus, the Browser, presets, the every-type tests) is this one:
  * the built-in types, `'est'` left out on purpose.
  */
+/**
+ * 1.578: the inserts that bypass inside themselves (a crossfade to their dry sound, delayed by
+ * their latency) and so stay wired when off: an EST plugin, the Clipper and the Transient Shaper.
+ * Their latency is the same on and off, so a bypass never moves the sound in time.
+ */
+export const bypassesInside = (type: FxType) => type === 'est' || type === 'clipper' || type === 'transientShaper';
+/** 1.578: whether an insert is in a chain's graph: on, or one that bypasses inside itself. */
+export const fxWired = (f: { type: FxType; on: boolean }) => f.on || bypassesInside(f.type);
+/** 1.578: the Clipper's oversampling choices (the `oversample` parameter's labels, by index). */
+export const CLIPPER_OVERSAMPLE = ['2×', '4×', '8×'] as const;
+
 export const BUILT_IN_FX_TYPES = FX_TYPES.filter((t): t is Exclude<FxType, 'est'> => t !== 'est');
 export type BuiltInFxType = Exclude<FxType, 'est'>;
 
@@ -268,6 +281,40 @@ export const FX_DEFS: Readonly<Record<FxType, FxDef>> = Object.freeze({
     { key: 'rate', label: 'Rate', min: 200, max: 48000, default: 11025, log: true, unit: 'Hz' },
     mix(1),
   ] },
+  // 1.578: Live 13's Clipper (clipper.ts, the `cyber-clipper` worklet): Input and Output are a-rate
+  // gains in the worklet, Ceiling and Shape k-rate, so each takes a lane; Oversampling is a choice.
+  clipper: { type: 'clipper', name: 'Clipper', group: 'Dynamics', blurb: 'Clips every peak at the ceiling, from a hard clip to a soft knee, oversampled so the clip stays clean.', params: [
+    { key: 'drive', label: 'Input', min: -24, max: 24, default: 0, unit: 'dB' },
+    { key: 'ceiling', label: 'Ceiling', min: -24, max: 0, default: 0, unit: 'dB' },
+    { key: 'shape', label: 'Shape', min: 0, max: 1, default: 0, unit: '%' },
+    { key: 'output', label: 'Output', min: -24, max: 12, default: 0, unit: 'dB' },
+    { key: 'oversample', label: 'Oversampling', min: 0, max: CLIPPER_OVERSAMPLE.length - 1, default: 1, choices: CLIPPER_OVERSAMPLE },
+  ] },
+  // 1.578: Live 13's Transient Shaper (transientShaper.ts, the `cyber-transient` worklet): Attack,
+  // Sustain and Speed k-rate, Output an a-rate gain, so each takes a lane; Lookahead is a choice.
+  transientShaper: { type: 'transientShaper', name: 'Transient Shaper', group: 'Dynamics', blurb: 'Turns the attacks and the tails of a sound up or down, by level alone: no threshold to set.', params: [
+    { key: 'attack', label: 'Attack', min: -1, max: 1, default: 0, unit: '%' },
+    { key: 'sustain', label: 'Sustain', min: -1, max: 1, default: 0, unit: '%' },
+    { key: 'speed', label: 'Speed', min: 0, max: 1, default: 0.5, unit: '%' },
+    { key: 'output', label: 'Output', min: -24, max: 12, default: 0, unit: 'dB' },
+    { key: 'lookahead', label: 'Lookahead', min: 0, max: 1, default: 0, choices: ['Off', 'On'] },
+  ] },
+  // 1.601: LOOPGRAB (loopGrab.ts, the `cyber-loopgrab` worklet): Grab and the knobs are the
+  // worklet's k-rate AudioParams, so each takes a lane (a lane on Grab is how a grab is written into
+  // the song); Length, Repeat, Reverse and Hold are choices. Its grid is the song clock's (songClock.ts).
+  loopGrab: { type: 'loopGrab', name: 'LOOPGRAB', group: 'Performance', blurb: 'Always listening: Grab loops the last 1/32 to 4 bars on the beat, with repeats, gate, pitch, decay, reverse and a filter sweep. Chance grabs by itself.', params: [
+    { key: 'grab', label: 'Grab', min: 0, max: 1, default: 0, unit: '' },
+    { key: 'length', label: 'Length', min: 0, max: LOOPGRAB_LENGTHS.length - 1, default: 1, choices: LOOPGRAB_LENGTHS },
+    { key: 'repeat', label: 'Repeat', min: 0, max: LOOPGRAB_REPEATS.length - 1, default: 0, choices: LOOPGRAB_REPEATS },
+    { key: 'gate', label: 'Gate', min: 0.05, max: 1, default: 1, unit: '%' },
+    { key: 'pitch', label: 'Pitch', min: -24, max: 24, default: 0, unit: '' },
+    { key: 'decay', label: 'Decay', min: 0, max: 1, default: 0, unit: '%' },
+    { key: 'filter', label: 'Filter', min: -1, max: 1, default: 0, unit: '%' },
+    { key: 'chance', label: 'Chance', min: 0, max: 1, default: 0, unit: '%' },
+    mix(1),
+    { key: 'reverse', label: 'Reverse', min: 0, max: 1, default: 0, choices: ['Off', 'On'] },
+    { key: 'hold', label: 'Hold', min: 0, max: 1, default: 0, choices: ['Off', 'On'] },
+  ] },
   utility: { type: 'utility', name: 'Utility', blurb: 'Gain, stereo width, mono.', params: [
     { key: 'gain', label: 'Gain', min: -24, max: 24, default: 0, unit: 'dB' },
     { key: 'width', label: 'Width', min: 0, max: 2, default: 1, unit: '%' },
@@ -295,6 +342,15 @@ export const FX_DEFS: Readonly<Record<FxType, FxDef>> = Object.freeze({
     { key: 'depth', label: 'Depth', min: 0, max: 1, default: 1, unit: '%', automatable: false },
     { key: 'phase', label: 'Phase', min: 0, max: 1, default: 0, unit: '%', automatable: false },
     ...Array.from({ length: SHAPER_STEPS }, (_, i): FxParamDef => ({ key: `s${i}`, label: `Step ${i + 1}`, min: -1, max: 1, default: Math.round(Math.sin((2 * Math.PI * i) / SHAPER_STEPS) * 100) / 100, automatable: false })),
+  ] },
+  // 1.543: Live's Audio Effect Rack (src/audio/rack/fxRackTypes.ts): its macros' values and the chain
+  // selector are its parameters (so lanes, MIDI learn and modulators reach them); its chains are `FxSlot.rack`.
+  // 1.600: 32 macros' values (`m0`…`m31`), offered only while shown (`fxRackKeyShown`).
+  fxRack: { type: 'fxRack', name: 'Audio Effect Rack', group: 'Racks', blurb: 'Parallel chains of effects, each with its own volume, pan and select zone, and up to 32 macros that turn several parameters at once.', params: [
+    ...Array.from({ length: FX_RACK_MAX_MACROS }, (_, i): FxParamDef => ({ key: `m${i}`, label: `Macro ${i + 1}`, min: 0, max: 1, default: 0, unit: '%' })),
+    { key: 'sel', label: 'Chain select', min: 0, max: FX_RACK_SEL_MAX, default: 0, unit: '' },
+    // 1.576: the crossovers of a Multiband rack (`split: 'bands'`; read only while it cuts that many bands).
+    ...defaultCrossovers(FX_RACK_MAX_BANDS).map((d, k): FxParamDef => ({ key: `x${k}`, label: `Crossover ${k + 1}`, min: FX_RACK_XOVER_MIN, max: FX_RACK_XOVER_MAX, default: d, log: true, unit: 'Hz' })),
   ] },
   // EST Phase 2: an installed plugin's parameters are its own (CLAP ids, `FxSlot.est.params`), none here.
   est: { type: 'est', name: 'EST plugin', blurb: 'An installed EST plugin.', params: [] },
@@ -338,6 +394,8 @@ export interface FxSlot {
    * `addEstInsert`, `setEstParams` and `setEstState`.
    */
   est?: EstSlotBlock;
+  /** 1.543: an `'fxRack'` slot's chains, macro names and maps (fxRackTypes.ts); absent on every other type. */
+  rack?: FxRackModel;
 }
 export const MAX_FX = 6;
 
@@ -359,8 +417,15 @@ export function newFxId(): string {
 
 /** The slot's parameters at its type's defaults (an `'est'` slot has none here: see `estSlotFor`). */
 export function defaultFx(type: FxType, id = newFxId()): FxSlot {
+  if (type === 'fxRack') return { id, type, on: true, params: fxRackDefaultParams(), rack: sanitiseFxRackModel({ chains: [makeFxChain([], 'Chain 1')] }, FX_RACK_RULES) };
   return { id, type, on: true, params: Object.fromEntries(FX_DEFS[type].params.map(p => [p.key, p.default])) };
 }
+
+/** 1.543: the insert rules a rack's sanitiser is given (one insert; an automatable parameter's range). */
+export const FX_RACK_RULES = {
+  slot: (raw: unknown) => sanitiseFx(raw),
+  range: (slot: FxSlot, key: string) => { const p = FX_DEFS[slot.type].params.find(x => x.key === key); return p && isAutomatable(p) ? { min: p.min, max: p.max } : null; },
+};
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 /**
@@ -395,6 +460,15 @@ export function sanitiseFx(raw: unknown): FxSlot | null {
     params[p.key] = n;
   }
   const slot: FxSlot = { id: r.id, type: def.type, on: r.on !== false, params };
+  // 1.543: a rack's chains (never another rack inside: `fxRackTakes`).
+  if (def.type === 'fxRack') {
+    slot.rack = sanitiseFxRackModel(r.rack, FX_RACK_RULES);
+    // 1.576: a Multiband rack's crossovers in order and spaced (a lane's values are kept between their neighbours as they play).
+    const n = fxRackBands(slot.rack);
+    if (n) slotCrossovers(params, n).forEach((v, k) => { params[fxRackXoverKey(k)] = v; });
+    // 1.600: a value for each macro the rack holds (`m0`…, 8 for every rack before 1.600, up to 32), none past them.
+    for (let i = slot.rack.macros.length; i < FX_RACK_MAX_MACROS; i++) delete params[`m${i}`];
+  }
   // 1.374: a modulator's targets, kept only when it has some.
   if (isModulatorType(def.type)) { const mod = sanitiseModTargets(r.mod); if (mod.length) slot.mod = mod; }
   const key = typeof r.keyTrackId === 'string' && ID_RE.test(r.keyTrackId) ? r.keyTrackId : null;

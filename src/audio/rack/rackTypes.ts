@@ -5,6 +5,10 @@ import { defaultWavePatch, sanitiseWavePatch, type WavePatch } from '../wave/wav
 import { defaultSamplerPatch, samplerHashes, sanitiseSamplerPatch, type SamplerPatch } from '../sampler/samplerTypes';
 import { hash32, hashString, sanitiseMidiFxList, type MidiFx } from '../../sequencer/midiFx';
 import { sanitiseFx, takesKey, type FxSlot } from '../mixer/fxDefs';
+import { FULL_SEL, RACK_SEL_MAX, distributedZones, isFullSel, sanitiseZone, zoneGain, type RackZone } from './zones';
+import { MACROS_DEFAULT, MACROS_MAX, MACRO_INDEX_RE, macroListLength, sanitiseMacroCount, stepMacroCount } from './macroCount';
+
+export { FULL_SEL, RACK_SEL_MAX, sanitiseZone, zoneGain, type RackZone };
 
 /**
  * 1.356 (Cyber_Instruments_MIDI_Work_Order.md, stream 9; Cyber_Instrument_Rack_Design.md): the
@@ -28,13 +32,14 @@ export const isRackChainEngine = (e: unknown): e is RackChainEngine => e === 'an
 export const RACK_MAX_CHAIN_FX = 4;
 
 export const RACK_MAX_CHAINS = 8;
-export const RACK_MACROS = 8;
+/** The macros a rack shows by default (every rack before 1.600) and its macro list's least length. */
+export const RACK_MACROS = MACROS_DEFAULT;
+/** 1.600: the most macros a rack holds (Live 13's 32). */
+export const RACK_MAX_MACROS = MACROS_MAX;
 export const RACK_MAX_MAPS = 8;
 export const RACK_MIN_DB = -60;
 export const RACK_MAX_DB = 6;
 
-/** A zone: notes (or velocities) `lo`…`hi` inclusive, fading in over `fadeLo` steps above `lo` and out over `fadeHi` below `hi`. */
-export interface RackZone { lo: number; hi: number; fadeLo: number; fadeHi: number }
 
 export type RackChainPatch = SynthPatch | FmPatch | ChipPatch | WavePatch | SamplerPatch;
 
@@ -73,11 +78,9 @@ export interface RackMacro {
   exclude?: boolean;
 }
 
-/** 1.386: a macro variation, Live's: the eight macros' values kept under a name, recalled in one click. */
+/** 1.386: a macro variation, Live's: the macros' values kept under a name, recalled in one click (1.600: as many values as the rack's macros when stored). */
 export interface RackVariation { name: string; values: number[] }
 export const RACK_MAX_VARIATIONS = 16;
-/** 1.386: the chain selector's range (Live's 0–127). */
-export const RACK_SEL_MAX = 127;
 
 export interface RackPatch {
   v: 1;
@@ -87,8 +90,10 @@ export interface RackPatch {
   selected: number;
   /** 1.386: the chain selector, 0–RACK_SEL_MAX (absent: 0). Read through `rackSelector`. */
   selector?: number;
-  /** 1.386: the macro (0–7) that sets the chain selector (its value × 127), so its lane and MIDI learn sweep the chains; absent: none. */
+  /** 1.386: the macro (0–7; 1.600: 0–31) that sets the chain selector (its value × 127), so its lane and MIDI learn sweep the chains; absent: none. */
   selectorMacro?: number;
+  /** 1.600: the macros shown (Show macros: 1, 2, 4, 8, 16 or 32; `macroCount.ts`); absent: 8. Read through `rackMacroCount`. */
+  macroCount?: number;
   /** 1.386: the macro variations (at most RACK_MAX_VARIATIONS); absent: none. */
   variations?: RackVariation[];
 }
@@ -135,21 +140,11 @@ export function sanitiseChainFx(raw: unknown): FxSlot[] {
   for (const r of Array.isArray(raw) ? raw : []) {
     if (out.length >= RACK_MAX_CHAIN_FX) break;
     const f = sanitiseFx(r);
-    if (!f || f.type === 'est' || seen.has(f.id)) continue;
+    if (!f || f.type === 'est' || f.type === 'fxRack' || seen.has(f.id)) continue; // 1.543: no Audio Effect Rack in a short chain
     seen.add(f.id);
     if (takesKey(f.type)) { const { keyTrackId: _k, ...rest } = f; out.push(f.type === 'cyberComp' ? rest : { ...rest, keyTrackId: null }); } else out.push(f);
   }
   return out;
-}
-
-export function sanitiseZone(raw: unknown, lo: number, hi: number): RackZone {
-  const r = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
-  const a = int(r.lo, lo, hi, lo);
-  const b = int(r.hi, lo, hi, hi);
-  const [zlo, zhi] = a <= b ? [a, b] : [b, a];
-  const span = zhi - zlo;
-  const fadeLo = int(r.fadeLo, 0, span, 0);
-  return { lo: zlo, hi: zhi, fadeLo, fadeHi: int(r.fadeHi, 0, span - fadeLo, 0) };
 }
 
 /** A new chain of `engine` (its patch the engine's default unless given), the whole keyboard and every velocity. */
@@ -202,13 +197,17 @@ function sanitiseMacro(raw: unknown, i: number, chains: readonly RackChain[]): R
   return { name: text(r.name, `Macro ${i + 1}`, 16), value: clamp(r.value, 0, 1, 0), maps, ...(r.exclude === true ? { exclude: true } : {}) };
 }
 
-/** 1.386: a variation from anything: a name and eight values 0…1 (a missing one 0). */
+/** 1.386: a variation from anything: a name and its values 0…1 (a missing one 0): eight at least (1.386's), 32 at most (1.600). */
 function sanitiseVariation(raw: unknown, i: number): RackVariation | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   const vals = Array.isArray(r.values) ? r.values : [];
-  return { name: text(r.name, `Variation ${i + 1}`, 24), values: Array.from({ length: RACK_MACROS }, (_, k) => Math.round(clamp(vals[k], 0, 1, 0) * 1000) / 1000) };
+  const n = Math.max(RACK_MACROS, Math.min(RACK_MAX_MACROS, vals.length));
+  return { name: text(r.name, `Variation ${i + 1}`, 24), values: Array.from({ length: n }, (_, k) => Math.round(clamp(vals[k], 0, 1, 0) * 1000) / 1000) };
 }
+
+/** 1.600: whether a macro holds nothing (its default name, at 0, no maps, not excluded): a hidden one past the eighth is then let go. */
+const isDefaultMacro = (m: RackMacro, i: number): boolean => m.name === `Macro ${i + 1}` && m.value === 0 && !m.maps.length && !m.exclude;
 
 /** A rack's patch from anything (a song, a peer, a preset): its limits applied; never fewer than one chain. */
 export function sanitiseRackPatch(raw: unknown): RackPatch {
@@ -222,12 +221,18 @@ export function sanitiseRackPatch(raw: unknown): RackPatch {
   }
   if (!chains.length) chains.push(makeChain('analog'));
   const macrosRaw = Array.isArray(r.macros) ? r.macros : [];
-  const macros = Array.from({ length: RACK_MACROS }, (_, i) => sanitiseMacro(macrosRaw[i], i, chains));
+  // 1.600: up to 32 macros, the list as long as `macroListLength` says (8 for every rack before 1.600).
+  const count = sanitiseMacroCount(r.macroCount);
+  const all = Array.from({ length: RACK_MAX_MACROS }, (_, i) => sanitiseMacro(macrosRaw[i], i, chains));
+  const selMacro = typeof r.selectorMacro === 'number' && Number.isInteger(r.selectorMacro) && r.selectorMacro >= 0 && r.selectorMacro < RACK_MAX_MACROS ? r.selectorMacro : undefined;
+  const macros = all.slice(0, macroListLength(count, i => i === selMacro || !isDefaultMacro(all[i]!, i)));
   const out: RackPatch = { v: 1, chains, macros, selected: int(r.selected, 0, chains.length - 1, 0) };
   // 1.386: the chain selector, its macro and the variations, each written only when set.
   const selector = int(r.selector, 0, RACK_SEL_MAX, 0);
   if (selector > 0) out.selector = selector;
-  if (typeof r.selectorMacro === 'number' && Number.isInteger(r.selectorMacro) && r.selectorMacro >= 0 && r.selectorMacro < RACK_MACROS) out.selectorMacro = r.selectorMacro;
+  if (selMacro !== undefined) out.selectorMacro = selMacro;
+  // 1.600: written only when it is not 8, so a rack from before reads back as saved.
+  if (count !== RACK_MACROS) out.macroCount = count;
   const variations: RackVariation[] = [];
   for (const v of Array.isArray(r.variations) ? r.variations : []) {
     if (variations.length >= RACK_MAX_VARIATIONS) break;
@@ -245,21 +250,9 @@ export function defaultRackPatch(first: RackChain = makeChain('analog')): RackPa
 
 // --- Routing --------------------------------------------------------------------------------------
 
-/** How much of a zone a value is in: 0 outside, 1 inside past the fades, linear across each fade. */
-export function zoneGain(z: RackZone, v: number): number {
-  if (v < z.lo || v > z.hi) return 0;
-  let g = 1;
-  if (z.fadeLo > 0 && v < z.lo + z.fadeLo) g = Math.min(g, (v - z.lo + 1) / (z.fadeLo + 1));
-  if (z.fadeHi > 0 && v > z.hi - z.fadeHi) g = Math.min(g, (z.hi - v + 1) / (z.fadeHi + 1));
-  return g;
-}
-
 /** A routed note: the chain (its index and id) and the gain of its zones (0…1]. */
 export interface RackHit { index: number; id: string; gain: number }
 
-/** 1.386: the whole selector range (a chain without a select zone of its own). */
-export const FULL_SEL: Readonly<RackZone> = { lo: 0, hi: RACK_SEL_MAX, fadeLo: 0, fadeHi: 0 };
-const isFullSel = (z: RackZone) => z.lo === 0 && z.hi === RACK_SEL_MAX && z.fadeLo === 0 && z.fadeHi === 0;
 /** 1.386: a chain's select zone (the whole range when it has none). */
 export const chainSel = (c: Pick<RackChain, 'sel'>): RackZone => c.sel ?? FULL_SEL;
 
@@ -294,16 +287,8 @@ export function rackRoute(patch: Pick<RackPatch, 'chains'> & Partial<Pick<RackPa
  * "Distribute ranges equally"), with `fade` steps of crossfade into each neighbour.
  */
 export function distributeSelect(patch: RackPatch, fade = 0): RackPatch {
-  const n = patch.chains.length;
-  const span = (RACK_SEL_MAX + 1) / n;
-  return sanitiseRackPatch({
-    ...patch,
-    chains: patch.chains.map((c, i) => {
-      const lo = Math.round(i * span), hi = Math.round((i + 1) * span) - 1;
-      const f = Math.max(0, Math.min(Math.floor((hi - lo) / 2), Math.round(fade)));
-      return { ...c, sel: { lo: Math.max(0, lo - (i > 0 ? f : 0)), hi: Math.min(RACK_SEL_MAX, hi + (i < n - 1 ? f : 0)), fadeLo: i > 0 ? f * 2 : 0, fadeHi: i < n - 1 ? f * 2 : 0 } };
-    }),
-  });
+  const zones = distributedZones(patch.chains.length, fade);
+  return sanitiseRackPatch({ ...patch, chains: patch.chains.map((c, i) => ({ ...c, sel: zones[i] })) });
 }
 
 /** 1.386: the selector set (0–127); while a macro sets it, that macro's value is set instead (one write either way). */
@@ -318,7 +303,7 @@ export function setRackSelector(patch: RackPatch, value: number): RackPatch {
 export function mapSelectorToMacro(patch: RackPatch, i: number | null): RackPatch {
   const now = rackSelector(patch);
   const { selectorMacro: _m, selector: _s, ...rest } = patch;
-  if (i === null || i < 0 || i >= RACK_MACROS) return now > 0 ? { ...rest, selector: now } : rest;
+  if (i === null || i < 0 || i >= patch.macros.length) return now > 0 ? { ...rest, selector: now } : rest;
   return setMacroValue({ ...rest, selectorMacro: i }, i, now / RACK_SEL_MAX);
 }
 
@@ -334,11 +319,11 @@ export function storeVariation(patch: RackPatch, name?: string): RackPatch {
   return { ...patch, variations: [...list, { name: text(name, `Variation ${list.length + 1}`, 24), values: macroValues(patch) }] };
 }
 
-/** Variation `i`'s values back on the macros (one patch: one write, one undo step); the same patch when there is none. */
+/** Variation `i`'s values back on the macros (one patch: one write, one undo step); the same patch when there is none. 1.600: a macro past the values it was stored with keeps its own. */
 export function recallVariation(patch: RackPatch, i: number): RackPatch {
   const v = patch.variations?.[i];
   if (!v) return patch;
-  return { ...patch, macros: patch.macros.map((m, k) => ({ ...m, value: Math.max(0, Math.min(1, v.values[k] ?? 0)) })) };
+  return { ...patch, macros: patch.macros.map((m, k) => (k < v.values.length ? { ...m, value: Math.max(0, Math.min(1, v.values[k] ?? 0)) } : m)) };
 }
 
 /** Variation `i` overwritten with the macros' values now. */
@@ -370,13 +355,29 @@ export function setMacroExclude(patch: RackPatch, i: number, exclude: boolean): 
 }
 
 /**
- * Randomize (Live's): every macro not excluded gets a value drawn from `seed` (one per press, so
- * the same seed draws the same values: a test, a peer replaying a write), rounded to 0.001. The
- * excluded keep theirs.
+ * Randomize (Live's): every shown macro (1.600: `rackMacroCount`) not excluded gets a value drawn
+ * from `seed` (one per press, so the same seed draws the same values: a test, a peer replaying a
+ * write), rounded to 0.001. The excluded and the hidden keep theirs.
  */
 export function randomizeMacros(patch: RackPatch, seed: number): RackPatch {
-  return { ...patch, macros: patch.macros.map((m, k) => (m.exclude ? m : { ...m, value: Math.round((hash32(0x7a2d, seed | 0, k) / 4294967296) * 1000) / 1000 })) };
+  const shown = rackMacroCount(patch);
+  return { ...patch, macros: patch.macros.map((m, k) => (m.exclude || k >= shown ? m : { ...m, value: Math.round((hash32(0x7a2d, seed | 0, k) / 4294967296) * 1000) / 1000 })) };
 }
+
+// --- 1.600: Show macros (1–32) ------------------------------------------------------------------
+
+/** The macros a rack shows (1, 2, 4, 8, 16 or 32; 8 when absent). */
+export const rackMacroCount = (patch: Pick<RackPatch, 'macroCount'>): number => sanitiseMacroCount(patch.macroCount);
+
+/** The rack showing `count` macros (snapped to an allowed count): the list grown to hold them, a hidden default one let go. */
+export function setRackMacroCount(patch: RackPatch, count: number): RackPatch {
+  const n = sanitiseMacroCount(count);
+  const { macroCount: _c, ...rest } = patch;
+  return sanitiseRackPatch(n === RACK_MACROS ? rest : { ...rest, macroCount: n });
+}
+
+/** Show macros + (`dir` 1) or − (−1), Live 13's. */
+export const stepRackMacroCount = (patch: RackPatch, dir: 1 | -1): RackPatch => setRackMacroCount(patch, stepMacroCount(rackMacroCount(patch), dir));
 
 /** The velocity a chain hears: the note's scaled by its zones' gain (at least 1). */
 export const routedVelocity = (velocity: number, gain: number): number => Math.max(1, Math.min(127, Math.round(velocity * gain)));
@@ -470,13 +471,14 @@ export function moveChain(patch: RackPatch, from: number, to: number): RackPatch
 
 /**
  * A macro's lane (and controller) target: the track's synth target `{ kind: 'synth', param:
- * 'macros.N.value' }`, N 0–7 (decided 1.371: the existing target shape, so lanes, MIDI learn, the
- * lane picker and the live room need no new kind). Its value is 0…1.
+ * 'macros.N.value' }`, N 0–7 (1.600: 0–31; decided 1.371: the existing target shape, so lanes, MIDI
+ * learn, the lane picker and the live room need no new kind). Its value is 0…1.
  */
 export const rackMacroPath = (i: number): string => `macros.${i}.value`;
+const MACRO_PATH_RE = new RegExp(`^macros\\.${MACRO_INDEX_RE}\\.value$`);
 /** The macro a lane's path names, or -1. */
 export function rackMacroIndex(path: string): number {
-  const m = /^macros\.([0-7])\.value$/.exec(path);
+  const m = MACRO_PATH_RE.exec(path);
   return m ? Number(m[1]) : -1;
 }
 

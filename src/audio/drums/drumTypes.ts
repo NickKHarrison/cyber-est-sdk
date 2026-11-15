@@ -2,6 +2,7 @@ import { clampParam, getPath, sanitiseSynthPatch, setPath, type SynthParam, type
 import { sanitiseFmPatch, type FmPatch } from '../fm/fmTypes';
 import { sanitiseChipPatch, type ChipPatch } from '../chip/chipTypes';
 import { defaultFx, sanitiseFx, takesKey, type FxSlot } from '../mixer/fxDefs';
+import { DRUM_SYNTH_AUTOMATABLE, DRUM_SYNTH_SHARED, drumSynthParam, sanitiseDrumSynthPatch, type DrumSynthPatch } from '../drumsynth/drumSynthTypes';
 
 /**
  * The Drum Rack's kit (1.29, Cyber_Drum_Rack_Plan.md): sixteen pads on a synth track (`engine:
@@ -27,12 +28,13 @@ export const MAX_DRUM_SAMPLE_SECONDS = 30;
 export const MAX_PAD_LAYERS = 4;
 
 /** 1.372 (part 3, stream 5): `'chip'`, an 8-BIT voice on a pad, as an FM or ANALOG voice. */
-export type DrumSource = 'empty' | 'sample' | 'fm' | 'analog' | 'chip';
-export const DRUM_SOURCES: readonly DrumSource[] = ['empty', 'sample', 'fm', 'analog', 'chip'];
-export const DRUM_SOURCE_LABELS: Record<DrumSource, string> = { empty: 'Empty', sample: 'Sample', fm: 'FM', analog: 'Analog', chip: '8-BIT' };
+/** 1.577: `'drum'`, a DRUM SYNTH voice (`drumsynth/drumSynthTypes.ts`), as the others a voice on its own worklet. */
+export type DrumSource = 'empty' | 'sample' | 'fm' | 'analog' | 'chip' | 'drum';
+export const DRUM_SOURCES: readonly DrumSource[] = ['empty', 'sample', 'drum', 'fm', 'analog', 'chip'];
+export const DRUM_SOURCE_LABELS: Record<DrumSource, string> = { empty: 'Empty', sample: 'Sample', fm: 'FM', analog: 'Analog', chip: '8-BIT', drum: 'Drum Synth' };
 /** The voice sources (a synth patch on the pad, played by its own worklet). */
-export type DrumVoiceSource = 'fm' | 'analog' | 'chip';
-export const isDrumVoice = (s: DrumSource): s is DrumVoiceSource => s === 'fm' || s === 'analog' || s === 'chip';
+export type DrumVoiceSource = 'fm' | 'analog' | 'chip' | 'drum';
+export const isDrumVoice = (s: DrumSource): s is DrumVoiceSource => s === 'fm' || s === 'analog' || s === 'chip' || s === 'drum';
 /** 1.372: a pad's own inserts, at most (a short chain, after its Pad FX). */
 export const DRUM_PAD_MAX_INSERTS = 3;
 /** 1.372: the rack's own return chains (Live's in-rack returns), each pad sending to them. */
@@ -91,6 +93,8 @@ export interface DrumPad {
   analog: SynthPatch | null;
   /** 1.372: the 8-BIT voice, for `source: 'chip'` (absent otherwise, so an older kit reads as it was). */
   chip?: ChipPatch;
+  /** 1.577: the DRUM SYNTH voice, for `source: 'drum'` (absent otherwise). */
+  drum?: DrumSynthPatch;
   /**
    * 1.372: what note a voice plays: absent (`'fixed'`), its `note` and `tune` whatever note hit the
    * pad (a drum voice); `'played'`, the note that hit it, moved by `tune` (a melodic voice).
@@ -148,7 +152,7 @@ export function sanitiseShortChain(raw: unknown, max: number): FxSlot[] {
   for (const r of Array.isArray(raw) ? raw : []) {
     if (out.length >= max) break;
     const f = sanitiseFx(r);
-    if (!f || f.type === 'est' || seen.has(f.id)) continue;
+    if (!f || f.type === 'est' || f.type === 'fxRack' || seen.has(f.id)) continue; // 1.543: no Audio Effect Rack in a short chain
     seen.add(f.id);
     if (takesKey(f.type)) { const { keyTrackId: _k, ...rest } = f; out.push(f.type === 'cyberComp' ? rest : { ...rest, keyTrackId: null }); } else out.push(f);
   }
@@ -209,7 +213,21 @@ export const DRUM_PAD_PARAMS: readonly SynthParam[] = Object.freeze([
   { path: 'fx.crush', min: 0, max: 1, default: 0, label: 'Crush' },
   ...Array.from({ length: DRUM_SENDS }, (_, i): SynthParam => ({ path: `sends.${i}`, min: 0, max: 1, default: 0, label: `Send ${'ABCD'[i]}` })),
 ]);
-const PAD_BY_PATH = new Map(DRUM_PAD_PARAMS.map(p => [p.path, p]));
+/**
+ * 1.577: a DRUM SYNTH pad's voice parameters, by their path inside the pad (`drum.tune` …, `drum.m.<k>`,
+ * the macros named by the engine through `drumPadParam`). Never in `DRUM_PAD_PARAMS`, whose every
+ * path each pad is given by the sanitiser: these live only on a `'drum'` pad.
+ */
+export const DRUM_SYNTH_PAD_PARAMS: readonly SynthParam[] = Object.freeze([
+  ...DRUM_SYNTH_SHARED.map(p => ({ ...p, path: `drum.${p.path}` })),
+  ...DRUM_SYNTH_AUTOMATABLE.filter(p => p.startsWith('m.')).map(p => ({ ...drumSynthParam(p)!, path: `drum.${p}` })),
+]);
+const PAD_BY_PATH = new Map([...DRUM_PAD_PARAMS, ...DRUM_SYNTH_PAD_PARAMS].map(p => [p.path, p]));
+/** 1.577: a pad path's parameter, a DRUM SYNTH macro named by the pad's engine (`pad` given). */
+export function drumPadParam(rel: string, pad?: Pick<DrumPad, 'drum'>): SynthParam | undefined {
+  if (rel.startsWith('drum.m.') && pad?.drum) { const p = drumSynthParam(rel.slice(5), pad.drum.engine); return p && { ...p, path: rel }; }
+  return PAD_BY_PATH.get(rel);
+}
 export const DRUM_KIT_PARAMS: readonly SynthParam[] = Object.freeze([
   { path: 'gain', min: -36, max: 12, default: 0, label: 'Kit gain', unit: 'dB' },
 ]);
@@ -231,7 +249,11 @@ export function drumParam(path: string): SynthParam | undefined {
 /** A pad's paths an automation lane can drive (on its sample): its mix, its filter and drive; the tune and decay reach the next hits. */
 export const DRUM_PAD_AUTOMATABLE: readonly string[] = Object.freeze([
   'level', 'pan', 'tune', 'decay', 'fx.filter.cutoff', 'fx.filter.resonance', 'fx.drive', 'sends.0', 'sends.1', 'sends.2', 'sends.3',
+  // 1.577: a DRUM SYNTH pad's voice (its worklet takes them as `param`; on another pad they drive nothing).
+  ...DRUM_SYNTH_AUTOMATABLE.map(p => `drum.${p}`),
 ]);
+/** 1.577: whether a pad path is a DRUM SYNTH voice's (a lane on it shows only for a `'drum'` pad). */
+export const isDrumSynthPath = (rel: string): boolean => rel.startsWith('drum.');
 
 /** Every automatable kit path. */
 export const DRUM_AUTOMATABLE: readonly string[] = Object.freeze([
@@ -335,6 +357,8 @@ export function sanitiseDrumPad(raw: unknown, i: number): DrumPad {
   out.analog = out.source === 'analog' ? sanitiseSynthPatch(r.analog) : null;
   // 1.372: the 8-BIT voice, the pitch mode, the pad's inserts and rack sends, each written only when there is one.
   if (out.source === 'chip') out.chip = sanitiseChipPatch(r.chip);
+  // 1.577: the DRUM SYNTH voice.
+  if (out.source === 'drum') out.drum = sanitiseDrumSynthPatch(r.drum);
   if (r.pitch === 'played' && isDrumVoice(out.source)) out.pitch = 'played';
   const inserts = sanitiseShortChain(r.inserts, DRUM_PAD_MAX_INSERTS);
   if (inserts.length) out.inserts = inserts;
@@ -434,9 +458,9 @@ export function padHasSound(p: DrumPad): boolean {
   return isDrumVoice(p.source) || (p.source === 'sample' && !!p.sample);
 }
 
-/** 1.372: a pad's voice patch (FM, ANALOG or 8-BIT), or null for a sample or an empty pad. */
-export function padVoice(p: DrumPad): FmPatch | SynthPatch | ChipPatch | null {
-  return p.source === 'fm' ? p.fm : p.source === 'analog' ? p.analog : p.source === 'chip' ? p.chip ?? null : null;
+/** 1.372: a pad's voice patch (FM, ANALOG or 8-BIT; 1.577 DRUM SYNTH), or null for a sample or an empty pad. */
+export function padVoice(p: DrumPad): FmPatch | SynthPatch | ChipPatch | DrumSynthPatch | null {
+  return p.source === 'fm' ? p.fm : p.source === 'analog' ? p.analog : p.source === 'chip' ? p.chip ?? null : p.source === 'drum' ? p.drum ?? null : null;
 }
 
 /**
@@ -445,7 +469,7 @@ export function padVoice(p: DrumPad): FmPatch | SynthPatch | ChipPatch | null {
  * 'played'`) from C3 (60) as the pad's note; the pad's mix, effects, choke and name stay.
  */
 export function padWithInstrument(p: DrumPad, i: number, source: DrumVoiceSource, patch: unknown, name?: string): DrumPad {
-  const { fm: _f, analog: _a, chip: _c, ...rest } = p;
+  const { fm: _f, analog: _a, chip: _c, drum: _d, ...rest } = p;
   return sanitiseDrumPad({ ...rest, source, [source]: patch, pitch: 'played', note: 60, ...(name ? { name } : {}) }, i);
 }
 

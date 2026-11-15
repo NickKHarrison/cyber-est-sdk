@@ -7,11 +7,12 @@
 - [docs/BUILD_AN_EST_PLUGIN.md](docs/BUILD_AN_EST_PLUGIN.md): start here: from nothing to a working effect with npm alone, the code inline, the rules, and what to paste into an assistant
 - [docs/PROMPT_KIT.md](docs/PROMPT_KIT.md): ready-to-paste prompts for an AI coding assistant: one per template family and cookbook recipe, and the common follow-ups (presets, a look, a click, EST-W004)
 - [docs/SHARING.md](docs/SHARING.md): sharing what you made: loading your own plugin in Cyber, a song with it, a listen link, what viewers see, what waits for Community publishing, etiquette
+- [docs/PUBLISH_ON_THE_EST_STORE.md](docs/PUBLISH_ON_THE_EST_STORE.md): from a plugin that validates to a listing on the EST Store: developer keys and your `dev.` namespace, the checks to pass, publishing, the store page, review, ratings, analytics and updates (most of it waits for Cyber's owner to open developer accounts and Community)
 - [README.md](README.md): what the kit is and the loop (`est new`, `est validate`, `est test`, `est pack`, `est dev`)
 - [docs/for-agents.md](docs/for-agents.md): the page for coding agents: the loop, the files, the limits
 - [docs/templates.md](docs/templates.md): which template to start from
 - [docs/cookbook.md](docs/cookbook.md): ten short tested plugins, each with a prompt
-- [docs/getting-started.md](docs/getting-started.md), [docs/concepts.md](docs/concepts.md), [docs/dsp-library.md](docs/dsp-library.md), [docs/ui.md](docs/ui.md), [docs/dev-host.md](docs/dev-host.md)
+- [docs/getting-started.md](docs/getting-started.md), [docs/concepts.md](docs/concepts.md), [docs/dsp-library.md](docs/dsp-library.md), [docs/ui.md](docs/ui.md), [docs/dev-host.md](docs/dev-host.md), [docs/quality.md](docs/quality.md)
 - [docs/manifest.md](docs/manifest.md) and [docs/validator-rules.md](docs/validator-rules.md): generated from the schema and the rules table
 
 ## Templates (`est new <name> <folder>`)

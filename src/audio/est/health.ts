@@ -31,7 +31,7 @@ import { estLibrary } from './library';
 import { showAppNotice } from '@/lib/appMessage';
 
 /** The processor's `stats` message, as this file reads it (`EstNode.ts`' `EstStats`, without importing it). */
-export interface EstHealthStats { blocks: number; meanUs: number; maxUs: number; faults?: number }
+export interface EstHealthStats { blocks: number; meanUs: number; maxUs: number; faults?: number; points?: number }
 
 /** What this file needs to know of the node a `stats` came from (an `AudioWorkletNode`; a test's stand-in). */
 export interface EstHealthNode { context: { sampleRate: number } }
@@ -44,6 +44,14 @@ export interface EstHealthRow {
   ctx: object;
   /** The plugin's id (`EstNodeOptions.pluginId`), '' for a fixture of the lab. */
   pluginId: string;
+  /** 1.622: the strip and slot it plays for (`EstNodeOptions.owner`), '' when the host named none (the lab, a page player). */
+  stripId: string;
+  slotId: string;
+  /**
+   * 1.622: the meter's points a block over the last window (the processor's `points`): the work the
+   * plugin did, counted exactly, where `meanUs` is read on a 1 ms clock. 0 for an unmetered module.
+   */
+  points: number;
   /** The memory pages the instance may grow to (`maxMemoryPages`, what `claimEst` counted). */
   pages: number;
   /** The last window's mean block cost (µs), and its worst. */
@@ -150,14 +158,14 @@ export const estHealthVersion = (): number => version;
  * A `stats` message from `node` (`EstNode.ts`, every instance). `info` names the plugin and its
  * pages (the node's options); `offline` (an offline render's node) is never a row.
  */
-export function noteEstStats(node: EstHealthNode, s: EstHealthStats, info: { pluginId?: string; pages?: number; offline?: boolean } = {}): void {
+export function noteEstStats(node: EstHealthNode, s: EstHealthStats, info: { pluginId?: string; owner?: { stripId: string; slotId: string }; pages?: number; offline?: boolean } = {}): void {
   if (info.offline || !node || !(s.blocks > 0)) return;
   let r = rows.get(node);
   if (!r) {
     let sampleRate = 48000;
     try { sampleRate = Number(node.context?.sampleRate) || 48000; } catch { /* a stand-in */ }
     r = {
-      node, ctx: (node.context as object) ?? node, pluginId: info.pluginId ?? '', pages: Math.max(0, (info.pages ?? 0) | 0),
+      node, ctx: (node.context as object) ?? node, pluginId: info.pluginId ?? '', stripId: info.owner?.stripId ?? '', slotId: info.owner?.slotId ?? '', points: 0, pages: Math.max(0, (info.pages ?? 0) | 0),
       meanUs: 0, maxUs: 0, worstUs: 0, blocks: 0, faults: 0, sampleRate, stoppedWhy: null, at: 0, seq: ++seq, gone: false, overMs: 0,
     };
     rows.set(node, r);
@@ -166,6 +174,7 @@ export function noteEstStats(node: EstHealthNode, s: EstHealthStats, info: { plu
   const max = Number.isFinite(s.maxUs) ? Math.max(0, s.maxUs) : 0;
   r.meanUs = mean;
   r.maxUs = max;
+  r.points = Number.isFinite(s.points) ? Math.max(0, s.points ?? 0) : 0;
   if (max > r.worstUs) r.worstUs = max;
   r.blocks += s.blocks;
   r.faults += Math.max(0, s.faults ?? 0) | 0;
@@ -216,6 +225,17 @@ export const estHealthOf = (node: EstHealthNode | null | undefined): EstHealthRo
 /** Every running row (ghosts left out), newest last: Diagnostics' Plugins table, the meter's top three. */
 export const estHealthRows = (): EstHealthRow[] => [...rows.values()].filter(r => !r.gone).sort((a, b) => a.seq - b.seq);
 
+/**
+ * 1.622: the running row of the instance a slot's host named (`EstNodeOptions.owner`), or null. A
+ * plugin instrument plays into its track's own gain, so its row is never found by that node
+ * (`status.ts`' `estHealthFor` asks here after the node).
+ */
+export function estHealthOfSlot(stripId: string, slotId: string): EstHealthRow | null {
+  let best: EstHealthRow | null = null;
+  for (const r of rows.values()) if (!r.gone && r.stripId === stripId && r.slotId === slotId && (!best || r.seq > best.seq)) best = r;
+  return best;
+}
+
 /** A plugin's name from the library, else its id, else "plugin" (a fixture of the lab). */
 export function estHealthName(row: Pick<EstHealthRow, 'pluginId'>): string {
   if (!row.pluginId) return 'plugin';
@@ -225,6 +245,9 @@ export function estHealthName(row: Pick<EstHealthRow, 'pluginId'>): string {
   } catch { return row.pluginId; }
 }
 
+/** One running plugin in the project meter (1.622: with where it plays, so the warning can offer its track's Freeze). */
+export interface EstLoadEntry { name: string; meanUs: number; share: number; stripId: string; slotId: string }
+
 export interface EstProjectLoad {
   /** Live instances claimed of the budget (`budget.ts`). */
   instances: number;
@@ -232,20 +255,23 @@ export interface EstProjectLoad {
   /** Memory pages the live pool's instances declare, of the pool. */
   pages: number;
   pagesOf: number;
-  /** The three costliest running plugins, by name and mean cost. */
-  top: { name: string; meanUs: number; share: number }[];
+  /** The three costliest running plugins, by name and mean cost (1.622: and the strip and slot each plays for, '' unnamed). */
+  top: EstLoadEntry[];
   /** Every running instance's mean cost summed (µs a block). */
   totalUs: number;
+  /** 1.622: the same as a share of a block's budget (each at its context's rate; 1 is all of the audio's time). */
+  totalShare: number;
 }
 
 /** The project meter's numbers (the master strip, the DSP chip's tooltip). */
 export function estProjectLoad(): EstProjectLoad {
   const running = estHealthRows();
   const top = running.slice().sort((a, b) => b.meanUs - a.meanUs).slice(0, 3)
-    .map(r => ({ name: estHealthName(r), meanUs: Math.round(r.meanUs), share: budgetShare(r.meanUs, r.sampleRate) }));
+    .map(r => ({ name: estHealthName(r), meanUs: Math.round(r.meanUs), share: budgetShare(r.meanUs, r.sampleRate), stripId: r.stripId, slotId: r.slotId }));
   return {
     instances: estHeld('live'), of: EST_LIVE_BUDGET, pages: estHeldPages('live'), pagesOf: EST_LIVE_MEMORY_PAGES,
     top, totalUs: Math.round(running.reduce((s, r) => s + r.meanUs, 0)),
+    totalShare: Math.round(running.reduce((s, r) => s + Math.max(0, r.meanUs) / blockBudgetUs(r.sampleRate), 0) * 100) / 100,
   };
 }
 
@@ -254,12 +280,23 @@ export function projectLoadWords(p: Pick<EstProjectLoad, 'instances' | 'of' | 'p
   return `Plugins ${p.instances} of ${p.of} · memory ${Math.round((p.pages / Math.max(1, p.pagesOf)) * 100)} %`;
 }
 
-/** The DSP chip's tooltip lines (none while no plugin runs and none is claimed). */
-export function estLoadLines(p: EstProjectLoad = estProjectLoad()): string[] {
+/**
+ * The DSP chip's tooltip lines (none while no plugin runs and none is claimed). 1.622: the heaviest
+ * plugin first, by name with where it plays (`where`: a strip's name, from the song) and its share
+ * of each block, then the costliest three.
+ */
+export function estLoadLines(p: EstProjectLoad = estProjectLoad(), where: (stripId: string) => string | null = () => null): string[] {
   if (p.instances === 0 && p.top.length === 0) return [];
   const lines = [`${projectLoadWords(p)} of the pool`];
+  const h = p.top[0];
+  if (h) lines.push(heaviestLine(h, h.stripId ? where(h.stripId) : null));
   if (p.top.length) lines.push(`Costliest: ${p.top.map(t => `${t.name} ${t.meanUs} µs`).join(' · ')}`);
   return lines;
+}
+
+/** 1.622: "Heaviest: STARDRIFT on Pad 2, 8 % of each block". */
+export function heaviestLine(h: Pick<EstLoadEntry, 'name' | 'share'>, trackName: string | null): string {
+  return `Heaviest: ${h.name}${trackName ? ` on ${trackName}` : ''}, ${Math.round(h.share * 100)} % of each block`;
 }
 
 /**
@@ -297,7 +334,7 @@ export function setEstHealthOverrideForTests(stripId: string, slotId: string, ro
   else {
     const node: EstHealthNode = { context: { sampleRate: row.sampleRate ?? 48000 } };
     overrides.set(k, {
-      node, ctx: node, pluginId: '', pages: 0, meanUs: 0, maxUs: 0, worstUs: 0, blocks: 0, faults: 0, sampleRate: 48000,
+      node, ctx: node, pluginId: '', stripId, slotId, points: 0, pages: 0, meanUs: 0, maxUs: 0, worstUs: 0, blocks: 0, faults: 0, sampleRate: 48000,
       stoppedWhy: null, at: 0, seq: 0, gone: false, overMs: 0, ...row,
     });
   }

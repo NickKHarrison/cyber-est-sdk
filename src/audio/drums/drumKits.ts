@@ -3,6 +3,7 @@ import { defaultSynthPatch, sanitiseSynthPatch, setPath, type SynthPatch } from 
 import { DRUM_PADS, emptyDrumKit, sanitiseDrumKit, type DrumKit, type DrumPad } from './drumTypes';
 import { CHIP_KIT_PADS } from './chipKit';
 import { defaultChipPatch, type ChipPatch } from '../chip/chipTypes';
+import { defaultDrumSynthPatch, type DrumSynthEngine, type DrumSynthPatch } from '../drumsynth/drumSynthTypes';
 
 /**
  * The Drum Rack's factory kits (1.29, Cyber_Drum_Rack_Plan.md §5): drums synthesised from FM
@@ -15,8 +16,8 @@ export interface DrumFactoryKit { id: string; name: string; blurb: string; kit: 
 
 type Env = [number, number, number, number];
 
-/** An FM voice: every operator off but the ones named, polyphonic, four voices. */
-function fm(changes: Record<string, unknown>, ops: Record<number, { level: number; env: Env; coarse?: number; freq?: number; wave?: string }>): FmPatch {
+/** An FM voice: every operator off but the ones named, polyphonic, four voices (1.565: exported for `padVoicePresets.ts`). */
+export function fm(changes: Record<string, unknown>, ops: Record<number, { level: number; env: Env; coarse?: number; freq?: number; wave?: string }>): FmPatch {
   let p = defaultFmPatch();
   for (let i = 0; i < 6; i++) p = setFmValue(p, `ops.${i}.on`, false);
   p = setFmValue(p, 'voice.voices', 4);
@@ -33,8 +34,8 @@ function fm(changes: Record<string, unknown>, ops: Record<number, { level: numbe
   return sanitiseFmPatch(p);
 }
 
-/** An ANALOG voice: oscillators off unless named, no drift or spread, polyphonic. */
-function analog(changes: Record<string, unknown>): SynthPatch {
+/** An ANALOG voice: oscillators off unless named, no drift or spread, polyphonic (1.565: exported for `padVoicePresets.ts`). */
+export function analog(changes: Record<string, unknown>): SynthPatch {
   let p = defaultSynthPatch();
   const base: Record<string, unknown> = {
     'osc.0.on': false, 'osc.1.on': false, 'osc.2.on': false, 'osc.0.fine': 0, 'osc.1.fine': 0, 'osc.2.fine': 0,
@@ -45,33 +46,33 @@ function analog(changes: Record<string, unknown>): SynthPatch {
   return sanitiseSynthPatch(p);
 }
 
-const env = (decay: number, release = Math.min(0.3, decay * 0.6)): Env => [0.001, decay, 0, release];
+export const env = (decay: number, release = Math.min(0.3, decay * 0.6)): Env => [0.001, decay, 0, release];
 
-// --- The voices ------------------------------------------------------------------------------
+// --- The voices (1.565: exported for `padVoicePresets.ts`) ---------------------------------------
 
-const fmKick = (pitch = 24, decay = 0.5) => fm({ 'pitchEnv.amount': pitch, 'pitchEnv.time': 0.07, gain: 3 }, { 0: { level: 1, env: env(decay) }, 1: { level: 0.12, env: env(0.03) } });
-const fmTom = (decay = 0.45) => fm({ 'pitchEnv.amount': 9, 'pitchEnv.time': 0.12 }, { 0: { level: 0.95, env: env(decay) }, 1: { level: 0.1, env: env(0.05) } });
+export const fmKick = (pitch = 24, decay = 0.5) => fm({ 'pitchEnv.amount': pitch, 'pitchEnv.time': 0.07, gain: 3 }, { 0: { level: 1, env: env(decay) }, 1: { level: 0.12, env: env(0.03) } });
+export const fmTom = (decay = 0.45) => fm({ 'pitchEnv.amount': 9, 'pitchEnv.time': 0.12 }, { 0: { level: 0.95, env: env(decay) }, 1: { level: 0.1, env: env(0.05) } });
 /** 4-OP algorithm 8 (all four heard): a body on operator 1, the feedback operator 4 as noise. */
-const fmSnare = (body: number, noise: number, decay = 0.16) => fm({ algorithm: 7, feedback: 1, 'pitchEnv.amount': 5, 'pitchEnv.time': 0.03 }, {
+export const fmSnare = (body: number, noise: number, decay = 0.16) => fm({ algorithm: 7, feedback: 1, 'pitchEnv.amount': 5, 'pitchEnv.time': 0.03 }, {
   0: { level: 0.8, env: env(decay * 0.75), freq: body }, 3: { level: 0.7, env: env(decay), freq: noise },
 });
 /** 4-OP algorithm 6 (4 into 1, 2 and 3): three inharmonic partials struck by a noisy operator 4. */
-const fmMetal = (decay: number, level = 0.5, fb = 0.6) => fm({ algorithm: 5, feedback: fb }, {
+export const fmMetal = (decay: number, level = 0.5, fb = 0.6) => fm({ algorithm: 5, feedback: fb }, {
   0: { level, env: env(decay), freq: 3150 }, 1: { level, env: env(decay), freq: 4530 }, 2: { level, env: env(decay), freq: 6270 }, 3: { level: 0.8, env: env(decay), freq: 8190 },
 });
-const fmStick = () => fm({ gain: -4 }, { 0: { level: 0.9, env: env(0.04), freq: 1750 }, 1: { level: 0.5, env: env(0.02), freq: 2650 } });
-const fmClap = () => fm({ algorithm: 7, feedback: 1, gain: -2 }, { 3: { level: 0.9, env: env(0.22), freq: 1500 } });
+export const fmStick = () => fm({ gain: -4 }, { 0: { level: 0.9, env: env(0.04), freq: 1750 }, 1: { level: 0.5, env: env(0.02), freq: 2650 } });
+export const fmClap = () => fm({ algorithm: 7, feedback: 1, gain: -2 }, { 3: { level: 0.9, env: env(0.22), freq: 1500 } });
 /** 4-OP algorithm 5 (2 into 1, 4 into 3): two bell pairs. */
-const fmRide = () => fm({ algorithm: 4, gain: -4 }, {
+export const fmRide = () => fm({ algorithm: 4, gain: -4 }, {
   0: { level: 0.6, env: env(1.3, 0.6), freq: 3800 }, 1: { level: 0.3, env: env(0.9), freq: 5310 }, 2: { level: 0.35, env: env(1.1, 0.6), freq: 7420 }, 3: { level: 0.4, env: env(0.8), freq: 9510 },
 });
 
-const anKick = () => analog({ 'osc.0.on': true, 'osc.0.wave': 'triangle', 'osc.0.level': 1, 'filter.cutoff': 260, 'filter.resonance': 0.1, 'filter.envAmount': 0.6, 'filterEnv.decay': 0.05, 'ampEnv.decay': 0.45, 'ampEnv.release': 0.1 });
-const anSnare = () => analog({ 'osc.0.on': true, 'osc.0.wave': 'triangle', 'osc.0.level': 0.55, 'noise.level': 0.85, 'filter.cutoff': 5200, 'filter.resonance': 0.1, 'filter.envAmount': 0.3, 'filterEnv.decay': 0.12, 'ampEnv.decay': 0.18, 'ampEnv.release': 0.14 });
-const anClap = () => analog({ 'noise.level': 1, 'filter.cutoff': 1900, 'filter.resonance': 0.35, 'filter.envAmount': 0.2, 'filterEnv.decay': 0.1, 'ampEnv.decay': 0.24, 'ampEnv.release': 0.16 });
-const anHat = (decay: number) => analog({ 'noise.level': 1, 'filter.cutoff': 14000, 'filter.resonance': 0.05, 'ampEnv.decay': decay, 'ampEnv.release': Math.min(0.3, decay * 0.6), velToFilter: 0 });
-const anTom = () => analog({ 'osc.0.on': true, 'osc.0.wave': 'triangle', 'osc.0.level': 0.9, 'osc.1.on': true, 'osc.1.wave': 'triangle', 'osc.1.level': 0.4, 'osc.1.fine': 9, 'filter.cutoff': 700, 'filter.envAmount': 0.45, 'filterEnv.decay': 0.08, 'ampEnv.decay': 0.4, 'ampEnv.release': 0.15 });
-const anBlip = () => analog({ 'osc.0.on': true, 'osc.0.wave': 'square', 'osc.0.level': 0.7, 'filter.cutoff': 2600, 'filter.envAmount': 0.3, 'filterEnv.decay': 0.03, 'ampEnv.decay': 0.05, 'ampEnv.release': 0.04 });
+export const anKick = () => analog({ 'osc.0.on': true, 'osc.0.wave': 'triangle', 'osc.0.level': 1, 'filter.cutoff': 260, 'filter.resonance': 0.1, 'filter.envAmount': 0.6, 'filterEnv.decay': 0.05, 'ampEnv.decay': 0.45, 'ampEnv.release': 0.1 });
+export const anSnare = () => analog({ 'osc.0.on': true, 'osc.0.wave': 'triangle', 'osc.0.level': 0.55, 'noise.level': 0.85, 'filter.cutoff': 5200, 'filter.resonance': 0.1, 'filter.envAmount': 0.3, 'filterEnv.decay': 0.12, 'ampEnv.decay': 0.18, 'ampEnv.release': 0.14 });
+export const anClap = () => analog({ 'noise.level': 1, 'filter.cutoff': 1900, 'filter.resonance': 0.35, 'filter.envAmount': 0.2, 'filterEnv.decay': 0.1, 'ampEnv.decay': 0.24, 'ampEnv.release': 0.16 });
+export const anHat = (decay: number) => analog({ 'noise.level': 1, 'filter.cutoff': 14000, 'filter.resonance': 0.05, 'ampEnv.decay': decay, 'ampEnv.release': Math.min(0.3, decay * 0.6), velToFilter: 0 });
+export const anTom = () => analog({ 'osc.0.on': true, 'osc.0.wave': 'triangle', 'osc.0.level': 0.9, 'osc.1.on': true, 'osc.1.wave': 'triangle', 'osc.1.level': 0.4, 'osc.1.fine': 9, 'filter.cutoff': 700, 'filter.envAmount': 0.45, 'filterEnv.decay': 0.08, 'ampEnv.decay': 0.4, 'ampEnv.release': 0.15 });
+export const anBlip = () => analog({ 'osc.0.on': true, 'osc.0.wave': 'square', 'osc.0.level': 0.7, 'filter.cutoff': 2600, 'filter.envAmount': 0.3, 'filterEnv.decay': 0.03, 'ampEnv.decay': 0.05, 'ampEnv.release': 0.04 });
 
 // --- Kits ------------------------------------------------------------------------------------
 
@@ -170,7 +171,17 @@ export function defaultDrumKit(): DrumKit {
   return DRUM_FACTORY[0]!.kit;
 }
 
-/** A fresh voice for a pad switched to FM or ANALOG: the kit's snare-ish starting point; 1.372, 8-BIT's own default. */
-export function defaultPadVoice(source: 'fm' | 'analog' | 'chip'): FmPatch | SynthPatch | ChipPatch {
+/** 1.577: the DRUM SYNTH engine a pad switched to Drum Synth starts on, by its General MIDI place (`GM_DRUM_NAMES`). */
+const GM_DRUM_SYNTH: readonly DrumSynthEngine[] = [
+  'kick808', 'rimshot', 'snare', 'clap', 'snare', 'tomLow', 'hatClosed', 'tomLow',
+  'hatPedal', 'tomMid', 'hatOpen', 'tomMid', 'tomHigh', 'crash', 'tomHigh', 'ride',
+];
+
+/**
+ * A fresh voice for a pad switched to FM or ANALOG: the kit's snare-ish starting point; 1.372, 8-BIT's
+ * own default; 1.577, DRUM SYNTH's engine for the pad's place (pad `i`).
+ */
+export function defaultPadVoice(source: 'fm' | 'analog' | 'chip' | 'drum', i = 0): FmPatch | SynthPatch | ChipPatch | DrumSynthPatch {
+  if (source === 'drum') return defaultDrumSynthPatch(GM_DRUM_SYNTH[i] ?? 'kick808');
   return source === 'fm' ? fmTom() : source === 'chip' ? defaultChipPatch() : anSnare();
 }

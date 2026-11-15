@@ -56,7 +56,7 @@ New to plugins, or working with a chat assistant? **[Build an EST plugin](docs/B
 8. [Porting a CLAP plugin](docs/porting-clap.md): what EST adds and what it refuses. [Porting a C++ plugin](docs/porting-cpp.md): `cpp-clap`, the toolchain, what breaks, and `est compare`. [Porting a JUCE plugin](docs/porting-juce.md): one source tree, two builds.
 9. [For coding agents](docs/for-agents.md): the loop, the files, the limits.
 10. [Vibe coding a plugin](docs/vibe-coding-guide.md): the whole path for a first-time or agent-assisted developer, and for porting a VST, AU, JUCE or CLAP plugin.
-11. [Publishing](docs/publishing.md): developer accounts, your key, `est login` and `est publish`.
+11. [Publishing](docs/publishing.md): developer accounts, your key, `est login` and `est publish`. [Publish on the EST Store](docs/PUBLISH_ON_THE_EST_STORE.md): the whole path from a plugin that validates to a store listing, step by step (built, waiting for developer accounts and Community to open).
 12. [The Plugin Studio](docs/plugin-studio.md): Cyber's browser-only path from a description to an installed plugin (built, not open yet).
 
 ## The loop

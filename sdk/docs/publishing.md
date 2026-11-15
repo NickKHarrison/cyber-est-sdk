@@ -2,6 +2,8 @@
 
 **Not open yet.** Developer accounts and the Community listing are built but closed until Cyber's owner opens them (gates 1 and 3 of Cyber's `docs/est/EST_PUBLIC_GATES.md`). Until then `est login` answers that developer accounts are not open on this server. Everything below is how it works once they are.
 
+For the whole path, from a plugin that validates to its store page, review, ratings, analytics and updates, read [Publish on the EST Store](PUBLISH_ON_THE_EST_STORE.md). This page is the command line in detail.
+
 You publish a plugin as a **developer**: a Cyber account with a name and a signing key. Your plugin then appears in every Cyber's **Available** list, in the **Community** tier, marked **Early** while it is new.
 
 ## The short version

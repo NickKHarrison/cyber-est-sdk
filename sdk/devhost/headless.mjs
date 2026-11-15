@@ -263,8 +263,12 @@ export async function runHeadless(o, io) {
       failed = true;
       line({ type: 'error', phase: 'page', message: err.message });
     });
-    page.on('response', (r) => { if (inFiles(r.url()) && r.status() >= 400) line({ type: 'ui', event: 'http', status: r.status(), url: r.url() }); });
-    page.on('requestfailed', (r) => { if (inFiles(r.url())) line({ type: 'ui', event: 'http', status: null, url: r.url(), failure: r.failure()?.errorText ?? null }); });
+    // A request that got its answer is reported by its status alone: Chromium also calls a HEAD whose
+    // answer has a length but no body (the app's origin probe, 1.630) a failed request ("net::ERR_ABORTED")
+    // after its 200, which is no fault of the plugin's files.
+    const answered = new WeakSet();
+    page.on('response', (r) => { answered.add(r.request()); if (inFiles(r.url()) && r.status() >= 400) line({ type: 'ui', event: 'http', status: r.status(), url: r.url() }); });
+    page.on('requestfailed', (r) => { if (inFiles(r.url()) && !answered.has(r)) line({ type: 'ui', event: 'http', status: null, url: r.url(), failure: r.failure()?.errorText ?? null }); });
     await page.goto(`${host.url}/?json=1&autostart=1`);
     line({ type: 'host', url: host.url, files: host.filesOrigin });
 
