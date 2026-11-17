@@ -21,12 +21,34 @@ export function defaultEqParams(): EQParams {
   };
 }
 
+/**
+ * A new Limiter (1.715: the mastering Limiter, Transparent, 4× true-peak, Auto release, fully
+ * linked). Anything saved before 1.715 has no `style` and loads as Legacy (`savedMaximizerTemplate`).
+ */
 export function defaultMaximizerParams(): MaximizerParams {
   return {
     threshold: 0,
     ceiling: -0.3,
     release: 100,
+    style: 1,
+    attack: 2,
+    autoRelease: 1,
+    oversample: 2,
+    linkTransients: 100,
+    linkRelease: 100,
+    stereoMode: 0,
+    audition: 0,
+    target: 0,
   };
+}
+
+/**
+ * The shape a saved Limiter is read against (1.715): the defaults with `style` 0 (Legacy), so a
+ * project saved before the mastering Limiter, which has no `style`, keeps the Limiter it was made
+ * with and sounds as it did.
+ */
+export function savedMaximizerTemplate(): MaximizerParams {
+  return { ...defaultMaximizerParams(), style: 0 };
 }
 
 export function defaultSaturationParams(): SaturationParams {

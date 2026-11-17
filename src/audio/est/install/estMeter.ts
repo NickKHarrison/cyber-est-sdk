@@ -308,15 +308,33 @@ function rewriteFuel(mod: binaryen.Module, name: string, imp: string, mode: Mete
     const bulk = BULK_SIZE[KIND_OF_ID.get(id) ?? ''];
     if (bulk) {
       // The size into a local of its own, the charge, the check, then the op on that local.
+      const cls = B[bulk[0]]!;
+      // The n710 integration (1.712's finding): the size is evaluated ahead of the op, so when an operand
+      // before it writes anything (AssemblyScript's shadow stack tees the local the size reads inside the
+      // value), those operands are first set into locals of their own, in their order, so the metered op
+      // reads what the unmetered one did. Operands that only read are left in place (the rewrite as before).
+      const before = CHILDREN[bulk[0]]!.filter(([get]) => get !== bulk[1]);
+      const pre: ExprRef[] = [];
+      const sizeOp = cls[bulk[1]]!(e);
+      if (before.some(([get]) => bulkReorderClash(cls[get]!(e), sizeOp, mod))) {
+        for (const [get, set] of before) {
+          const op = cls[get]!(e);
+          const ty = binaryen.getExpressionType(op);
+          const k = params.length + vars.length;
+          vars.push(ty);
+          pre.push(mod.local.set(k, op));
+          cls[set]!(e, mod.local.get(k, ty));
+        }
+      }
       const S = params.length + vars.length;
       vars.push(binaryen.i32);
-      const cls = B[bulk[0]]!;
       const size = cls[bulk[1]]!(e);
       cls[bulk[2]]!(e, mod.local.get(S, binaryen.i32));
       // The review of #449: the size compared unsigned first (a size of 2^31 or more is a negative
       // i32, and subtracting it would add fuel); then the charge.
       const charge = () => mod.i32.add(mod.i32.const(1), mod.i32.shr_u(mod.local.get(S, binaryen.i32), mod.i32.const(BULK_SHIFT)));
       return mod.block(null, [
+        ...pre,
         mod.local.set(S, size),
         mod.if(mod.i32.ge_u(mod.i32.shr_u(mod.local.get(S, binaryen.i32), mod.i32.const(BULK_SHIFT)), getL()), mod.unreachable()),
         setL(mod.i32.sub(getL(), charge())),
@@ -464,6 +482,47 @@ const SEQUENCE_OPS = new Set<number>([
 const MEMORY_KINDS = new Set(['Load', 'Store', 'SIMDLoad', 'SIMDLoadStoreLane']);
 /** 1.405: a bulk memory op's own cost before its bytes (a call into the engine, about 5 ns even for 0 bytes). */
 const BULK_KINDS = new Set(['MemoryFill', 'MemoryCopy', 'MemoryInit']);
+/** binaryen's side-effect flags, read at run time (its typings declare an ambient const enum). */
+const SIDE_EFFECTS = (binaryen as unknown as { SideEffects: Record<'Branches' | 'Calls' | 'ReadsLocal' | 'WritesLocal' | 'ReadsGlobal' | 'WritesGlobal' | 'ReadsMemory' | 'WritesMemory' | 'ReadsTable' | 'WritesTable' | 'ImplicitTrap' | 'IsAtomic' | 'Throws' | 'DanglingPop', number> }).SideEffects;
+
+/** An expression's side effects (binaryen.js takes the module, whose features it reads; its typings say features). */
+const sideEffectsOf = (e: ExprRef, mod: binaryen.Module): number => (binaryen.getSideEffects as unknown as (e: ExprRef, m: binaryen.Module) => number)(e, mod);
+
+/** The locals (by index) and globals (by name) an expression reads and writes. */
+function touched(e: ExprRef): { rl: Set<number>; wl: Set<number>; rg: Set<string>; wg: Set<string> } {
+  const out = { rl: new Set<number>(), wl: new Set<number>(), rg: new Set<string>(), wg: new Set<string>() };
+  walk(e, x => {
+    const id = binaryen.getExpressionId(x);
+    if (id === binaryen.LocalGetId) out.rl.add((binaryen.getExpressionInfo(x) as binaryen.LocalGetInfo).index);
+    else if (id === binaryen.LocalSetId) out.wl.add((binaryen.getExpressionInfo(x) as binaryen.LocalSetInfo).index);
+    else if (id === binaryen.GlobalGetId) out.rg.add((binaryen.getExpressionInfo(x) as binaryen.GlobalGetInfo).name);
+    else if (id === binaryen.GlobalSetId) out.wg.add((binaryen.getExpressionInfo(x) as binaryen.GlobalSetInfo).name);
+    return x;
+  });
+  return out;
+}
+
+/**
+ * The n710 integration (1.712's finding): whether a bulk op's size may not be evaluated ahead of `op`, an operand
+ * before it: one writes a local or global the other reads or writes, either writes memory or a table the other
+ * reads or writes, either calls while the other touches any global, memory or table, either branches out, throws,
+ * is atomic or holds a pop, or one may trap while the other writes a global, memory or a table. An operand that
+ * only reads what the size leaves alone (AssemblyScript's usual `local.tee` of another local) stays in place.
+ */
+function bulkReorderClash(op: ExprRef, size: ExprRef, mod: binaryen.Module): boolean {
+  const F = SIDE_EFFECTS;
+  const a = sideEffectsOf(op, mod), b = sideEffectsOf(size, mod);
+  if ((a | b) & (F.Branches | F.Throws | F.IsAtomic | F.DanglingPop)) return true;
+  const shared = F.ReadsGlobal | F.WritesGlobal | F.ReadsMemory | F.WritesMemory | F.ReadsTable | F.WritesTable;
+  if ((a & F.Calls && b & (shared | F.Calls)) || (b & F.Calls && a & shared)) return true;
+  if ((a & F.WritesMemory && b & (F.ReadsMemory | F.WritesMemory)) || (b & F.WritesMemory && a & F.ReadsMemory)) return true;
+  if ((a & F.WritesTable && b & (F.ReadsTable | F.WritesTable)) || (b & F.WritesTable && a & F.ReadsTable)) return true;
+  const outer = F.WritesGlobal | F.WritesMemory | F.WritesTable;
+  if ((a & F.ImplicitTrap && b & outer) || (b & F.ImplicitTrap && a & outer)) return true;
+  const x = touched(op), y = touched(size);
+  const meets = <T>(p: Set<T>, q: Set<T>) => [...p].some(v => q.has(v));
+  return meets(x.wl, y.rl) || meets(x.wl, y.wl) || meets(y.wl, x.rl) || meets(x.wg, y.rg) || meets(x.wg, y.wg) || meets(y.wg, x.rg);
+}
 
 /** An expression's weight in a body's count (`WEIGHT`). */
 function weightOf(e: ExprRef): number {

@@ -157,11 +157,13 @@ export function standInInstance(input: Pick<ConformanceInput, 'module' | 'shim' 
     const id = req++;
     return send({ ...m, req: id }).find(x => x.type === 'reply' && x.req === id) ?? null;
   };
-  const block = (inL: Float32Array, inR: Float32Array, frame: number): { out: [Float32Array, Float32Array]; posted: Msg[] } => {
+  // 1.669 (`est replay`): `more` gives every main input channel (EST 1.1's up to 8) and the sidechain's.
+  const block = (inL: Float32Array, inR: Float32Array, frame: number, more?: { inputs?: Float32Array[]; key?: Float32Array[] }): { out: [Float32Array, Float32Array]; posted: Msg[] } => {
     const out: [Float32Array, Float32Array] = [new Float32Array(inL.length), new Float32Array(inR.length)];
     scope.currentFrame = frame;
     outbox = [];
-    proc.process([[inL, inR]], [out]);
+    const main = more?.inputs?.length ? more.inputs : [inL, inR];
+    proc.process(more?.key?.length ? [main, more.key] : [main], [out]);
     return { out, posted: outbox.splice(0) };
   };
   return { proc, boot, send, ask, block };

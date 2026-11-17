@@ -155,7 +155,7 @@ export function stateValues(bytes: Uint8Array): [number, number][] | null {
   return out;
 }
 
-interface Played { left: Float32Array; right: Float32Array; fuelPeak: number; denormals: number[]; error: string | null }
+interface Played { left: Float32Array; right: Float32Array; fuelPeak: number; denormals: number[]; error: string | null; blockUs: number[] }
 
 interface Modules { counted: WebAssembly.Module; metered: WebAssembly.Module; shim: WebAssembly.Module; bundle: EstBundle }
 
@@ -173,7 +173,7 @@ async function modulesOf(bytes: Uint8Array): Promise<Modules> {
  * at `transportOff` (an instrument with a groove of its own plays while it runs), `seconds` rendered.
  * With `counted`, the subnormal stores in each second are read from 1.437's counter.
  */
-function play(mods: Modules, which: 'counted' | 'metered', sr: number, events: Ev[], seconds: number, transportOff: number): Played {
+function play(mods: Modules, which: 'counted' | 'metered', sr: number, events: Ev[], seconds: number, transportOff: number, timed = false): Played {
   const module = which === 'counted' ? mods.counted : mods.metered;
   const Real = WebAssembly.Instance;
   let instance: WebAssembly.Instance | null = null;
@@ -192,7 +192,7 @@ function play(mods: Modules, which: 'counted' | 'metered', sr: number, events: E
   const frames = Math.round(seconds * sr);
   const left = new Float32Array(frames), right = new Float32Array(frames);
   const err = inst.boot.find(m => m.type === 'error');
-  if (!inst.boot.some(m => m.type === 'ready') || !instance) return { left, right, fuelPeak: 0, denormals: [], error: err ? `${String(err.phase)}: ${String(err.message)}` : 'it did not start' };
+  if (!inst.boot.some(m => m.type === 'ready') || !instance) return { left, right, fuelPeak: 0, denormals: [], blockUs: [], error: err ? `${String(err.phase)}: ${String(err.message)}` : 'it did not start' };
   const counter = which === 'counted' ? (instance as WebAssembly.Instance).exports[DENORMAL_COUNTER] as WebAssembly.Global : null;
   const proc = inst.proc as unknown as { blockFuel?: number; fuelLeft?: (() => number) | null; dead?: boolean };
   // The transport goes inside the `events` message (the n572 integration, 1.605's open item): the `est-plugin`
@@ -203,12 +203,15 @@ function play(mods: Modules, which: 'counted' | 'metered', sr: number, events: E
   const perSecond = Math.round(sr / F);
   const denormals: number[] = [];
   let last = 0, fuelPeak = 0, stopped = false, error: string | null = null;
+  const blockUs: number[] = [];
   for (let b = 0, at = 0; at < frames; b++, at += F) {
     if (!stopped && at >= transportOff * sr) {
       inst.send({ type: 'events', events: [{ type: 'transport', playing: false, tempo: 120, beat: (at / sr) * 2, num: 4, den: 4 }] });
       stopped = true;
     }
+    const t0 = timed ? performance.now() : 0;
     const { out, posted } = inst.block(zero, zero, at);
+    if (timed) blockUs.push((performance.now() - t0) * 1000);
     const e = posted.find(m => m.type === 'error');
     if (e || proc.dead) { error = `frame ${at}: ${e ? `${String(e.phase)}: ${String(e.message)}` : 'stopped'}`; break; }
     if (proc.fuelLeft && proc.blockFuel) fuelPeak = Math.max(fuelPeak, (proc.blockFuel - proc.fuelLeft()) / proc.blockFuel);
@@ -218,7 +221,7 @@ function play(mods: Modules, which: 'counted' | 'metered', sr: number, events: E
     if (counter && (b + 1) % perSecond === 0) { const now = counter.value as number; denormals.push(now - last); last = now; }
   }
   inst.send({ type: 'dispose' });
-  return { left, right, fuelPeak, denormals, error };
+  return { left, right, fuelPeak, denormals, error, blockUs };
 }
 
 export interface PresetQuality {
@@ -244,13 +247,31 @@ export interface PresetQuality {
   level: number | null;
   flags: string[];
   error: string | null;
+  /**
+   * 1.665: the time this machine took a block in the stealing run (the same run as `fuel`), µs: mean,
+   * 95th percentile and largest, against `budgetUs` (a 128-frame block at 48 kHz, 2667 µs). Wall time in
+   * Node on the stand-in host, so it moves with the machine; reported, never a flag here.
+   */
+  cpu?: { meanUs: number; p95Us: number; maxUs: number; budgetUs: number };
+  /**
+   * 1.665: the tail after the last note-off. `decayS`: the first time from which every 50 ms stays under
+   * `TAIL_FLOOR_DB` (null: never within `AFTER_S`); `energyDb`: the energy after the last note-off against
+   * the phrase's; `atDeclared`: the level (dBFS RMS, the half second before) at the manifest's
+   * `tailSeconds` (from the long run past `AFTER_S`, null when not looked at). Reported, never a flag here.
+   */
+  tail?: { decayS: number | null; energyDb: number; atDeclared: number | null };
 }
+
+/** 1.665: the level a tail is over once it falls under it (dBFS RMS): 60 dB down, the RT60's convention. */
+export const TAIL_FLOOR_DB = -60;
 
 export interface QualityReport {
   id: string;
   version: string;
   name: string;
   levelParam: number | null;
+  /** 1.665: the manifest's `limits.tailSeconds` (0 when it names none). */
+  tailSeconds?: number;
   presets: PresetQuality[];
 }
 
@@ -264,15 +285,19 @@ export function levelParamOf(bundle: EstBundle, profile: QualityProfile = {}): n
 const chordFor = (kind: QualityKind): number[] => (kind === 'bass' ? [36, 43] : [48, 55, 60, 64]);
 
 /** Measure every preset of an instrument bundle (or those whose names `only` holds). */
-export async function qualityOf(bytes: Uint8Array, profile: QualityProfile = {}, opts: { only?: string[]; progress?: (s: string) => void; levels?: Record<string, number> } = {}): Promise<QualityReport> {
+export async function qualityOf(bytes: Uint8Array, profile: QualityProfile = {}, opts: { only?: string[]; progress?: (s: string) => void; levels?: Record<string, number>; values?: Record<string, Record<number, number>> } = {}): Promise<QualityReport> {
   const mods = await modulesOf(bytes);
   const { bundle } = mods;
   if (bundle.manifest.kind !== 'instrument') throw new Error(`${bundle.manifest.id} is an effect: est quality measures instruments' presets`);
   const levelId = levelParamOf(bundle, profile);
   // A trial Level (dB) by preset name over its state's, to try a level change before writing it (`--levels`).
+  // Trial values (by preset name, then parameter id) over its state's, to try a preset change before
+  // writing it (1.664); a trial Level wins over a trial value of the level parameter.
   const withLevel = (name: string, v: [number, number][] | null) => {
     const lv = opts.levels?.[name];
-    return v && lv !== undefined && levelId !== null ? v.map(([id, x]) => [id, id === levelId ? lv : x] as [number, number]) : v;
+    const tv = opts.values?.[name];
+    const tried = v && tv ? v.map(([id, x]) => [id, tv[id] ?? x] as [number, number]) : v;
+    return tried && lv !== undefined && levelId !== null ? tried.map(([id, x]) => [id, id === levelId ? lv : x] as [number, number]) : tried;
   };
   const all = bundle.presets.map(p => ({ name: p.name, tags: p.tags, values: withLevel(p.name, stateValues(p.bytes)) }));
   const presets = all.filter(p => !opts.only || opts.only.includes(p.name));
@@ -318,6 +343,16 @@ export async function qualityOf(bytes: Uint8Array, profile: QualityProfile = {},
       atTail = rmsDb(long.left, long.right, long.left.length - sr / 2, long.left.length);
     }
     void startAfter;
+    // 1.665: the tail against the phrase's energy, its decay under TAIL_FLOOR_DB, and the level at the declared tail.
+    const energy = (a: number, b: number) => { let e = 0; for (let j = a; j < b; j++) e += run.left[j]! ** 2 + run.right[j]! ** 2; return e; };
+    const offAt = Math.min(run.left.length, Math.round(end * sr));
+    const energyDb = 10 * Math.log10((energy(offAt, run.left.length) + 1e-30) / (energy(0, offAt) + 1e-30));
+    const hop = Math.round(sr / 20);
+    let lastLoud = offAt;
+    for (let j = offAt; j + hop <= run.left.length; j += hop) if (rmsDb(run.left, run.right, j, j + hop) > TAIL_FLOOR_DB) lastLoud = j + hop;
+    const decayS = lastLoud + hop > run.left.length ? null : Math.round(((lastLoud - offAt) / sr) * 100) / 100;
+    const declaredAt = Math.round((end + tail) * sr);
+    const atDeclared = tail > 0 && tail <= AFTER_S && declaredAt <= run.left.length ? rmsDb(run.left, run.right, Math.max(0, declaredAt - sr / 2), declaredAt) : atTail;
 
     // Stealing: more notes held than voices (a drum kit: one key struck again and again); fuel at full polyphony.
     const stealNotes: QNote[] = [];
@@ -330,7 +365,7 @@ export async function qualityOf(bytes: Uint8Array, profile: QualityProfile = {},
       for (let j = 0; j < poly + 4; j++) stealNotes.push([0.05 + j * 0.15, base + steps[j % steps.length]! + 12 * Math.floor(j / steps.length), 2.6 - j * 0.15, 0.85]);
     }
     const stealEnd = Math.max(...stealNotes.map(n => n[0] + n[2]));
-    const st = play(mods, 'metered', sr, [...paramEvents(values), ...noteEvents(stealNotes, 1000)], stealEnd + 0.5, stealEnd);
+    const st = play(mods, 'metered', sr, [...paramEvents(values), ...noteEvents(stealNotes, 1000)], stealEnd + 0.5, stealEnd, true);
     let ordinary = 0, steal = 0;
     stealNotes.forEach(([t], j) => {
       const r = heard(clickAt(st.left, st.right, Math.round(t * sr), sr));
@@ -390,9 +425,20 @@ export async function qualityOf(bytes: Uint8Array, profile: QualityProfile = {},
       denormals, denormalsLate, alias, fuel: st.fuelPeak, stuck: { after10, after40: afterAll, atTail }, gain, flags,
       level: levelId === null ? null : (values.find(([id]) => id === levelId)?.[1] ?? null),
       error: run.error ?? st.error,
+      cpu: cpuOf(st.blockUs, sr),
+      tail: { decayS, energyDb, atDeclared },
     });
   });
-  return { id: bundle.manifest.id, version: bundle.manifest.version, name: bundle.manifest.name, levelParam: levelId, presets: out };
+  return { id: bundle.manifest.id, version: bundle.manifest.version, name: bundle.manifest.name, levelParam: levelId, tailSeconds: tail, presets: out };
+}
+
+/** 1.665: a run's block times (µs) as mean, 95th percentile and largest, against a 128-frame block's real time. */
+export function cpuOf(us: number[], sr: number): NonNullable<PresetQuality['cpu']> {
+  const budgetUs = Math.round((128 / sr) * 1e6);
+  if (!us.length) return { meanUs: 0, p95Us: 0, maxUs: 0, budgetUs };
+  const s = [...us].sort((a, b) => a - b);
+  const r = (x: number) => Math.round(x * 10) / 10;
+  return { meanUs: r(us.reduce((a, b) => a + b, 0) / us.length), p95Us: r(s[Math.min(s.length - 1, Math.floor(s.length * 0.95))]!), maxUs: r(s[s.length - 1]!), budgetUs };
 }
 
 const f1 = (x: number) => (Number.isFinite(x) ? x.toFixed(1) : '−∞');

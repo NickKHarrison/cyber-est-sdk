@@ -90,6 +90,9 @@ impl Filter {
         let v2 = self.ic2 + self.a2 * self.ic1 + self.a3 * v3;
         self.ic1 = 2.0 * v1 - self.ic1;
         self.ic2 = 2.0 * v2 - self.ic2;
+        // 1.652 (EST-C027): a state below 1e-20 (about -400 dB) is 0, so silence never runs on subnormal numbers.
+        if self.ic1.abs() < 1e-20 { self.ic1 = 0.0; }
+        if self.ic2.abs() < 1e-20 { self.ic2 = 0.0; }
         match self.mode {
             FilterMode::Low => v2,
             FilterMode::Band => self.k * v1,

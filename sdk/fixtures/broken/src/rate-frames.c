@@ -15,11 +15,14 @@
 #include "est_rt.h"
 static bool plugin_activate(const clap_plugin_t *p, double sr, uint32_t min_frames, uint32_t max_frames);
 static clap_process_status plugin_process(const clap_plugin_t *p, const clap_process_t *proc);
+static const void *plugin_get_extension(const clap_plugin_t *p, const char *id);
 #define plugin_activate(p, sr, a, b) plugin_activate_inner(p, sr, a, b)
 #define plugin_process(p, proc) plugin_process_inner(p, proc)
+#define plugin_get_extension(p, id) plugin_get_extension_inner(p, id)
 #include "gain.c"
 #undef plugin_activate
 #undef plugin_process
+#undef plugin_get_extension
 
 /* The longest echo buffer: 100 ms at 96 kHz. */
 #define ECHO_MAX 9600
@@ -51,4 +54,12 @@ static clap_process_status plugin_process(const clap_plugin_t *p, const clap_pro
       if (++echo_pos >= echo_len) echo_pos = 0;
    }
    return st;
+}
+
+/* 1.652: the echo's tail (EST-C028: an export or a freeze stops at the reported tail): the echo and a block. */
+static uint32_t rate_tail_get(const clap_plugin_t *p) { (void)p; return echo_len + 128; }
+static const clap_plugin_tail_t rate_ext_tail = { .get = rate_tail_get };
+static const void *plugin_get_extension(const clap_plugin_t *p, const char *id) {
+   if (est_streq(id, CLAP_EXT_TAIL)) return &rate_ext_tail;
+   return plugin_get_extension_inner(p, id);
 }

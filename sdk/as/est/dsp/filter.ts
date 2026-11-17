@@ -77,6 +77,9 @@ export class Filter {
     const v2 = this.ic2 + this.a2 * this.ic1 + this.a3 * v3;
     this.ic1 = 2.0 * v1 - this.ic1;
     this.ic2 = 2.0 * v2 - this.ic2;
+    // 1.652 (EST-C027): a state below 1e-20 (about -400 dB) is 0, so silence never runs on subnormal numbers.
+    if (abs<f64>(this.ic1) < 1e-20) this.ic1 = 0;
+    if (abs<f64>(this.ic2) < 1e-20) this.ic2 = 0;
     if (this.mode == FilterMode.Band) return this.k * v1;
     if (this.mode == FilterMode.High) return x - this.k * v1 - v2;
     if (this.mode == FilterMode.Notch) return x - this.k * v1;

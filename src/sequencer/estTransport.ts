@@ -49,9 +49,15 @@ export function estTransportAt(clock: Tempo, meter: Meter, w: EstTransportWindow
  * An offline render's transport events (export, bounce, freeze): one at its start and one at each
  * tempo break up to its end (a step, or every `rampStep` beats inside a ramp, each carrying its
  * ramp to the next), at render seconds `time(beat)`. The render plays once, so no loop.
+ * (1.654) And one at each meter change inside it, so a plugin's bar start and signature follow the
+ * song's meter offline as they do live (the live transport posts one a scheduler window).
  */
 export function estRenderTransport(clock: Tempo, meter: Meter, r0: number, r1: number, time: (beat: number) => number, rampStep = 1): EstTransportEvent[] {
-  const edges = [r0, ...tempoBreaks(clock, r0, r1, rampStep).filter(b => b > r0 + 1e-9 && b < r1 - 1e-9), r1];
+  const inside = (b: number) => b > r0 + 1e-9 && b < r1 - 1e-9;
+  const breaks = [...tempoBreaks(clock, r0, r1, rampStep).filter(inside), ...meter.slice(1).map(s => s.beat).filter(inside)]
+    .sort((a, b) => a - b)
+    .filter((b, i, all) => i === 0 || b - all[i - 1]! > 1e-9);
+  const edges = [r0, ...breaks, r1];
   const out: EstTransportEvent[] = [];
   for (let i = 0; i < edges.length - 1; i++) {
     const a = edges[i]!, b = edges[i + 1]!;

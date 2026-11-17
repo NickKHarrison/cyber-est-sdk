@@ -151,6 +151,20 @@ export function estProcessorMain() {
   const FADE_BLOCKS = 8;
   /** Output channels whose last sample a fault's fade starts from (a node has at most MAX_CH; the rest are spare). */
   const LAST_OUT_CHANNELS = 8;
+  /**
+   * 1.669 (the crash replayer, src/audio/est/crashCapture.ts): an opt-in instance (`capture`, a count
+   * of blocks) keeps a ring of its last `CAP_MAX` blocks at most: each block's main and sidechain
+   * input, its parameter values as the block began (as the host last set them), its transport and
+   * the events it was given (`CAP_EV` rows at most, the rest counted). Filled in `process()` without
+   * allocating (fixed arrays, made when the capture is armed); read only by a fault, which posts it
+   * as one `capture` message before its `error`. Nothing leaves the page from here.
+   *   block row (`CAP_BI` numbers): [0] block number, [1] its first frame, [2] frames, [3] events
+   *   kept, [4] events past CAP_EV, [5] 1 an untimed transport arrived before it + 2 a transport is
+   *   set, [6…19] the transport as `tr` (its anchor at [10])
+   */
+  const CAP_MAX = 64;
+  const CAP_EV = 64;
+  const CAP_BI = 20;
   const WASI = ['clock_time_get', 'random_get', 'fd_write', 'proc_exit', 'args_get', 'args_sizes_get', 'environ_get', 'environ_sizes_get'];
   const K_NOTE = 1, K_PARAM = 2, K_EXPR = 3, K_MIDI = 4, K_TR = 5, K_MOD = 6;
   /** CLAP's note expression ids the page names (`clap/events.h`). */
@@ -291,6 +305,8 @@ export function estProcessorMain() {
     sidechain?: number;
     /** EST 1.1: post the plugin's note output (`notes` messages). */
     notesOut?: boolean;
+    /** 1.669: keep the last this many blocks (at most CAP_MAX) for the crash replayer; absent or 0: none. */
+    capture?: number;
   }
   /** `norm` (EST Phase 2): a `param` event's value is 0…1 over the parameter's range, mapped here (a stepped one rounded). */
   type InEvent = {
@@ -418,6 +434,16 @@ export function estProcessorMain() {
     declare offline: boolean;
     declare offSpentMs: number;
     declare offFrames: number;
+    /** 1.669: the crash capture's ring (`CAP_MAX`'s comment): its length in blocks (0 off), the next slot, the blocks held. */
+    declare capN: number;
+    declare capPos: number;
+    declare capHeld: number;
+    declare capSlot: number;
+    declare capInfo: Float64Array;
+    declare capAudio: Float32Array;
+    declare capPv: Float64Array;
+    declare capParams: Float64Array;
+    declare capEv: Float64Array;
 
     constructor(options?: unknown) {
       super(options);
@@ -503,6 +529,15 @@ export function estProcessorMain() {
       this.nIn = 0;
       this.nOut = 0;
       this.notePorts = 0;
+      this.capN = 0;
+      this.capPos = 0;
+      this.capHeld = 0;
+      this.capSlot = -1;
+      this.capInfo = new Float64Array(0);
+      this.capAudio = new Float32Array(0);
+      this.capPv = new Float64Array(0);
+      this.capParams = new Float64Array(0);
+      this.capEv = new Float64Array(0);
       this.port.onmessage = (e: MessageEvent) => this.onMessage(e.data as { type?: string });
       const t0 = Date.now();
       try {
@@ -515,6 +550,7 @@ export function estProcessorMain() {
         this.phase = 'events';
         const initial = Array.isArray(o.events) ? o.events : [];
         for (let i = 0; i < initial.length; i++) this.queue(initial[i]!);
+        if (typeof o.capture === 'number' && o.capture >= 1) this.armCapture(o.capture);
         this.phase = 'process';
         this.port.postMessage({
           type: 'ready', params: this.params, latency: this.latency(), tail: this.tail(), compiledIn: this.compiledIn,
@@ -1130,6 +1166,7 @@ export function estProcessorMain() {
           else this.port.postMessage(ok ? { type: 'reply', req: m.req, bytes } : { type: 'reply', req: m.req, error: 'the plugin did not save its state' }, ok ? [bytes] : []);
         } else if (m.type === 'state:set') {
           const ok = this.loadState(new Uint8Array(m.bytes ?? new ArrayBuffer(0)));
+          if (ok && this.capN) this.capMirror();
           this.port.postMessage(ok ? { type: 'reply', req: m.req, ok: true } : { type: 'reply', req: m.req, error: 'the plugin refused the state' });
         } else if (m.type === 'cancelMods') {
           // EST 1.1: a modulator let go: its parameter's queued PARAM_MOD events dropped (every parameter's for none).
@@ -1454,6 +1491,7 @@ export function estProcessorMain() {
         dv.setUint32(at + H.flags, 0, true);
         n++;
       }
+      if (used && this.capSlot >= 0) this.capEvents(used);
       if (used) {
         q.copyWithin(0, used * EV, this.qLen * EV);
         this.qLen -= used;
@@ -1563,6 +1601,7 @@ export function estProcessorMain() {
         this.stat(t0);
         return true;
       }
+      if (this.capN) this.capBegin(frames);
       if (this.restart) {
         this.restart = false;
         try {
@@ -1724,13 +1763,106 @@ export function estProcessorMain() {
     die(phase: string, err: unknown, out: Float32Array[]) {
       this.fadeOut(out);
       this.keep = FADE_BLOCKS;
+      // 1.669: the capture, if armed, goes first, so the page holds it when the error arrives.
+      if (this.capN && this.capHeld && !this.errorPosted) this.postCapture(phase);
       this.fail(phase, err);
+    }
+
+    // --- 1.669: the crash capture (CAP_MAX's comment) ----------------------------------------
+
+    /** Arm the ring for `blocks` blocks (outside process(): it allocates). */
+    armCapture(blocks: number) {
+      const n = Math.max(1, Math.min(CAP_MAX, Math.floor(blocks)));
+      const ch = this.nIn + this.nSc;
+      this.capN = n;
+      this.capPos = 0;
+      this.capHeld = 0;
+      this.capSlot = -1;
+      this.capInfo = new Float64Array(n * CAP_BI);
+      this.capAudio = new Float32Array(n * (ch || 1) * FRAMES);
+      this.capPv = new Float64Array(this.params.length);
+      this.capParams = new Float64Array(n * (this.params.length || 1));
+      this.capEv = new Float64Array(n * CAP_EV * EV);
+      this.capMirror();
+    }
+
+    /** The host's view of every parameter, from the plugin (outside process()). */
+    capMirror() {
+      for (let i = 0; i < this.params.length && i < this.capPv.length; i++) this.capPv[i] = this.paramValue(this.params[i]!.id);
+    }
+
+    /** A block begins: its row, its input and its parameters into the next slot (allocation-free). */
+    capBegin(frames: number) {
+      const s = this.capPos, I = this.capInfo, b = s * CAP_BI, tr = this.tr;
+      this.capSlot = s;
+      this.capPos = s + 1 >= this.capN ? 0 : s + 1;
+      if (this.capHeld < this.capN) this.capHeld++;
+      I[b] = this.blockNo - 1;
+      I[b + 1] = currentFrame;
+      I[b + 2] = frames;
+      I[b + 3] = 0;
+      I[b + 4] = 0;
+      I[b + 5] = (this.trDirty ? 1 : 0) | (this.trSet ? 2 : 0);
+      for (let k = 0; k < 14; k++) I[b + 6 + k] = tr[k]!;
+      const ch = this.nIn + this.nSc, a = this.capAudio, n = frames < FRAMES ? frames : FRAMES;
+      for (let c = 0; c < ch; c++) {
+        const src = c < this.nIn ? this.inCh[c]! : this.scCh[c - this.nIn]!, o = (s * ch + c) * FRAMES;
+        for (let i = 0; i < n; i++) a[o + i] = src[i]!;
+      }
+      const P = this.capPv.length, pv = this.capPv, pr = this.capParams, po = s * (P || 1);
+      for (let i = 0; i < P; i++) pr[po + i] = pv[i]!;
+    }
+
+    /** The first `used` queue rows, the block's events, into its slot; parameter values into the mirror. */
+    capEvents(used: number) {
+      const s = this.capSlot, I = this.capInfo, b = s * CAP_BI, q = this.q, e = this.capEv;
+      let kept = I[b + 3]!;
+      for (let r = 0; r < used; r++) {
+        const qb = r * EV;
+        if (q[qb + 1] === K_PARAM) {
+          const id = q[qb + 3]!;
+          for (let i = 0; i < this.params.length; i++) if (this.params[i]!.id === id) { this.capPv[i] = q[qb + 4]!; break; }
+        }
+        if (kept >= CAP_EV) { I[b + 4] = I[b + 4]! + 1; continue; }
+        const o = (s * CAP_EV + kept) * EV;
+        for (let k = 0; k < EV; k++) e[o + k] = q[qb + k]!;
+        kept++;
+      }
+      I[b + 3] = kept;
+    }
+
+    /** The ring, oldest block first, as one `capture` message (a fault's: it allocates, once). */
+    postCapture(phase: string) {
+      const n = this.capHeld, ch = this.nIn + this.nSc, P = this.capPv.length;
+      const blocks = [];
+      for (let j = 0; j < n; j++) {
+        const s = (this.capPos - n + j + this.capN * 2) % this.capN, b = s * CAP_BI, I = this.capInfo;
+        const frames = I[b + 2]!, kept = I[b + 3]!;
+        const input: Float32Array[] = [], key: Float32Array[] = [], events: number[][] = [];
+        for (let c = 0; c < ch; c++) {
+          const o = (s * ch + c) * FRAMES;
+          (c < this.nIn ? input : key).push(this.capAudio.slice(o, o + (frames < FRAMES ? frames : FRAMES)));
+        }
+        for (let r = 0; r < kept; r++) { const o = (s * CAP_EV + r) * EV; events.push(Array.from(this.capEv.subarray(o, o + EV))); }
+        blocks.push({
+          block: I[b], frame: I[b + 1], frames, dropped: I[b + 4], untimedTransport: (I[b + 5]! & 1) !== 0, transportSet: (I[b + 5]! & 2) !== 0,
+          transport: Array.from(I.subarray(b + 6, b + 20)), params: Array.from(this.capParams.subarray(s * (P || 1), s * (P || 1) + P)), input, key, events,
+        });
+      }
+      const paramIds = this.params.map(p => p.id);
+      try { this.port.postMessage({ type: 'capture', phase, sampleRate, frames: FRAMES, audioIn: this.nIn, sidechainIn: this.nSc, paramIds, blocks }); } catch { /* closed */ }
     }
 
     /** The plugin's own parameter changes, to the page (allocates: only when it reported some). */
     postParams() {
       const changes = [];
       for (let i = 0; i < this.outParamLen; i++) changes.push({ id: this.outParams[2 * i], value: this.outParams[2 * i + 1] });
+      // 1.669: the plugin's own changes are the host's view too (the capture's mirror).
+      if (this.capN) {
+        for (let i = 0; i < this.outParamLen; i++) {
+          for (let j = 0; j < this.params.length; j++) if (this.params[j]!.id === this.outParams[2 * i]) { this.capPv[j] = this.outParams[2 * i + 1]!; break; }
+        }
+      }
       this.outParamLen = 0;
       this.port.postMessage({ type: 'param', changes });
     }

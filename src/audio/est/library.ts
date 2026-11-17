@@ -75,8 +75,10 @@ export interface EstInstalled {
   metered: boolean;
 }
 
+
 /** Why a slot cannot run its plugin; the placeholder card words each. 1.314 (EST-06): 'stopped', marked after a problem on this device until the card's Start (`running.ts`). */
-export type EstUnavailable = 'not-installed' | 'other-version' | 'blocked' | 'refused' | 'budget' | 'crashed' | 'stopped';
+/** 1.663: each a stopped state of instanceState.ts' machine (its `EstReason`); 'stalled' and 'slow' no longer read as 'crashed'. Kept here, not imported, so the SDK's mirror carries no new file. */
+export type EstUnavailable = 'not-installed' | 'other-version' | 'blocked' | 'refused' | 'budget' | 'crashed' | 'stopped' | 'stalled' | 'slow';
 
 export interface EstLibrary {
   /** Every installed plugin version, newest first. */
@@ -109,6 +111,12 @@ export interface EstLibrary {
    * this device: the bundle's size in bytes and the cost of a block in µs. Optional (older fakes).
    */
   stats?(ref: EstRef): { bundleBytes: number; blockUs: number } | null;
+  /**
+   * 1.672: whether this version's module is compiled and held for the page now (`module(ref)` then
+   * answers at once). Optional (older fakes): without it a precompile asks `module(ref)`, which a
+   * library caches anyway.
+   */
+  compiled?(ref: EstRef): boolean;
 }
 
 const NONE: EstLibrary = {

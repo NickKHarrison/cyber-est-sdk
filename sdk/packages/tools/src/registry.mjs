@@ -106,6 +106,7 @@ const writeCanonical = (file, obj) => { mkdirSync(dirname(file), { recursive: tr
  * 1.515 (EST Store Phase C, stream 1): the **sound packs** in `<sourceDir>/packs/<id>/pack.json` (`publishPacks`),
  * their files read from `packsRoot` (default: the repository, two folders above `sourceDir`), signed
  * into the index's `packs`. No pack folder: the index is as before (no `packs` member).
+ * 1.730: the ids in `<sourceDir>/withdrawn.json` are left out of the index (withdrawn plugins).
  * @param {{ distDir: string, sourceDir: string, outDir: string, privateKey: any, now?: Date, blocklist?: { id: string, version?: string, hash?: string, reason: string, at: string }[], expiresDays?: number, ownerKeyIds?: string[] | null, community?: { keys: any[], developers?: any[] }, packsRoot?: string }} o
  */
 export function publishRegistry({ distDir, sourceDir, outDir, privateKey, now = new Date(), blocklist = [], expiresDays = REGISTRY_EXPIRES_DAYS, ownerKeyIds = null, community = undefined, packsRoot = resolve(sourceDir, '..', '..') }) {
@@ -118,8 +119,11 @@ export function publishRegistry({ distDir, sourceDir, outDir, privateKey, now = 
   // 1.344: the registry also signs the catalogue's bundles (`<sourceDir>/catalogue.json`, written by
   // scripts/est-catalogue-add.mjs): plugins built elsewhere, in dist/ by hash like the reference
   // ones but never built into the app.
-  const reference = [...readJson(join(distDir, 'reference.json'), [])];
-  for (const c of readJson(join(sourceDir, 'catalogue.json'), [])) if (!reference.some(r => r.hash === c.hash)) reference.push(c);
+  // 1.730: `<sourceDir>/withdrawn.json` (plugin ids) names plugins the registry no longer signs: their
+  // bundles stay in dist/ and their catalogue rows stay (projects pin them), but the next index leaves them out.
+  const withdrawn = new Set(readJson(join(sourceDir, 'withdrawn.json'), []).filter(id => typeof id === 'string'));
+  const reference = readJson(join(distDir, 'reference.json'), []).filter(r => !withdrawn.has(r.id));
+  for (const c of readJson(join(sourceDir, 'catalogue.json'), [])) if (!withdrawn.has(c.id) && !reference.some(r => r.hash === c.hash)) reference.push(c);
   const before = readJson(join(v1, 'index.json'), null);
   const at = now.toISOString();
   const publishedBefore = new Map();

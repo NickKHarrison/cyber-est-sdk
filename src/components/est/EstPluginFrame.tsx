@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { noteEstInstanceFrame } from '../../audio/est/instanceState';
 import type { EstParam } from '../../audio/est/EstNode';
 import type { EstInstalled } from '../../audio/est/library';
 import type { EstEdit } from './estHooks';
@@ -50,11 +51,16 @@ import { noteEstOriginBlocked, noteEstOriginOk, probeEstOrigin, type EstProbeCod
  * 1.346: a key the frame guard handed back (`checkKeyMessage`), dispatched on the frame's element
  * as a key event of the page's, so every page listener hears it as a key pressed with the frame
  * focused (the computer keys, Space's transport, the pad keys; what they reserve, they reserve).
- * Nothing while the frame does not have the page's focus. Exported for tests.
+ * Nothing while the frame does not have the page's focus, or (1.662) the page the system's. 1.662:
+ * Escape too, so the window or dialog around the frame closes. Exported for tests.
  */
 export function playFrameKey(el: HTMLIFrameElement | null, k: FrameKey): boolean {
   // 1.495: the frame's own document (a popped-out window's popup for a frame drawn there).
   if (!el || typeof document === 'undefined' || el.ownerDocument.activeElement !== el) return false;
+  // 1.662: and that document has the system focus. The frame stays the active element while the person
+  // is in another tab, window or app (or the page's other window), and a plugin's script can post
+  // what the guard posts (the nonce is in its own address): no key then.
+  if (typeof el.ownerDocument.hasFocus === 'function' && !el.ownerDocument.hasFocus()) return false;
   el.dispatchEvent(new KeyboardEvent(k.down ? 'keydown' : 'keyup', {
     key: k.key, code: k.code, shiftKey: k.shift, repeat: k.repeat, bubbles: true, cancelable: true, composed: true,
   }));
@@ -138,7 +144,7 @@ export interface EstReadout { read: () => readonly EstParam[] | null; subscribe:
 /** CLAP's read-only flag (clap/ext/params.h). */
 const READONLY = 8;
 
-export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, rate = null, meters = null, audio = null, readout = null, onBlocked = null }: {
+export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, rate = null, meters = null, audio = null, readout = null, onBlocked = null, instance = null }: {
   installed: EstInstalled; params: readonly EstParam[]; edit: EstEdit; origin: string; title: string;
   /** The UI page's address without a fragment (`uiUrlFor`); default the bundle's on the plugin origin. */
   uiUrl?: string | null;
@@ -152,6 +158,8 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
   readout?: EstReadout | null;
   /** 1.630: the frame never answered and the plugin origin could not be read (`HANDSHAKE_MS`, `probeEstOrigin`). */
   onBlocked?: ((code: EstProbeCode) => void) | null;
+  /** 1.663: the slot whose instance this frame shows: its fallback noted on the instance's record (instanceState.ts' `frame`), never its state. */
+  instance?: { stripId: string; slotId: string } | null;
 }) {
   const ui = installed.manifest.ui!;
   const [nonce] = useState(newNonce);
@@ -186,7 +194,13 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
   const handshaken = useRef(false);
   const onBlockedRef = useRef(onBlocked);
   onBlockedRef.current = onBlocked;
+  const instanceRef = useRef(instance);
+  instanceRef.current = instance;
   const handshakeRef = useRef<() => void>(() => {});
+  /** 1.658: the frame proved it loaded (or a quiet page on a reachable origin was kept): drawn only then. */
+  const [revealed, setRevealed] = useState(false);
+  /** 1.658: the frame's load, counted: one more after a quiet first load on a reachable origin. */
+  const [attempt, setAttempt] = useState(0);
 
   // 1.551: posted as the code of the window the frame is drawn in (a popped-out window's popup), so
   // the message's `source` is the frame's parent, which is all the wrapper relays (`realmPost.ts`).
@@ -246,7 +260,6 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
     };
     sendInitRef.current = sendInit;
     const el = frame.current;
-    el?.addEventListener('load', sendInit);
     const onMessage = (e: MessageEvent) => {
       const win = frame.current?.contentWindow;
       if (!win || e.source !== win) return; // not this frame's: not ours to count
@@ -318,7 +331,6 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
     }, Math.ceil(1000 / METER_PER_SECOND));
     return () => {
       host.removeEventListener('message', onMessage);
-      el?.removeEventListener('load', sendInit);
       clearInterval(themeTimer);
       clearInterval(meterTimer);
       stopAudio();
@@ -328,17 +340,25 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
   }, [nonce]);
 
   // 1.630: the handshake's clock and the probe (see above), for each address the frame loads.
+  // 1.658 (the network failure simulation, e2e/netFail.ts): the frame is drawn hidden until it proves it
+  // loaded (`revealed`), so a blocked load never shows the browser's own error page, even for the
+  // handshake's few seconds; at `HANDSHAKE_MS` without a handshake the origin is probed **afresh** (a
+  // cached OK may be stale: the network changed since), and on a reachable origin the frame is loaded
+  // once more (`attempt`: a load that failed on a passing blip recovers with no reload of the page);
+  // only a second quiet load on a reachable origin is shown as it is (a page that says nothing).
   useEffect(() => {
     if (!src) return;
     let done = false;
     handshaken.current = false;
     setBlocked(null);
+    setRevealed(false);
     const fail = (code: EstProbeCode) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       noteEstOriginBlocked(origin, code, true);
       setBlocked(code);
+      if (instanceRef.current) noteEstInstanceFrame(instanceRef.current.stripId, instanceRef.current.slotId, 'fallback');
       onBlockedRef.current?.(code);
     };
     handshakeRef.current = () => {
@@ -346,21 +366,26 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
       handshaken.current = true;
       done = true;
       clearTimeout(timer);
+      setRevealed(true);
       noteEstOriginOk(origin);
+      if (instanceRef.current) noteEstInstanceFrame(instanceRef.current.stripId, instanceRef.current.slotId, 'own');
     };
     // review2 C-1: the frame's address is the wrapper's (`frameWrapUrl`: /est/frame/b/<hash>/…), so the bundle's hash is read there.
     const kindB = /\/est\/(?:frame\/)?b\/([0-9a-f]{64})\//.exec(src)?.[1] ?? null;
     const probe = probeEstOrigin(origin, kindB);
     void probe.then(r => { if (r.code === 'filter-redirect' || r.code === 'timeout') fail(r.code); });
     const timer = setTimeout(() => {
-      void probe.then(r => {
+      if (done) return;
+      void probeEstOrigin(origin, kindB, { fresh: true }).then(r => {
         if (done) return;
-        if (r.code === 'ok') { done = true; return; } // the origin reads: a quiet plugin page, kept
-        fail(r.code);
+        if (r.code !== 'ok') { fail(r.code); return; }
+        done = true;
+        if (attempt === 0) setAttempt(1); // the origin reads: load the frame once more
+        else setRevealed(true); // a quiet plugin page on a reachable origin, kept
       });
     }, HANDSHAKE_MS);
     return () => { done = true; clearTimeout(timer); handshakeRef.current = () => {}; };
-  }, [src, origin]);
+  }, [src, origin, attempt]);
 
   // A new sample rate (the engine's context made again): a version-2 frame hears it in a fresh est:init.
   const sentRate = useRef(rate);
@@ -402,18 +427,26 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
   }, [edit.values, params, nonce]);
 
   return (
-    <div ref={hostEl} className="flex min-h-0 flex-1 items-start justify-center overflow-auto bg-cyber-0" data-testid="est-frame-host" data-rejected={rejected} data-ui-version={version}>
-      {blocked ? <p className="p-4 text-sm" data-testid="est-frame-blocked" data-probe={blocked}>Your network blocked this plugin&apos;s own window. Sound and saving work as usual.</p> : src ? <iframe
+    <div ref={hostEl} className="relative flex min-h-0 flex-1 items-start justify-center overflow-auto bg-cyber-0" data-testid="est-frame-host" data-rejected={rejected} data-ui-version={version}>
+      {blocked ? <p role="note" className="p-4 text-sm" data-testid="est-frame-blocked" data-probe={blocked}>This plugin&apos;s own window needs the plugin site, which your network blocks. Sound and saving work as usual.</p> : src ? <>
+      {!revealed && <p role="status" className="absolute p-4 text-[11px] text-muted-foreground" data-testid="est-frame-opening">Opening the plugin&apos;s own window…</p>}
+      <iframe
+        key={attempt}
         ref={frame}
         src={src}
+        // 1.658: the wrapper's load (once per attempt: `key`), sending est:init (a frame drawn again by
+        // `attempt` is a new element, so a listener added once would never hear it).
+        onLoad={() => sendInitRef.current()}
+        data-shown={revealed ? 'true' : 'false'}
+        data-attempt={attempt}
         sandbox="allow-scripts allow-same-origin"
         allow=""
         referrerPolicy="no-referrer"
         title={title}
         data-testid="est-frame"
         className="block flex-none border-0 bg-cyber-0"
-        style={{ width: size.w, height: size.h, maxWidth: '100%' }}
-      /> : <p className="p-4 text-sm" data-testid="est-frame-unavailable">This plugin's own page is not on the plugin origin, so it cannot be shown.</p>}
+        style={{ width: size.w, height: size.h, maxWidth: '100%', visibility: revealed ? undefined : 'hidden' }}
+      /></> : <p className="p-4 text-sm" data-testid="est-frame-unavailable">This plugin's own page is not on the plugin origin, so it cannot be shown.</p>}
     </div>
   );
 }

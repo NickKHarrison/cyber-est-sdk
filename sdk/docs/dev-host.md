@@ -141,6 +141,27 @@ The head of the report gives the block's mean fuel, its mean time on this machin
 
 On EST Synth, the reference instrument, the per-sample loop over the voices (`Synth::process`, inlined into the glue's `process`) is about 92 % of the block, called once a block; the voices' filter coefficients (`Synth::control`, about 30 calls a block) and `exp` share most of the rest. That is the shape to look for: one hot loop, and what it calls more often than it needs to.
 
+## Replaying a crash: `est replay`
+
+When your plugin crashes in Cyber (its card says it stopped after a fault), `est replay` runs the blocks it was given just before, here, and names the function it trapped in.
+
+1. In Cyber, turn on **Settings → Plugins → Developer tools → Keep crash captures** (developer mode on). Plugins started after that keep their last 16 blocks in memory: each block's input, the parameter values as it began, its notes, parameter changes and transport. Nothing is sent anywhere, and only this account in this browser keeps them.
+2. When the plugin crashes, choose **Save crash capture…** in its card's menu (or its panel, or Diagnostics' Crash captures for an admin). That saves a `.estcapture.json` file on your computer.
+3. Replay it:
+
+```
+est replay crash.estcapture.json            # this folder: built and packed first
+est replay --debug crash.estcapture.json    # built once more with its function names kept
+est replay dist/x.est crash.estcapture.json # a bundle
+est replay crash.estcapture.json --json     # the report as JSON
+```
+
+It plays the capture on the same processor Cyber runs (the module metered as at install), from a fresh instance with the captured parameters, block by block with the events at their frames, until the plugin traps. The report says whether it trapped in the same block with the same message as in Cyber, the trapping function and its callers, innermost first. It exits 1 when the crash reproduced, 0 when it did not.
+
+**Names.** As for `est profile`: a release build usually strips them, so functions show as `function <index>`. `--debug` builds the folder once more with its names (AssemblyScript and Rust; clang: leave out `--strip-all` and add `-g`), never touching `dist/`; a debug build is not the exact bundle the capture was made with, and the report says so.
+
+**What it cannot replay.** The capture starts at its first block: what the plugin heard before (a delay line, a held voice, a saved state it loaded) is not in it. A crash that depends on that may not reproduce; it does when the blocks the capture holds are enough to bring it about. The file holds the audio that went into the plugin: share it only as you would that audio.
+
 ## `--ui-preview`: a UI before its DSP
 
 `est dev <folder> --ui-preview params.json` serves the folder's `ui/` (with `est-ui.js` copied in when the page names it) against the parameters in the file, a list of `{ id, name, module, min, max, def, flags, value }` as `est:init` carries them (add `"scale": "log"` to a parameter to preview a log knob). No module runs; the generated UI, the parameter list, the custom UI and its `ui` lines all work. The frame's size comes from the folder's `est.json` if it has one (else 660 × 480).

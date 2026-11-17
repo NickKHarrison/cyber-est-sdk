@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { clickAt, correlation, dcDb, inharmonicDb, integratedLufs, spectrum, truePeakDb } from '../packages/tools/src/qualityMeasures';
-import { kindOf, phraseFor, qualityOf, stateValues, TARGETS } from '../packages/tools/src/quality';
+import { cpuOf, kindOf, phraseFor, qualityOf, stateValues, TAIL_FLOOR_DB, TARGETS } from '../packages/tools/src/quality';
 
 const SR = 48000;
 const sine = (freq: number, amp: number, seconds: number, phase = 0, sr = SR) => {
@@ -127,5 +127,39 @@ describe('est quality on a catalogue instrument', () => {
     expect(p.denormals).toBe(0);
     expect(p.fuel).toBeGreaterThan(0);
     expect(p.fuel).toBeLessThan(0.75);
+    // 1.665: the block times and the tail, reported for Admin → Store → Quality.
+    expect(r.tailSeconds).toBeGreaterThanOrEqual(0);
+    expect(p.cpu!.budgetUs).toBe(2667);
+    expect(p.cpu!.meanUs).toBeGreaterThan(0);
+    expect(p.cpu!.p95Us).toBeLessThanOrEqual(p.cpu!.maxUs);
+    // A bass line that decays: under the floor before the 40 s are out, with less energy after than during.
+    expect(p.tail!.decayS).not.toBeNull();
+    expect(p.tail!.decayS!).toBeLessThan(40);
+    expect(p.tail!.energyDb).toBeLessThan(0);
   }, 120_000);
+
+  it('tries a preset\'s other values before they are written (1.664, --values), a trial Level winning over a trial value of it', async () => {
+    const catalogue = JSON.parse(readFileSync(fileURLToPath(new URL('../../est-plugins/registry/catalogue.json', import.meta.url)), 'utf8')) as { id: string; hash: string }[];
+    const row = catalogue.filter(r => r.id === 'org.nickkharrison.filmstrip').at(-1)!;
+    const bytes = new Uint8Array(readFileSync(fileURLToPath(new URL(`../../est-plugins/dist/${row.hash}/bundle.est`, import.meta.url))));
+    const only = ['Optical Bass'];
+    const base = (await qualityOf(bytes, {}, { only })).presets[0]!;
+    const level = base.level!;
+    expect(typeof level).toBe('number');
+    // FILMSTRIP's Level is parameter 0: 12 dB down by a trial value is 12 LU quieter (the output ceiling untouched there).
+    const down = (await qualityOf(bytes, {}, { only, values: { 'Optical Bass': { 0: level - 12 } } })).presets[0]!;
+    expect(down.level).toBeCloseTo(level - 12, 6);
+    expect(down.lufs).toBeLessThan(base.lufs - 11);
+    expect(down.lufs).toBeGreaterThan(base.lufs - 13);
+    const both = (await qualityOf(bytes, {}, { only, values: { 'Optical Bass': { 0: level - 12 } }, levels: { 'Optical Bass': level } })).presets[0]!;
+    expect(both.level).toBe(level);
+    expect(both.lufs).toBeCloseTo(base.lufs, 6);
+  }, 180_000);
+
+  it('1.665: cpuOf reads mean, 95th percentile and largest against a 128-frame block at the rate', () => {
+    const us = Array.from({ length: 100 }, (_, i) => i + 1);
+    expect(cpuOf(us, 48000)).toEqual({ meanUs: 50.5, p95Us: 96, maxUs: 100, budgetUs: 2667 });
+    expect(cpuOf([], 44100)).toEqual({ meanUs: 0, p95Us: 0, maxUs: 0, budgetUs: 2902 });
+    expect(TAIL_FLOOR_DB).toBe(-60);
+  });
 });

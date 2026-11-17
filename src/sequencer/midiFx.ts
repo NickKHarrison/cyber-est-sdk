@@ -3,6 +3,8 @@ import { SCALE_INTERVALS, SCALE_MODES, type Scale, type ScaleMode } from './scal
 import { fxSongScale } from './fxSongScale';
 import { automationValue } from './laneValue';
 import type { AutomationPoint } from './sequencerTypes';
+import { holdNewer, keepExtras, newerOf, unwrapNewer } from '../lib/forwardFields';
+import { MIDI_FX_FIELDS } from './songFields';
 
 /**
  * MIDI effects (1.21, Cyber_MIDI_Effects_Plan.md): a chain of up to MAX_MIDI_FX devices on a
@@ -278,8 +280,27 @@ const num = (v: unknown, min: number, max: number, d: number, int = false) => {
 const oneOf = <T extends string>(v: unknown, xs: readonly T[], d: T): T => (typeof v === 'string' && (xs as readonly string[]).includes(v) ? v as T : d);
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 
-/** One device from anything (projects, live sessions), or null when it is not one. */
-export function sanitiseMidiFx(raw: unknown): MidiFx | null {
+/**
+ * One device from anything (projects, live sessions), or null when it is not one. 1.661: a type a
+ * newer Cyber has is an inert placeholder (`isNewerMidiFx`: a Velocity device switched off, so the
+ * notes pass unchanged) holding the device as it was, given back unchanged on save; a known device
+ * keeps a newer build's fields beside its own (forwardFields.ts).
+ */
+export function sanitiseMidiFx(rawIn: unknown): MidiFx | null {
+  const raw = unwrapNewer(rawIn);
+  // (A newer build's device always has its id: one without is junk, dropped as before.)
+  if (isObj(raw) && typeof raw.type === 'string' && raw.type && !(MIDI_FX_TYPES as readonly unknown[]).includes(raw.type)) {
+    if (typeof raw.id !== 'string' || !ID_RE.test(raw.id)) return null;
+    return holdNewer(raw, { ...defaultMidiFx('velocity', raw.id), on: false }, { own: ['id'] });
+  }
+  const fx = sanitiseMidiFxKnown(raw);
+  return fx && keepExtras(raw, fx, MIDI_FX_FIELDS);
+}
+
+/** 1.661: whether a device is a placeholder of a MIDI effect type a newer Cyber has. */
+export const isNewerMidiFx = (f: object): boolean => newerOf(f) !== undefined;
+
+function sanitiseMidiFxKnown(raw: unknown): MidiFx | null {
   if (!isObj(raw) || !(MIDI_FX_TYPES as readonly unknown[]).includes(raw.type)) return null;
   const type = raw.type as MidiFxType;
   const id = typeof raw.id === 'string' && ID_RE.test(raw.id) ? raw.id : fxId();
@@ -562,7 +583,8 @@ function runChain(chain: readonly MidiFx[], start: number, played: FxNote[], key
   let notes = played;
   for (let index = start; index < chain.length; index++) {
     const fx = chain[index]!;
-    if (!fx.on || !notes.length) continue;
+    // 1.661: a placeholder of a newer Cyber's effect passes the notes through, whatever its switch says.
+    if (!fx.on || !notes.length || isNewerMidiFx(fx)) continue;
     if (fx.type === 'steps') {
       // Each step runs the rest of the chain as a note of its own, keyed by its place in the song.
       const out: FxNote[] = [];

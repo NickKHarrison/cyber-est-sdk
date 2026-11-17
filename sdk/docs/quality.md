@@ -10,6 +10,7 @@ npm run est -- quality path/to/plugin.est                         # one bundle
 npm run est -- quality est-plugins/catalogue-src/org.example.synth  # a plugin folder (built and packed first)
 npm run est -- quality a.est b.est --profile profiles.json --md report.md --json report.json
 npm run est -- quality a.est --preset "Warm Pad"                  # one preset
+npm run est -- quality a.est --preset "Warm Pad" --values try.json  # try other values before writing them
 ```
 
 It prints a Markdown table, one row a preset, and exits 1 when a preset has a finding other than its
@@ -44,6 +45,8 @@ Every kind has the same ceiling: the true peak under −1 dBTP.
 | HF | the power above 18 kHz against the fundamental's (reported) | |
 | Fuel | the heaviest block of the stealing run, a share of `BLOCK_FUEL` | over 75 % |
 | After 10 s | the level 10 s after the last note-off, and at the manifest's `tailSeconds` when not yet quiet | above −80 dBFS at both |
+| Time (reported) | the stealing run's block times on the measuring machine, µs: mean, 95th percentile and largest, against a 128-frame block at 48 kHz (2667 µs); `cpu` in the JSON | never flagged here (it moves with the machine) |
+| Tail (reported) | when every 50 ms after the last note-off stays under −60 dBFS (`decayS`), the energy after the notes against the phrase's (`energyDb`) and the level at the manifest's `tailSeconds` (`atDeclared`); `tail` in the JSON | never flagged here |
 
 ## Profiles
 
@@ -59,3 +62,21 @@ Level-match by each preset's own gain, never by compressing it: in a catalogue s
 `presets.levels.json` (`{ "levels": { "<preset name>": <Level in dB> } }`) sets presets' Level over the
 source (read by `est-plugins/catalogue-src/tools/presets.mjs`), and `est quality` again should show the
 loudness moved by the gain and the peak-to-loudness distance unchanged.
+
+When a preset is held short of its target (its Level at its top, or a raise that would only squash into the
+ceiling), change the sound's own values first, then its Level. `--values` tries values before you write them:
+`{ "values": { "<preset name>": { "<parameter id>": value } } }` (or such by plugin id), sent over the
+preset's state; a `--levels` trial wins over a trial value of the level parameter.
+
+A change of values also changes the sound's own peak-to-loudness distance (a denser layer lowers it), so
+the Level rule above cannot tell squashing from the new sound. Measure the new values twice: at the Level
+you mean to write, and 12 dB lower (the true peak far under the ceiling). The lower one's loudness plus 12,
+less the louder one's, is the ceiling's share: what the soft output ceiling took. Keep it where the preset
+as it was had it (within 0.2 LU).
+
+## The catalogue's summary
+
+Cyber's own catalogue is measured as a whole by `node scripts/est-quality-summary.mjs` (in Cyber's repository),
+which writes `est-plugins/quality/summary.json` for Admin → Store → Quality: every version's presets, flagged
+against the band (±1 LU of the kind's target), the ceiling, half the block budget, any subnormal store and a tail
+still over −60 dBFS when the declared tail ends, with the summary before kept for the trend.

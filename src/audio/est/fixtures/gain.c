@@ -3,7 +3,8 @@
  * stereo in and one stereo out port, a smoothed Gain parameter in dB (-60 to +12) and a Bypass flag,
  * clap.state save/load and clap.latency 0. trap.c and spin.c are this file with a fault on the
  * 100th process() (FIXTURE_FAULT_TRAP, FIXTURE_FAULT_SPIN); gainsimd.c is it with its samples
- * multiplied four at a time in fixed-width SIMD (FIXTURE_SIMD, built with -msimd128).
+ * multiplied four at a time in fixed-width SIMD (FIXTURE_SIMD, built with -msimd128). 1.669's
+ * crash-spike (sdk/fixtures/crash/) is it with FIXTURE_FAULT_SPIKE: a trap in `spike_guard`.
  */
 #include "est_rt.h"
 #if defined(FIXTURE_SIMD)
@@ -46,6 +47,15 @@ static const clap_plugin_descriptor_t descriptor = {
    .description = "A gain and a bypass: the EST runtime's reference effect.",
    .features = features,
 };
+
+#if defined(FIXTURE_FAULT_SPIKE)
+/* 1.669 (the crash replayer's planted fault, sdk/fixtures/crash/): traps on an input sample past
+ * 0.9 in magnitude, called only while Gain is over +6 dB, so a replay reproduces it only with the
+ * captured input and parameter changes both. Its own function, so the replayer can name it. */
+__attribute__((noinline)) static void spike_guard(float x) {
+   if (x > 0.9f || x < -0.9f) __builtin_trap();
+}
+#endif
 
 static double target_of(const gain_t *g) { return g->bypass >= 0.5 ? 1.0 : est_db_to_lin(g->gain_db); }
 
@@ -236,7 +246,12 @@ static clap_process_status plugin_process(const clap_plugin_t *p, const clap_pro
 #endif
       for (; at < until; at++) {
          g->current += (g->target - g->current) * g->coef;
-         for (uint32_t c = 0; c < chans; c++) out->data32[c][at] = (float)(in->data32[c][at] * g->current);
+         for (uint32_t c = 0; c < chans; c++) {
+#if defined(FIXTURE_FAULT_SPIKE)
+            if (g->gain_db > 6.0) spike_guard(in->data32[c][at]);
+#endif
+            out->data32[c][at] = (float)(in->data32[c][at] * g->current);
+         }
       }
       if (h) handle_event(g, h);
    }

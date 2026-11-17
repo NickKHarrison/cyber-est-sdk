@@ -114,10 +114,11 @@ describe('sdk-build: the helpers', () => {
   });
 
   it("leaves Cyber's registry commands out of the published CLI", () => {
-    expect(CLONE_ONLY).toEqual(['keygen', 'sign', 'publish']);
+    // 1.686: `release` (the store releases, scripts/est-release.mjs) is the owner's alone, with no developer version.
+    expect(CLONE_ONLY).toEqual(['keygen', 'sign', 'publish', 'release']);
     const all = commandFiles(join(REPO, PACKAGES.cli.dir));
     const shipped = commandFiles(join(REPO, PACKAGES.cli.dir), { exclude: [...CLONE_ONLY] });
-    expect(all.filter(f => !shipped.includes(f)).sort()).toEqual(['keygen.ts', 'publish.ts', 'sign.ts']);
+    expect(all.filter(f => !shipped.includes(f)).sort()).toEqual(['keygen.ts', 'publish.ts', 'release.ts', 'sign.ts']);
     expect(shipped).toEqual(expect.arrayContaining(['dev.ts', 'doctor.ts', 'new.ts', 'pack.ts', 'validate.ts']));
   });
 
@@ -126,9 +127,10 @@ describe('sdk-build: the helpers', () => {
     expect(developerFiles(pkg)).toEqual(['keygen.ts', 'publish.ts', 'sign.ts']);
     const entry = entrySource(pkg, { exclude: [...CLONE_ONLY], developer: true });
     for (const c of CLONE_ONLY) {
-      expect(entry).toContain(`'./src/developer/${c}.ts'`);
+      if (c !== 'release') expect(entry).toContain(`'./src/developer/${c}.ts'`);
       expect(entry).not.toContain(`'./src/commands/${c}.ts'`);
     }
+    expect(entry).not.toContain('release.ts');
     // The clone's own entry keeps the owner's commands and adds no developer copies.
     const clone = entrySource(pkg);
     for (const c of CLONE_ONLY) expect(clone).toContain(`'./src/commands/${c}.ts'`);

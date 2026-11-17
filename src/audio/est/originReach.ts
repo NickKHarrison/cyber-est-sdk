@@ -81,6 +81,8 @@ export function noteEstOriginOk(origin: string | null): void {
 export function noteEstOriginBlocked(origin: string | null, code: EstProbeCode, ui = false): void {
   if (!origin) return;
   why.set(origin, code);
+  // 1.658: a block learnt now outranks an earlier proof: the cached OK no longer stands for this origin.
+  if (okProbes.has(origin)) { okProbes.delete(origin); probes.set(origin, Promise.resolve<EstProbe>({ code })); }
   if (ui && !counted.has(origin)) { counted.add(origin); countFn('ui-fallback'); }
   if (reach.get(origin) === 'blocked') return;
   reach.set(origin, 'blocked');
@@ -145,11 +147,16 @@ export async function lookAt(url: string): Promise<EstProbe> {
  * Probe the plugin origin (once a visit per origin unless `retryEstOrigin`): `ok` when any of its files
  * read (a 404 with the origin's CORS header is still the origin), else the first failure's code. Marks
  * `ok` on success; a failure marks nothing (the caller decides).
+ *
+ * 1.658: `fresh` asks the network again whatever is cached (and caches that answer): a frame that has
+ * not answered in time asks afresh rather than trust an OK learnt earlier this visit, which may be stale
+ * (the network changed since: a laptop moved onto a school's filtered network, a filter's rule loaded).
  */
-export function probeEstOrigin(origin: string | null, hash: string | null = null): Promise<EstProbe> {
+export function probeEstOrigin(origin: string | null, hash: string | null = null, opts: { fresh?: boolean } = {}): Promise<EstProbe> {
   if (!origin) return Promise.resolve({ code: 'no-origin' });
-  let p = probes.get(origin);
+  let p = opts.fresh ? undefined : probes.get(origin);
   if (!p) {
+    if (opts.fresh) okProbes.delete(origin);
     p = (async () => {
       let first: EstProbe | null = null;
       for (const url of probeUrls(origin, hash)) {

@@ -270,6 +270,14 @@ then, in my-steps: npm install --save-dev --save-exact @cyber-est/cli@0.1.0
 Change: add a Gate knob (10 to 100 % of a step) and a per-step on/off; every note it starts it ends.
 ```
 
+### spectrum-tilt
+
+```
+Start with: npx @cyber-est/cli new spectrum-tilt my-tilt --id com.example.my-tilt --name "My Tilt"
+then, in my-tilt: npm install --save-dev --save-exact @cyber-est/cli@0.1.0
+Change: draw a peak-hold line over the spectrum in ui/ui.js (each bin's highest dB, falling 12 dB a second), from the bins alone.
+```
+
 ## Follow-ups
 
 Paste these into the same conversation, in the plugin's folder.

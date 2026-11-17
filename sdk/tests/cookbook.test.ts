@@ -1,6 +1,6 @@
 /**
- * DEV-F (1.321, Cyber_EST_Developers_Work_Order.md §F): the EST cookbook, sdk/cookbook/. Ten short
- * AssemblyScript plugins, each a folder `est new` can start from (`est new <entry> <dir>`). Each
+ * DEV-F (1.321, Cyber_EST_Developers_Work_Order.md §F): the EST cookbook, sdk/cookbook/. Short
+ * AssemblyScript plugins (ten, and since 1.672 the spectrum tilt, an EST 1.1 window drawing its own spectrum), each a folder `est new` can start from (`est new <entry> <dir>`). Each
  * entry's module (built by scripts/est-sdk-fixtures.sh into sdk/fixtures/cookbook/; the suite
  * needs no toolchain):
  * - passes `est validate` (`@est/tools`' `validate`: the install's checks, metered, 10 s);
@@ -25,8 +25,8 @@ const WRITE = process.env.EST_GOLDEN_WRITE === '1';
 const page = readFileSync(repo('sdk/docs/cookbook.md'), 'utf8');
 const llms = readFileSync(repo('sdk/llms.txt'), 'utf8');
 
-it('has the ten recipes the order names', () => {
-  expect(ENTRIES).toEqual(['auto-wah', 'bitcrusher', 'chorus', 'compressor', 'drum-synth', 'ring-mod', 'schroeder-reverb', 'step-sequencer', 'wavetable', 'widener']);
+it('has the ten recipes the order names, and 1.672\'s spectrum tilt', () => {
+  expect(ENTRIES).toEqual(['auto-wah', 'bitcrusher', 'chorus', 'compressor', 'drum-synth', 'ring-mod', 'schroeder-reverb', 'spectrum-tilt', 'step-sequencer', 'wavetable', 'widener']);
 });
 
 describe.each(ENTRIES)('the cookbook\'s %s', entry => {

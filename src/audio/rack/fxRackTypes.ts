@@ -1,6 +1,7 @@
 import type { FxSlot } from '../mixer/fxDefs';
 import { FULL_SEL, RACK_SEL_MAX, distributedZones, isFullSel, sanitiseZone, zoneGain, type RackZone } from './zones';
 import { MACROS_DEFAULT, MACROS_MAX, MACRO_INDEX_RE, macroListLength, sanitiseMacroCount, stepMacroCount } from './macroCount';
+import { sanitiseVariations, type RackVariation } from './variations';
 
 /**
  * 1.543: Live's **Audio Effect Rack**, an insert of type `'fxRack'` (the last item of 1.486's
@@ -52,7 +53,12 @@ export interface FxRackChain {
 
 /** A macro's mapping: an insert of a chain and one of its automatable parameters, set to `min + value · (max − min)` (display units). */
 export interface FxRackMap { chain: string; fx: string; param: string; min: number; max: number }
-export interface FxRackMacro { name: string; maps: FxRackMap[] }
+export interface FxRackMacro {
+  name: string;
+  maps: FxRackMap[];
+  /** 1.673: left alone by Randomize (Live's "exclude from randomization", as the Instrument Rack's since 1.386); absent: false. */
+  exclude?: boolean;
+}
 
 /**
  * 1.576: Live 13's Multiband and Mid-Side Racks as split modes of the one rack. Absent: the chains
@@ -76,6 +82,11 @@ export interface FxRackModel {
   selectorMacro?: number;
   /** 1.600: the macros shown (Show macros: 1, 2, 4, 8, 16 or 32; `macroCount.ts`); absent: 8. Read through `fxRackMacroCount`. */
   macroCount?: number;
+  /**
+   * 1.673: the macro variations (Live's; the work order's macro snapshots: `fxRackVariations.ts`),
+   * at most RACK_MAX_VARIATIONS, each the macros' values (the slot's `m<i>`) under a name; absent: none.
+   */
+  variations?: RackVariation[];
 }
 
 /** The slot keys of the macros' values and the selector. */
@@ -339,17 +350,20 @@ export function sanitiseFxRackModel(raw: unknown, rules: FxRackRules): FxRackMod
       taken.add(k);
       maps.push({ chain: chain.id, fx: slot.id, param: x.param as string, min: clamp(x.min, range.min, range.max, range.min), max: clamp(x.max, range.min, range.max, range.max) });
     }
-    return { name: text(m.name, `Macro ${i + 1}`, 16), maps };
+    return { name: text(m.name, `Macro ${i + 1}`, 16), maps, ...(m.exclude === true ? { exclude: true } : {}) };
   });
   // 1.600: up to 32 macros, the list as long as `macroListLength` says (8 for every rack before 1.600;
   // a hidden macro's value is the slot's `m<i>`, so a named or mapped one is what keeps it).
   const count = sanitiseMacroCount(r.macroCount);
   const selMacro = typeof r.selectorMacro === 'number' && Number.isInteger(r.selectorMacro) && r.selectorMacro >= 0 && r.selectorMacro < FX_RACK_MAX_MACROS ? r.selectorMacro : undefined;
-  const macros = all.slice(0, macroListLength(count, i => i === selMacro || all[i]!.name !== `Macro ${i + 1}` || all[i]!.maps.length > 0));
+  const macros = all.slice(0, macroListLength(count, i => i === selMacro || all[i]!.name !== `Macro ${i + 1}` || all[i]!.maps.length > 0 || !!all[i]!.exclude));
   const out: FxRackModel = { v: 1, chains, macros, selected: Math.round(clamp(r.selected, 0, chains.length - 1, 0)) };
   if (split) out.split = split;
   if (selMacro !== undefined) out.selectorMacro = selMacro;
   if (count !== FX_RACK_MACROS) out.macroCount = count;
+  // 1.673: written only when there are some, so a rack from before reads back as saved.
+  const variations = sanitiseVariations(r.variations);
+  if (variations.length) out.variations = variations;
   return out;
 }
 

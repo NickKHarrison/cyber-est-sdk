@@ -1,6 +1,6 @@
 # The cookbook
 
-Ten short plugins, each a working, validated starting point for a common job, in AssemblyScript (no native toolchain). Each is a folder in `sdk/cookbook/` with its `est.json`, `assembly/index.ts`, `asconfig.json`, a golden render in `test/` and a README; the SDK's tests validate every one (`est validate`'s checks, metered) and render its golden on every change, so the code here is tested code.
+Eleven short plugins, each a working, validated starting point for a common job, in AssemblyScript (no native toolchain). Each is a folder in `sdk/cookbook/` with its `est.json`, `assembly/index.ts`, `asconfig.json`, a golden render in `test/` and a README; the SDK's tests validate every one (`est validate`'s checks, metered) and render its golden on every change, so the code here is tested code.
 
 Start from one as from a template:
 
@@ -24,6 +24,7 @@ est validate && est test && est dev
 | [Auto-Wah](#auto-wah) | effect | An auto-wah: an envelope follower on the input sweeps a resonant band-pass filter up from Base by up to Range octaves. |
 | [Schroeder Reverb](#schroeder-reverb) | effect | A Schroeder reverb: four damped feedback combs in parallel, then two all-passes, per channel, the right a little longer for width. |
 | [Step Sequencer](#step-sequencer) | note effect | A step sequencer: eight steps of notes from a root key, at a rate synced to the tempo, free or with the transport; notes played in pass through. |
+| [Spectrum Tilt](#spectrum-tilt) | effect | A tilt EQ (lows down as highs go up around a pivot) whose own window draws its output's spectrum from the host's analysis, never from samples. |
 
 ## compressor
 
@@ -104,6 +105,14 @@ Parameters: Size, Damping, Mix (%).
 Parameters: Run, Rate, Root, Steps, Gate (%), Step 1 (st), Step 2 (st), Step 3 (st), Step 4 (st), Step 5 (st), Step 6 (st), Step 7 (st), Step 8 (st).
 
 **Ask for:** "a step sequencer with velocity and a probability per step"
+
+## spectrum-tilt
+
+[`sdk/cookbook/spectrum-tilt/`](../cookbook/spectrum-tilt/): Cookbook Spectrum Tilt, an effect with its own window, and the cookbook's EST 1.1 recipe. A one-pole low-pass at Pivot splits the sound into lows and highs; Tilt raises one half by half its amount and lowers the other by the same, so the pivot stays put. Its est.json says `"abi": { "est": "1.1", "clap": "1.2" }` and `"ui": { …, "audio": true }`, and its page (`ui/ui.js`) asks the host for an analysis of the plugin's output with `est.audio({ fftSize: 2048, rate: 30 }, fn)`, draws the bins it gets (`est:spectrum`: whole-dB magnitudes and each channel's RMS) on a log-frequency axis, and draws the tilt's own curve over them from the parameters. The page never receives samples ([ui.md](ui.md), version 3), so it cannot record the sound; where the host sends no analysis (`est.audioAvailable` false) it says so and draws the curve alone.
+
+Parameters: Tilt (dB), Pivot (Hz), Output (dB).
+
+**Ask for:** "a tilt EQ whose window shows its own spectrum, with the tilt's curve drawn over it"
 
 ## Two notes
 

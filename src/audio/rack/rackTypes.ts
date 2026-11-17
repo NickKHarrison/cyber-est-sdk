@@ -7,6 +7,8 @@ import { hash32, hashString, sanitiseMidiFxList, type MidiFx } from '../../seque
 import { sanitiseFx, takesKey, type FxSlot } from '../mixer/fxDefs';
 import { FULL_SEL, RACK_SEL_MAX, distributedZones, isFullSel, sanitiseZone, zoneGain, type RackZone } from './zones';
 import { MACROS_DEFAULT, MACROS_MAX, MACRO_INDEX_RE, macroListLength, sanitiseMacroCount, stepMacroCount } from './macroCount';
+import { randomMacroValue } from './rackRandom';
+import { RACK_MAX_VARIATIONS, morphValues, sanitiseVariations, withOverwritten, withRenamed, withStored, withoutVariation, type RackVariation } from './variations';
 
 export { FULL_SEL, RACK_SEL_MAX, sanitiseZone, zoneGain, type RackZone };
 
@@ -78,9 +80,8 @@ export interface RackMacro {
   exclude?: boolean;
 }
 
-/** 1.386: a macro variation, Live's: the macros' values kept under a name, recalled in one click (1.600: as many values as the rack's macros when stored). */
-export interface RackVariation { name: string; values: number[] }
-export const RACK_MAX_VARIATIONS = 16;
+/** 1.386: a macro variation, Live's: the macros' values kept under a name, recalled in one click (1.600: as many values as the rack's macros when stored). 1.673: shared with the Audio Effect Rack (`variations.ts`). */
+export { RACK_MAX_VARIATIONS, type RackVariation };
 
 export interface RackPatch {
   v: 1;
@@ -197,15 +198,6 @@ function sanitiseMacro(raw: unknown, i: number, chains: readonly RackChain[]): R
   return { name: text(r.name, `Macro ${i + 1}`, 16), value: clamp(r.value, 0, 1, 0), maps, ...(r.exclude === true ? { exclude: true } : {}) };
 }
 
-/** 1.386: a variation from anything: a name and its values 0…1 (a missing one 0): eight at least (1.386's), 32 at most (1.600). */
-function sanitiseVariation(raw: unknown, i: number): RackVariation | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-  const vals = Array.isArray(r.values) ? r.values : [];
-  const n = Math.max(RACK_MACROS, Math.min(RACK_MAX_MACROS, vals.length));
-  return { name: text(r.name, `Variation ${i + 1}`, 24), values: Array.from({ length: n }, (_, k) => Math.round(clamp(vals[k], 0, 1, 0) * 1000) / 1000) };
-}
-
 /** 1.600: whether a macro holds nothing (its default name, at 0, no maps, not excluded): a hidden one past the eighth is then let go. */
 const isDefaultMacro = (m: RackMacro, i: number): boolean => m.name === `Macro ${i + 1}` && m.value === 0 && !m.maps.length && !m.exclude;
 
@@ -233,12 +225,8 @@ export function sanitiseRackPatch(raw: unknown): RackPatch {
   if (selMacro !== undefined) out.selectorMacro = selMacro;
   // 1.600: written only when it is not 8, so a rack from before reads back as saved.
   if (count !== RACK_MACROS) out.macroCount = count;
-  const variations: RackVariation[] = [];
-  for (const v of Array.isArray(r.variations) ? r.variations : []) {
-    if (variations.length >= RACK_MAX_VARIATIONS) break;
-    const x = sanitiseVariation(v, variations.length);
-    if (x) variations.push(x);
-  }
+  // 1.673: one rule with the Audio Effect Rack's (`variations.ts`).
+  const variations = sanitiseVariations(r.variations);
   if (variations.length) out.variations = variations;
   return out;
 }
@@ -314,9 +302,8 @@ export const macroValues = (patch: Pick<RackPatch, 'macros'>): number[] => patch
 
 /** A new variation holding the macros' values (refused, the same patch, past RACK_MAX_VARIATIONS). */
 export function storeVariation(patch: RackPatch, name?: string): RackPatch {
-  const list = patch.variations ?? [];
-  if (list.length >= RACK_MAX_VARIATIONS) return patch;
-  return { ...patch, variations: [...list, { name: text(name, `Variation ${list.length + 1}`, 24), values: macroValues(patch) }] };
+  const variations = withStored(patch.variations ?? [], macroValues(patch), name);
+  return variations ? { ...patch, variations } : patch;
 }
 
 /** Variation `i`'s values back on the macros (one patch: one write, one undo step); the same patch when there is none. 1.600: a macro past the values it was stored with keeps its own. */
@@ -329,19 +316,31 @@ export function recallVariation(patch: RackPatch, i: number): RackPatch {
 /** Variation `i` overwritten with the macros' values now. */
 export function overwriteVariation(patch: RackPatch, i: number): RackPatch {
   if (!patch.variations?.[i]) return patch;
-  return { ...patch, variations: patch.variations.map((v, k) => (k === i ? { ...v, values: macroValues(patch) } : v)) };
+  return { ...patch, variations: withOverwritten(patch.variations, i, macroValues(patch)) };
 }
 
 export function removeVariation(patch: RackPatch, i: number): RackPatch {
   if (!patch.variations?.[i]) return patch;
-  const variations = patch.variations.filter((_, k) => k !== i);
+  const variations = withoutVariation(patch.variations, i);
   const { variations: _v, ...rest } = patch;
   return variations.length ? { ...rest, variations } : rest;
 }
 
 export function renameVariation(patch: RackPatch, i: number, name: string): RackPatch {
   if (!patch.variations?.[i]) return patch;
-  return { ...patch, variations: patch.variations.map((v, k) => (k === i ? { ...v, name: text(name, v.name, 24) } : v)) };
+  return { ...patch, variations: withRenamed(patch.variations, i, name) };
+}
+
+/**
+ * 1.673: the macros `t` (0…1) of the way from variation `a` to variation `b` (`morphValues`: one
+ * patch, one write; a run of a Morph slider merged into one undo step by the history's burst). The
+ * same patch when either is missing.
+ */
+export function morphVariations(patch: RackPatch, a: number, b: number, t: number): RackPatch {
+  const va = patch.variations?.[a], vb = patch.variations?.[b];
+  if (!va || !vb) return patch;
+  const vals = morphValues(va, vb, t, patch.macros.map(m => m.value));
+  return { ...patch, macros: patch.macros.map((m, k) => (vals[k] === m.value ? m : { ...m, value: vals[k]! })) };
 }
 
 /** Macro `i` marked (or not) as left alone by Randomize. */
@@ -361,7 +360,7 @@ export function setMacroExclude(patch: RackPatch, i: number, exclude: boolean): 
  */
 export function randomizeMacros(patch: RackPatch, seed: number): RackPatch {
   const shown = rackMacroCount(patch);
-  return { ...patch, macros: patch.macros.map((m, k) => (m.exclude || k >= shown ? m : { ...m, value: Math.round((hash32(0x7a2d, seed | 0, k) / 4294967296) * 1000) / 1000 })) };
+  return { ...patch, macros: patch.macros.map((m, k) => (m.exclude || k >= shown ? m : { ...m, value: randomMacroValue(seed, k) })) };
 }
 
 // --- 1.600: Show macros (1–32) ------------------------------------------------------------------

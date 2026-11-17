@@ -1,0 +1,40 @@
+{
+  "est": 1,
+  "id": "org.cyber.est.behave",
+  "version": "1.0.0",
+  "name": "Broken Behave",
+  "vendor": "Cyber",
+  "description": "A broken EST fixture: its tail is the echo's at 120 BPM whatever the tempo (EST-C028).",
+  "license": "MIT",
+  "kind": "instrument",
+  "features": [
+    "instrument",
+    "synthesizer",
+    "sequencer"
+  ],
+  "abi": {
+    "est": "1.0",
+    "clap": "1.2"
+  },
+  "module": {
+    "path": "module.wasm"
+  },
+  "audio": {
+    "inputs": [],
+    "outputs": [
+      {
+        "channels": 2
+      }
+    ]
+  },
+  "notes": {
+    "inputs": 1,
+    "outputs": 0
+  },
+  "limits": {
+    "maxLatencyFrames": 0,
+    "memoryPagesMax": 64,
+    "tailSeconds": 20
+  },
+  "permissions": []
+}

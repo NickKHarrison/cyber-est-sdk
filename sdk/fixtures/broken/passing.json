@@ -10,5 +10,9 @@
   {
     "name": "rate-seconds",
     "module": "wasm/rate-seconds.wasm"
+  },
+  {
+    "name": "behave-ok",
+    "module": "wasm/behave.wasm"
   }
 ]

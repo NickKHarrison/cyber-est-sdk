@@ -6,8 +6,10 @@
  */
 
 import { LOOPGRAB_LENGTHS, LOOPGRAB_REPEATS } from './loopGrabCore';
-import { CYBER_NAMES, CYBER_PARAMS, CYBER_TYPES, type CyberType } from './cyberDefs';
+import { CYBER_NAMES, CYBER_PARAMS, CYBER_TYPES, LEGACY_LIMITER_STYLE, LIMITER_STYLES, migrateCyberParams, NEW_SLOT_PARAMS, type CyberType } from './cyberDefs';
 import { sanitiseEstBlock, type EstSlotBlock } from '../est/slot';
+import { holdNewer, keepExtras, newerOf, unwrapNewer } from '../../lib/forwardFields';
+import { FX_SLOT_FIELDS } from '../../sequencer/songFields';
 import { FX_RACK_MACROS, FX_RACK_MAX_BANDS, FX_RACK_MAX_MACROS, FX_RACK_SEL_MAX, FX_RACK_XOVER_MAX, FX_RACK_XOVER_MIN, defaultCrossovers, fxRackBands, fxRackDefaultParams, fxRackXoverKey, makeFxChain, sanitiseFxRackModel, slotCrossovers, type FxRackModel } from '../rack/fxRackTypes';
 
 /**
@@ -268,10 +270,14 @@ export const FX_DEFS: Readonly<Record<FxType, FxDef>> = Object.freeze({
     { key: 'hold', label: 'Hold', min: 0, max: 0.5, default: 0.02, unit: 's' },
     { key: 'release', label: 'Release', min: 0.02, max: 1, default: 0.15, log: true, unit: 's', automatable: false },
   ] },
-  limiter: { type: 'limiter', name: 'Limiter', blurb: 'A fast compressor followed by a hard clip at the ceiling: peaks never pass it.', params: [
+  // 1.715: `style` 1–5 is the mastering Limiter (`cyber-mastering-limiter`: a look-ahead true-peak
+  // limiter at 4×, Auto release); 0, Legacy, the default for a slot saved without one, the 1.8 chain
+  // of a fast compressor and a hard clip. A new slot is Transparent (NEW_SLOT_PARAMS).
+  limiter: { type: 'limiter', name: 'Limiter', blurb: 'A look-ahead true-peak limiter: peaks never pass the ceiling.', params: [
     { key: 'gain', label: 'Gain', min: 0, max: 24, default: 0, unit: 'dB' },
     { key: 'ceiling', label: 'Ceiling', min: -12, max: 0, default: -0.3, unit: 'dB' },
     { key: 'release', label: 'Release', min: 0.01, max: 1, default: 0.1, log: true, unit: 's' },
+    { key: 'style', label: 'Style', min: 0, max: LIMITER_STYLES.length - 1, default: LEGACY_LIMITER_STYLE, choices: LIMITER_STYLES },
   ] },
   // 1.201: sample-rate and bit-depth reduction (the `cyber-bitcrusher` worklet, bitcrusherWorklet.ts;
   // before the processors are registered, a quantising WaveShaper for the bits only). Bits and
@@ -418,7 +424,8 @@ export function newFxId(): string {
 /** The slot's parameters at its type's defaults (an `'est'` slot has none here: see `estSlotFor`). */
 export function defaultFx(type: FxType, id = newFxId()): FxSlot {
   if (type === 'fxRack') return { id, type, on: true, params: fxRackDefaultParams(), rack: sanitiseFxRackModel({ chains: [makeFxChain([], 'Chain 1')] }, FX_RACK_RULES) };
-  return { id, type, on: true, params: Object.fromEntries(FX_DEFS[type].params.map(p => [p.key, p.default])) };
+  // 1.715: a new Limiter is the mastering one (NEW_SLOT_PARAMS); a slot saved without a style stays Legacy.
+  return { id, type, on: true, params: { ...Object.fromEntries(FX_DEFS[type].params.map(p => [p.key, p.default])), ...NEW_SLOT_PARAMS[type] } };
 }
 
 /** 1.543: the insert rules a rack's sanitiser is given (one insert; an automatable parameter's range). */
@@ -428,11 +435,32 @@ export const FX_RACK_RULES = {
 };
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+/** Insert types removed for good (1.31: third-party Web Audio Modules): dropped, never a placeholder. */
+const RETIRED_FX_TYPES = new Set(['wam']);
+
 /**
- * One effect from anything (projects, live sessions): known type, every parameter in range. An
- * unknown type is dropped, which is how old data's removed `wam` inserts (1.8–1.30) go (1.31).
+ * One effect from anything (projects, live sessions): known type, every parameter in range. A
+ * removed type is dropped, which is how old data's `wam` inserts (1.8–1.30) go (1.31). 1.661: a type
+ * a newer Cyber has is an inert placeholder (`isNewerFx`: a Utility switched off, so the sound passes
+ * unchanged, as an EST placeholder's does) holding the slot as it was, given back unchanged on save;
+ * a known slot keeps a newer build's fields beside its own (forwardFields.ts).
  */
-export function sanitiseFx(raw: unknown): FxSlot | null {
+export function sanitiseFx(rawIn: unknown): FxSlot | null {
+  const raw = unwrapNewer(rawIn);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== 'string' || !ID_RE.test(r.id) || typeof r.type !== 'string' || RETIRED_FX_TYPES.has(r.type)) return null;
+  if (!(FX_TYPES as readonly string[]).includes(r.type)) {
+    return holdNewer(r, { ...defaultFx('utility', r.id), on: false }, { own: ['id'] });
+  }
+  const slot = sanitiseFxKnown(r);
+  return slot && keepExtras(r, slot, FX_SLOT_FIELDS);
+}
+
+/** 1.661: whether a slot is a placeholder of an insert type a newer Cyber has (drawn as words, built as a pass-through, never edited). */
+export const isNewerFx = (f: object): boolean => newerOf(f) !== undefined;
+
+function sanitiseFxKnown(raw: unknown): FxSlot | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   if (typeof r.id !== 'string' || !ID_RE.test(r.id)) return null;
@@ -452,6 +480,8 @@ export function sanitiseFx(raw: unknown): FxSlot | null {
   if (def.type === 'delay') ps = migrateDelayParams(ps);
   else if (def.type === 'compressor') ps = migrateCompressorParams(ps);
   else if (def.type === 'reverb') ps = migrateReverbParams(ps);
+  // 1.716: a Cyber EQ, Comp or Saturator from before keeps its Classic sound (cyberDefs.ts).
+  else ps = migrateCyberParams(def.type, ps);
   const params: Record<string, number> = {};
   for (const p of def.params) {
     const v = ps[p.key];

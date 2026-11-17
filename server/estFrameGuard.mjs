@@ -125,6 +125,7 @@ export const FRAME_GUARD_JS = `(function () {
   // with no Ctrl, Cmd or Alt that the plugin did not take (preventDefault) and that is not typed
   // into a field goes to the host as est:key; the host checks it (checkKeyMessage) and plays it only
   // while this frame has the focus. Bubble phase on the window, after the plugin's own handlers.
+  // 1.662: and Escape, the one named key, under the same rules.
   try {
     // The wrapper's child (the wrapper the host's), or, before 1.413, the host's own.
     if (G.parent === G || (G.parent !== G.top && G.parent.parent !== G.top)) return;
@@ -145,7 +146,10 @@ export const FRAME_GUARD_JS = `(function () {
     var send = function (e, down) {
       try {
         if (!e || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
-        if (typeof e.key !== 'string' || e.key.length !== 1 || !CODE.test(String(e.code))) return;
+        // 1.662: Escape too (no other named key), so a window or dialog around the frame closes as
+        // from any control of Cyber's: a plugin's own use of it (a menu, a field) keeps it.
+        var esc = e.key === 'Escape' && e.code === 'Escape';
+        if (!esc && (typeof e.key !== 'string' || e.key.length !== 1 || !CODE.test(String(e.code)))) return;
         if (down && e.defaultPrevented) return;
         if (typing(e.target)) return;
         // Space presses a focused control of the page's own (a checkbox, a button, a switch): its

@@ -146,7 +146,7 @@ Every check is in the rules table: [validator-rules.md](validator-rules.md), and
 
 ## 5. Where next
 
-- Other starting points: `npx est new instrument-as my-synth`, and the cookbook's ten recipes (`compressor`, `chorus`, `bitcrusher`, `wavetable`, `drum-synth`, `ring-mod`, `widener`, `auto-wah`, `schroeder-reverb`, `step-sequencer`): `npx @cyber-est/cli new chorus my-chorus`. [templates.md](templates.md) and [cookbook.md](cookbook.md) say what each is.
+- Other starting points: `npx est new instrument-as my-synth`, and the cookbook's recipes (`compressor`, `chorus`, `bitcrusher`, `wavetable`, `drum-synth`, `ring-mod`, `widener`, `auto-wah`, `schroeder-reverb`, `step-sequencer`, `spectrum-tilt`): `npx @cyber-est/cli new chorus my-chorus`. [templates.md](templates.md) and [cookbook.md](cookbook.md) say what each is.
 - Your own page as the plugin's window: `est new … --ui` ([ui.md](ui.md)).
 - The whole contract: [concepts.md](concepts.md), and [for-agents.md](for-agents.md) for an agent's loop.
 

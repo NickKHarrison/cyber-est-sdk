@@ -7,12 +7,13 @@
  * `est-plugins/`, 1.305). They read and write Cyber's repository, so the published CLI leaves them
  * out. 1.322 (DEV-C follow-up): in their place it packs `src/developer/`'s developer-only versions of
  * the same three (`developer: true`): a developer's key, `--developer` signature and `publish <file>`,
- * the owner's modes refused with words. The clone keeps both modes in `src/commands/`.
+ * the owner's modes refused with words. The clone keeps both modes in `src/commands/`. 1.686: `release`
+ * (the store releases, `scripts/est-release.mjs`) is clone-only too, with no developer version.
  */
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const CLONE_ONLY = Object.freeze(['keygen', 'sign', 'publish']);
+export const CLONE_ONLY = Object.freeze(['keygen', 'sign', 'publish', 'release']);
 /** The published CLI's own versions of `CLONE_ONLY`, in `src/developer/`. */
 export const DEVELOPER_DIR = 'developer';
 

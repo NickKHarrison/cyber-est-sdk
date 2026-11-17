@@ -30,7 +30,7 @@ const command: EstCommand = {
   usage: [
     'est sign <file.est> --developer [--key <file>] [--json]',
     'est sign <file.est> [--key <file>] [--tier curated|reviewed|community] [--json]   (the registry owner\'s)',
-    'est sign --review <est-review-export.json> [--bundles <dir>] [--key <file>] [--json]   (the registry owner\'s)',
+    'est sign --review <est-review-export.json | est-review-batch.zip> [--bundles <dir>] [--key <file>] [--json]   (the registry owner\'s)',
     '',
     '  --developer  sign as a developer with your own key (default $EST_DEVELOPER_KEY_FILE or',
     '          ~/.est/developer-key.pem); writes <file>.developer.json for est publish',
@@ -72,15 +72,21 @@ async function signReview(exportFile: string, args: Parameters<EstCommand['run']
   // The key first: nothing is laid in without a key that can sign.
   const key = signingKeyOf(keyFile ? readFileSync(resolve(ctx.cwd, keyFile), 'utf8') : process.env.EST_REGISTRY_SIGNING_KEY);
   const bundles = flagString(args, 'bundles');
-  const mod = await import(pathToFileURL(script).href) as { applyReviewExport(file: string, o?: { bundlesDir?: string }): { id: string; version: string; hash: string }[] };
-  const done = mod.applyReviewExport(resolve(ctx.cwd, exportFile), bundles ? { bundlesDir: resolve(ctx.cwd, bundles) } : {});
+  type Vouch = { vouched: string[]; blocked: string[]; skipped?: string };
+  const mod = await import(pathToFileURL(script).href) as { applyReviewExport(file: string, o?: { bundlesDir?: string; onVouch?: (v: Vouch) => void }): { id: string; version: string; hash: string }[] };
+  // 1.710: the export (or Admin's review batch) also vouches for the approved plugins' developers in the root.
+  let vouch: Vouch = { vouched: [], blocked: [] };
+  const done = mod.applyReviewExport(resolve(ctx.cwd, exportFile), { ...(bundles ? { bundlesDir: resolve(ctx.cwd, bundles) } : {}), onVouch: (v) => { vouch = v; } });
   const r = publishRegistry({ distDir: join(REPO_DIR, 'est-plugins/dist'), sourceDir: join(REPO_DIR, 'est-plugins/registry'), outDir: join(REPO_DIR, 'est-plugins/registry-dist'), privateKey: key });
   const facts = keyFacts(key);
-  if (args.flags.json) { ctx.out(JSON.stringify({ reviewed: done, keyId: r.keyId, versions: r.versions })); return 0; }
+  if (args.flags.json) { ctx.out(JSON.stringify({ reviewed: done, vouched: vouch.vouched, blocked: vouch.blocked, ...(vouch.skipped ? { vouchSkipped: vouch.skipped } : {}), keyId: r.keyId, versions: r.versions })); return 0; }
   ctx.out([
     ...done.map(d => `reviewed ${d.id} ${d.version} (sha256 ${d.hash})`),
+    ...vouch.vouched.map(id => `vouched for ${id} in the root: their plugins no longer wait 48 hours on a new device`),
+    ...vouch.blocked.map(id => `marked ${id} blocked in the root`),
+    ...(vouch.skipped ? [`nobody vouched for: ${vouch.skipped}`] : []),
     `signed the registry: ${r.index.plugins.length} plugins, ${r.versions} versions, key ${r.keyId} (fingerprint ${facts.fingerprint})`,
-    'Next: commit est-plugins/, deploy cyber-est, then Admin → Store → Review queue → Check the registry again.',
+    'Next: commit est-plugins/ and let CI pass; then a store release (node scripts/est-sign-day.mjs --sign --release --key <file>) or, while store releases are off, deploy cyber-est; then Admin → Store → Review queue → Check the registry again.',
   ].join('\n'));
   return 0;
 }

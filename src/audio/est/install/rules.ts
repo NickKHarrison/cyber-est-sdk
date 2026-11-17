@@ -17,17 +17,17 @@
  *
  * `step` is where in the pipeline the check runs (in order: `archive`, `manifest`, `files`,
  * `module`, `presets`, `expect`, `meter`, `conformance`, then the validator's own `determinism`,
- * `ui`, `performance`); `install` says whether Cyber's install refuses on it (a validator-only rule
+ * `behaviour` (1.652: src/audio/est/review/behaviour.ts), `ui`, `performance`); `install` says whether Cyber's install refuses on it (a validator-only rule
  * is stricter than the install, never looser).
  */
 
-export const EST_RULES_VERSION = '1.6.1';
+export const EST_RULES_VERSION = '1.7.0';
 
 export type EstRuleSeverity = 'error' | 'warning';
-export type EstRuleStep = 'archive' | 'manifest' | 'files' | 'module' | 'presets' | 'expect' | 'meter' | 'conformance' | 'determinism' | 'ui' | 'performance';
+export type EstRuleStep = 'archive' | 'manifest' | 'files' | 'module' | 'presets' | 'expect' | 'meter' | 'conformance' | 'determinism' | 'behaviour' | 'ui' | 'performance';
 
 /** The steps in the order the validator runs them. */
-export const EST_RULE_STEPS: readonly EstRuleStep[] = ['archive', 'manifest', 'files', 'module', 'presets', 'expect', 'meter', 'conformance', 'determinism', 'ui', 'performance'];
+export const EST_RULE_STEPS: readonly EstRuleStep[] = ['archive', 'manifest', 'files', 'module', 'presets', 'expect', 'meter', 'conformance', 'determinism', 'behaviour', 'ui', 'performance'];
 
 export interface EstRule {
   id: string;
@@ -293,6 +293,30 @@ export const EST_RULES: readonly EstRule[] = [
   r('EST-C023', 'conformance', 'The note output differs from est.json',
     'est.json says `"notes": { "outputs": 1 }` on an EST 1.1 plugin, so Cyber routes its notes to the next plugin on the track and records them, but the plugin reports no note output port (clap.note-ports), or reports one est.json does not declare.',
     'Declare a note output port in the DSP and set `"notes": { "outputs": 1 }`, or remove both.'),
+  // 1.652: the behaviour checks (src/audio/est/review/behaviour.ts), the seven bug classes the catalogue's code
+  // reviews kept finding. Validator-only: an error fails `est validate`/`est test`, a warning does not; neither
+  // refuses an install or a Community publish (the store's review shows them to the person reviewing).
+  r('EST-C024', 'behaviour', 'A note never ends, or its NOTE_END is never sent',
+    'An instrument gets a flood of overlapping notes (more than most synths have voices, so voices are stolen), one key retriggered while it still sounds, a burst of 24 at once and a choke pair (GM hats 46 then 42), then every key goes up. Every note-on must get exactly one NOTE_END, and the sound must end (against a run with no notes) within the tail the plugin reports. A stolen or choked voice whose NOTE_END is skipped leaves the host counting a note that is gone; a voice that never ends sounds for good. Run at the defaults and on the first bundle presets.',
+    'Send one NOTE_END for every note that starts, when it stops sounding: when its release ends, when it is stolen (at the steal) and when another note chokes it. A note waiting for a stolen voice\'s fade that is let go or replaced ends too. Send none for a note-off that matches no sounding note.', 'error', false),
+  r('EST-C025', 'behaviour', 'A note let go twice during a steal\'s fade holds',
+    'With 64 notes held, three notes that must steal a voice are each let go twice within 2.5 ms of their note-on, inside a typical steal fade. A "released while waiting" mark that toggles on each note-off is cleared again by the second one, so the note starts held and plays until it is choked. Every note-on must get exactly one NOTE_END and the sound must end within the reported tail.',
+    'Set the "released while waiting for the fade" mark once (`released = true`), never toggle it, and ignore a note-off for a note that is already released.', 'error', false),
+  r('EST-C026', 'behaviour', 'Raising Swing mid-pattern plays steps again',
+    'A pattern plugin with a parameter named Swing plays with Swing at its minimum, raised to its maximum part-way into a beat (beat 0.3, 1.3 and 2.55), against Swing at its maximum throughout (with the transport alone, then with keys held). The raised run must not have more hits: a step chosen by "the swung step index changed" falls back a step when Swing moves the next off-beat later, and plays that pair again.',
+    'Fire each step once, going forwards only: keep the next step to play and fire it when the song position passes its swung time; reset the next step only on a transport jump.', 'warning', false),
+  r('EST-C027', 'behaviour', 'A state sticks in the subnormal range',
+    'Notes held for 3 s, then released (an effect: 3.6 s of the test loop), then 10 s of silence, with every float the module stores to memory checked (1.437\'s counter): more than 100 subnormal stores in a second while the notes are held, or in the silence\'s last 5 s, is a recursive state (a filter, an envelope decaying to 0, a delay line\'s feedback) stuck below the smallest normal float, where every multiply costs tens of times an ordinary one on most CPUs. The meter counts work, not time, so it cannot see it; Cyber\'s watchdog stops a plugin that overruns.',
+    'Set every recursive state below 1e-20 (about -400 dB) to 0, once a sample or once a block: a filter\'s memory, an envelope\'s level with Sustain at 0, a delay line\'s writes.', 'warning', false),
+  r('EST-C028', 'behaviour', 'Sound past the reported tail',
+    'Notes at full velocity held for 1 s (an effect: 2 s of the test loop), then nothing, with no transport and again with the transport stopped at 60 BPM (a tempo-synced echo is longest there). Once the tail the plugin reports (clap.tail, asked as the notes stop and at the end) has passed, its output must be 60 dB under its loudest, under -80 dBFS, or under twice a run with nothing played. Cyber\'s exports, freezes and bounces stop at the tail, so anything after it is cut. EST-C017 checks one held note at install; this checks the loudest case, every reverb and echo included, and at a slow tempo.',
+    'Report a tail that covers everything that can still sound: the longest release, the reverb\'s decay at its current size, and an echo\'s repeats at the current tempo (repeats × delay until 60 dB down). Ask for the tempo each block when it depends on it.', 'error', false),
+  r('EST-C029', 'behaviour', 'A render from a bar differs from playing through it',
+    'A pattern plugin is played from beat 0 and, fresh, from beat 8 (bar 3), with the transport alone. Once what played before beat 8 has rung out (2 s, or its reported tail and 0.5 s, at most 8 s), the two renders must agree within 1 % RMS: a render or an export that starts at a bar must sound as playing through it does. Randomness seeded by a count of notes or hits, or modulation and noise running from activate, make them differ.',
+    'Seed every random choice from the song position (the step, the bar, the pad), never from a count of notes or hits or the time since the plugin started, and restart free-running generators from the position when the transport starts.', 'warning', false),
+  r('EST-C030', 'behaviour', 'A transport jump fires every skipped step',
+    'A pattern plugin plays from beat 0; at beat 4 the transport jumps to beat 36. In the next 100 ms its output must have at most twice the energy of a start at beat 36 plus the ring-out of what played before: a step clock that catches up step by step after a forward jump fires every skipped step at once, a burst of 128 hits in a few milliseconds.',
+    'When the position moves forwards by more than a step (or backwards at all), move the next step to the first one at or after the new position without firing the steps in between.', 'warning', false),
 
   // --- EST-U: the UI ------------------------------------------------------------------------
   r('EST-U001', 'ui', 'The UI page is not readable HTML',

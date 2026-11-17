@@ -33,7 +33,7 @@ How the packages are built, checked, mirrored and (by the owner, from the public
 | The `est` command (`@cyber-est/cli`) | `sdk/packages/cli` | `est new`, `est validate`, `est pack`, `est test`, `est doctor`, `est inspect`, `est dev`, `est compare` |
 | The validator | `sdk/packages/tools` (`@cyber-est/tools`) | the same code as Cyber's install check, with a stable id for every rule |
 | The templates | `sdk/templates/` | `effect-rust`, `instrument-rust` (the default), `effect-as`, `instrument-as` (AssemblyScript: no native toolchain), `cpp-clap` (a CLAP plugin in C++, for porting); since 1.321 `sampler-*`, `midi-effect-*` and `visualiser-*` in both languages ([which to start from](docs/templates.md)) |
-| The cookbook | `sdk/cookbook/` | ten short tested AssemblyScript plugins, one idea each, with a prompt to take it further ([the cookbook](docs/cookbook.md)); `est new <recipe> <dir>` starts from one |
+| The cookbook | `sdk/cookbook/` | eleven short tested AssemblyScript plugins, one idea each, with a prompt to take it further ([the cookbook](docs/cookbook.md)); `est new <recipe> <dir>` starts from one |
 | The C and C++ kit | `sdk/cpp` | the build `est` runs for C and C++ (clang to wasm32), the CLAP 1.2.2 headers and the freestanding runtime `<est/runtime.hpp>` |
 | The porting kits | `sdk/kits/` | `juce-shared-dsp`: one source tree building a JUCE plugin and an EST plugin from one DSP header |
 | `llms.txt` | `sdk/llms.txt` | the kit's index for a coding agent: the docs, the templates and the recipes |

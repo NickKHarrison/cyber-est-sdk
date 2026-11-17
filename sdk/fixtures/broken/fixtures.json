@@ -154,5 +154,47 @@
     "module": "../../../src/audio/est/fixtures/gain.wasm",
     "rule": "EST-M022",
     "install": true
+  },
+  {
+    "name": "behave-note-end",
+    "module": "wasm/behave-note-end.wasm",
+    "rule": "EST-C024",
+    "install": false
+  },
+  {
+    "name": "behave-toggle",
+    "module": "wasm/behave-toggle.wasm",
+    "rule": "EST-C025",
+    "install": false
+  },
+  {
+    "name": "behave-swing",
+    "module": "wasm/behave-swing.wasm",
+    "rule": "EST-C026",
+    "install": false
+  },
+  {
+    "name": "behave-subnormal",
+    "module": "wasm/behave-subnormal.wasm",
+    "rule": "EST-C027",
+    "install": false
+  },
+  {
+    "name": "behave-tail",
+    "module": "wasm/behave-tail.wasm",
+    "rule": "EST-C028",
+    "install": false
+  },
+  {
+    "name": "behave-seed",
+    "module": "wasm/behave-seed.wasm",
+    "rule": "EST-C029",
+    "install": false
+  },
+  {
+    "name": "behave-jump",
+    "module": "wasm/behave-jump.wasm",
+    "rule": "EST-C030",
+    "install": false
   }
 ]

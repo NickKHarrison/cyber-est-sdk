@@ -1,6 +1,6 @@
 /**
  * 1.520 (Cyber_EST_Store_Phase_C_Work_Order.md stream 6): **1.437's subnormal-store counter**, moved
- * here from `src/audio/est/install/estDenormals.test.ts` so the store's automatic review
+ * here from `src/audio/est/install/estDenormalsHarness.ts` so the store's automatic review
  * (`autoReview.ts`) counts the same way the catalogue's test does; the test imports it from here.
  *
  * Timing would be flaky, so this counts: the module is rewritten by Binaryen's `instrument-memory`
@@ -27,7 +27,7 @@ export const REVIEW_FEATURES = binaryen.Features.MVP | binaryen.Features.Mutable
  * first add one to a mutable global when the value is subnormal (|v| below the smallest normal, and
  * not zero). The global is exported as `DENORMAL_COUNTER`. Throws when the pass did not run as expected.
  */
-export function countDenormals(bytes: Uint8Array): Uint8Array {
+export function countDenormals(bytes: Uint8Array, opts: { coalesce?: boolean } = {}): Uint8Array {
   const mod = binaryen.readBinary(bytes);
   try {
     mod.setFeatures(REVIEW_FEATURES);
@@ -62,6 +62,9 @@ export function countDenormals(bytes: Uint8Array): Uint8Array {
       mod.removeFunction(info.name);
       mod.addFunction(info.name, info.params, info.results, [], body);
     }
+    // 1.652: a function the pass leaves with more locals than V8 compiles (50 000) is shrunk by coalescing
+    // them (`coalesce`: the behaviour checks retry so; it changes no value stored or computed).
+    if (opts.coalesce) mod.runPasses(['coalesce-locals']);
     if (!mod.validate()) throw new Error('the instrumented module does not validate');
     return new Uint8Array(mod.emitBinary());
   } finally {

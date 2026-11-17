@@ -14,6 +14,7 @@
 import { checkBundle, type InstallCheck } from '../../../../src/audio/est/install/pipeline';
 import { EST_BLOCK_BUDGET_US, EST_RULES, EST_RULES_VERSION, EST_RULE_STEPS, type EstRule } from '../../../../src/audio/est/install/rules';
 import { standInInstance, type ConformanceReport } from '../../../../src/audio/est/install/conformance';
+import { behaviourChecks, type BehaviourFinding } from '../../../../src/audio/est/review/behaviour';
 import { nodeDeps } from './host';
 import { packDir, sha256 } from './pack.mjs';
 import { readProject } from './project';
@@ -84,6 +85,11 @@ export interface ValidateOptions {
   license?: string;
   /** The report's time stamp (default now). */
   now?: () => Date;
+  /**
+   * 1.652: the behaviour checks (EST-C024 to EST-C030, `src/audio/est/review/behaviour.ts`): how many bundle
+   * presets they play besides the defaults (default 3, `'all'` every one), or false to leave them out.
+   */
+  behaviour?: number | 'all' | false;
 }
 
 const stepIndex = (r: EstRule) => EST_RULE_STEPS.indexOf(r.step);
@@ -96,13 +102,20 @@ export async function validate(input: Uint8Array | { dir: string }, opts: Valida
   const bytes = input instanceof Uint8Array ? input : packDir(input.dir, { module: opts.module ?? readProject(input.dir).wasm, license: opts.license }).bytes;
   const at = (opts.now ?? (() => new Date()))().toISOString();
   const r = await checkBundle(bytes, { expectHash: null, seconds: opts.seconds, sampleRate: opts.sampleRate }, nodeDeps);
-  return reportOf(bytes, r, at, r.ok ? { state: probeState(r) } : {});
+  const extra: ExtraChecks = {};
+  if (r.ok) {
+    extra.state = probeState(r);
+    if (opts.behaviour !== false) extra.behaviour = behaviourChecks({ bundle: r.bundle, module: r.module, shim: r.shim }, { presets: opts.behaviour ?? 3 });
+  }
+  return reportOf(bytes, r, at, extra);
 }
 
 /** The validator's own checks that need a live instance (beyond the install's), run after a passed install check. */
 export interface ExtraChecks {
   /** `EST-C020`/`EST-C011` once more: whether a fresh instance saves its state (null: it does). */
   state?: string | null;
+  /** 1.652: the behaviour checks' findings (absent: not run, each reported as a skip). */
+  behaviour?: BehaviourFinding[];
 }
 
 /**
@@ -171,6 +184,14 @@ export function reportOf(bytes: Uint8Array, r: InstallCheck, at: string, extra: 
         else add(rule, 'warn', 'a bundle preset, loaded and saved again, gave other bytes', 'phase:presets');
         continue;
       }
+    }
+    if (rule.step === 'behaviour') {
+      if (!conformanceOk || !report) { add(rule, 'skip', 'not reached: the conformance run did not pass'); continue; }
+      const f = extra.behaviour?.find(x => x.rule === rule.id);
+      if (!f) { add(rule, 'skip', 'not run (validate with behaviour: false)'); continue; }
+      if (f.status === 'fail') add(rule, rule.severity === 'warning' ? 'warn' : 'fail', f.message, f.where);
+      else add(rule, f.status, f.message);
+      continue;
     }
     if (rule.step === 'ui') {
       if (!bundle) { add(rule, 'skip', 'not reached: the bundle could not be read'); continue; }

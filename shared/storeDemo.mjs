@@ -10,6 +10,12 @@
 // the server (server/storeListings.mjs) and the app's catalogue fallback (src/components/est/store/
 // storeData.ts) both through `storeDemoOf`; the detail's `DemoPlayer` plays it. A developer's demo clip
 // (1.505, `/store/dev/demo/<id>/<hash>`) keeps its own shape; `isStoreDemoUrl` takes both. Pure and light.
+//
+// 1.690 (STORE live updates, stream 5): an index may also carry `release`, the active store release's
+// `demo-index.json` rows (shared/storeReleaseWeb.mjs `releaseDemoRows`: each clip's same-origin hashed URL,
+// `/est-net/v1/store/demo/<sha256>.mp3`), set only by the app while STORE_RELEASES_OPEN is on. A release
+// row for the listing's exact version wins; without `release` every answer is exactly 1.605's. (No import:
+// the SDK's public mirror carries this file; shared/storeReleaseWeb.mjs takes the pattern from here.)
 
 export const DEMO_PATH = '/est-demos/';
 export const DEMO_INDEX_PATH = '/est-demos/index.json';
@@ -25,22 +31,28 @@ export const DEMO_MAX_FILE_BYTES = 600 * 1024;
  * The whole folder's budget (bytes): never precached by the service worker, fetched only on Play, and
  * (1.624) streamed from disk by the server, never held in its memory. 1.624 gives every catalogue plugin a
  * demo: 70 demos of 29.9 s on average at 112 kbit/s (14 KB a second) are 28.0 MB (29,382,929 bytes, about
- * 420 KB each). 32 MB (33,554,432 bytes) holds them with room for nine more of the average length; a plugin past that
+ * 420 KB each). 32 MB (33,554,432 bytes) held them with room for nine more of the average length; a plugin past that
  * moves this number with its arithmetic here (the per-file cap, 600 KB, is about 43 s at the bit rate).
+ * The granular suite (1.711 FOURFOLD, 1.712 CLOUDLOOM, 1.713 SHARDBEAT) passed it, each stream alone at 80 demos.
+ * Together at the n710 integration (with 1.714's new versions): 82 demos and the index, 34,751,816 bytes (about
+ * 423,800 each). 40 MB (41,943,040 bytes) holds them with 7,191,224 bytes free, about 16 more of that average.
  */
-export const DEMO_BUDGET_BYTES = 32 * 1024 * 1024;
+export const DEMO_BUDGET_BYTES = 40 * 1024 * 1024;
 
 const ID_RE = /^[a-z0-9](?:[a-z0-9.-]{1,118})[a-z0-9]$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
 const FILE_RE = /^[a-z0-9][a-z0-9.-]{0,140}\.mp3$/;
 /** A first-party demo's URL: this origin's demo folder, with its bundle's `?v=<hash8>`. */
 export const FIRST_PARTY_DEMO_URL_RE = /^\/est-demos\/[a-z0-9][a-z0-9.-]{0,140}\.mp3\?v=[0-9a-f]{8}$/;
+/** 1.690: a store release's clip by its hash, served from the app's own origin. */
+export const RELEASE_DEMO_URL_RE = /^\/est-net\/v1\/store\/demo\/[0-9a-f]{64}\.mp3$/;
 /** 1.505: a developer's demo clip's URL (the store's own route). */
 export const DEV_DEMO_URL_RE = /^\/store\/dev\/demo\/[a-z0-9](?:[a-z0-9.-]{1,118})[a-z0-9]\/[0-9a-f]{64}$/;
 
 /**
  * @typedef {{ file: string, version: string, hash: string, seconds: number, bytes: number, lufs: number | null }} StoreDemoRow
- * @typedef {{ v: 1, plugins: Record<string, StoreDemoRow> }} StoreDemoIndex
+ * @typedef {{ url: string, version: string, hash: string, seconds: number }} StoreDemoReleaseRow
+ * @typedef {{ v: 1, plugins: Record<string, StoreDemoRow>, release?: Record<string, StoreDemoReleaseRow> }} StoreDemoIndex
  * @typedef {{ url: string, seconds: number }} StoreDemo
  */
 
@@ -73,13 +85,15 @@ export function cleanDemoIndex(raw) {
  * @param {StoreDemoIndex | null | undefined} index @param {string} id @param {string} hash @returns {StoreDemo | null}
  */
 export function storeDemoOf(index, id, hash) {
+  const rel = index?.release?.[id];
+  if (rel && rel.hash === hash) return { url: rel.url, seconds: rel.seconds };
   const row = index?.plugins?.[id];
   if (!row || !row.file || row.hash !== hash) return null;
   return { url: `${DEMO_PATH}${row.file}?v=${row.hash.slice(0, 8)}`, seconds: row.seconds };
 }
 
 /** Whether a listing's demo url is one of ours (a first-party demo or a developer's clip). @param {unknown} url */
-export const isStoreDemoUrl = (url) => typeof url === 'string' && (FIRST_PARTY_DEMO_URL_RE.test(url) || DEV_DEMO_URL_RE.test(url));
+export const isStoreDemoUrl = (url) => typeof url === 'string' && (FIRST_PARTY_DEMO_URL_RE.test(url) || DEV_DEMO_URL_RE.test(url) || RELEASE_DEMO_URL_RE.test(url));
 
 /**
  * A listing's `demo` as read (either side): the url one of ours, the length within its kind's bound (a
@@ -91,6 +105,6 @@ export function cleanStoreDemo(raw) {
   const d = /** @type {any} */ (raw);
   const seconds = Number(d.seconds);
   if (!isStoreDemoUrl(d.url) || !Number.isFinite(seconds) || seconds <= 0) return null;
-  const max = FIRST_PARTY_DEMO_URL_RE.test(d.url) ? DEMO_MAX_SECONDS + 1 : 31;
+  const max = FIRST_PARTY_DEMO_URL_RE.test(d.url) || RELEASE_DEMO_URL_RE.test(d.url) ? DEMO_MAX_SECONDS + 1 : 31;
   return seconds <= max ? { url: d.url, seconds: Math.round(seconds * 10) / 10 } : null;
 }

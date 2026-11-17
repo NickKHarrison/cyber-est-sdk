@@ -75,6 +75,12 @@ export const ORIGIN_CACHE = Object.freeze({ maxFileBytes: 8 * 1024 * 1024, maxTo
 const GUARD_BODY = Buffer.from(FRAME_GUARD_JS, 'utf8');
 const WRAP_BODY = Buffer.from(FRAME_WRAP_HTML, 'utf8');
 
+/**
+ * 1.688: where the plugin origin reads releases (server/estOriginRelease.mjs' `source`).
+ * 1.696: `manifestDir`, the active release's signed manifest and its `.sig`, served at `/est/release/`.
+ * @typedef {{ registryDir(): string | null, bundleFile(hash: string, rel: string): string | null, manifestDir?: () => string | null }} EstOriginReleaseSource
+ */
+
 /** @type {WeakMap<Buffer, string>} */
 const etags = new WeakMap();
 /** 1.625: a strong ETag from a body's bytes, computed once per body. @param {Buffer} body */
@@ -144,13 +150,27 @@ const MIME = {
   '.pack': 'application/octet-stream',
 };
 
+/** 1.688: a served file's type: the table above, else a store release's picture or clip (`STORE_ASSET_MIME`). @param {string} ext */
+const typeOf = (ext) => MIME[ext] ?? STORE_ASSET_MIME[ext];
+
 /** Phase 5b: how long the registry's index, blocklist and meta.json may be cached (a version's files are immutable). */
 export const REGISTRY_SHORT_CACHE = 'public, max-age=300';
 const REGISTRY_RE = /^\/est\/v1\/(.+)$/;
+/** 1.696: the active store release's signed manifest (shared/storeReleaseWeb.mjs `RELEASE_MANIFEST_PATH`), only while releases are followed. */
+const RELEASE_MANIFEST_RE = /^\/est\/release\/(manifest\.json(?:\.sig)?)$/;
+/** 1.696: revalidated every time (an ETag makes that a 304), so a new release is seen at the next look. */
+export const RELEASE_MANIFEST_CACHE = 'no-cache';
 /** A version's own files: content addressed by the index, so cached forever. */
 const REGISTRY_VERSION_RE = /^(?:plugins\/[a-z0-9][a-z0-9.-]{1,118}[a-z0-9]\/\d{1,6}\.\d{1,6}\.\d{1,6}(?:[-+][0-9A-Za-z.-]{1,40})?\/(?:bundle\.est|est\.json|signature\.json)|packs\/[a-z0-9][a-z0-9.-]{1,118}[a-z0-9]\/\d{1,6}\.\d{1,6}\.\d{1,6}(?:[-+][0-9A-Za-z.-]{1,40})?\/(?:pack\.json|signature\.json|files\/[0-9a-f]{64}\.pack))$/;
 /** 1.515: `.pack`, a sound pack's file (audio or JSON, never run: served as bytes with nosniff). */
 const REGISTRY_EXT = new Set(['.json', '.sig', '.est', '.pack']);
+/**
+ * 1.688: a store release's pictures and clips (shared/storeRelease.mjs `storeAssetPath`), named by their
+ * hash, so immutable; only at exactly that path (any other picture or clip under `/est/v1/` is a 404,
+ * as before), and with these types only (never a page: the bundles' own MIME table is unchanged).
+ */
+const STORE_ASSET_RE = /^store\/(?:art\/[0-9a-f]{64}\.(webp|png|jpg)|demo\/[0-9a-f]{64}\.(mp3))$/;
+const STORE_ASSET_MIME = { '.webp': 'image/webp', '.png': 'image/png', '.jpg': 'image/jpeg', '.mp3': 'audio/mpeg' };
 
 /** Phase 2: the files the app's page reads with fetch() during an install (frames need no CORS). */
 const FETCHED = new Set(['.est', '.json', '.wasm']);
@@ -283,19 +303,32 @@ function hostOf(hostHeader) {
 
 /**
  * @param {{ EST_ORIGIN_HOST?: string, EST_ORIGIN_DIR?: string, EST_REGISTRY_DIR?: string, EST_APP_ORIGIN?: string, APP_ORIGIN?: string, EST_DEV_UI_KEY?: string, EST_DEV_UI_PUBLIC_KEY?: string }} env
- * @param {{ anyHost?: boolean, files?: typeof DISK_FILES, paidGate?: ReturnType<typeof import('./storeDelivery.mjs').createPaidGate> | null }} [o] Phase 2 (2-B, D-29): `anyHost`, every request is the plugin
+ * @param {{ anyHost?: boolean, files?: typeof DISK_FILES, paidGate?: ReturnType<typeof import('./storeDelivery.mjs').createPaidGate> | null, release?: EstOriginReleaseSource | null }} [o] Phase 2 (2-B, D-29): `anyHost`, every request is the plugin
  *   1.625: `files`, where `/est/b/` and `/est/v1/` are read (server/staticFiles.mjs' `createStaticFiles`
  *   with `ORIGIN_CACHE`); none, the disk each time.
  *   origin's whatever its Host (server/estOriginServer.mjs, the `cyber-est` app, which is nothing else).
  *   1.514: `paidGate` (server/storeDelivery.mjs), a paid version's bundle bytes only with a store ticket;
  *   none, nothing is gated (no version is paid).
+ *   1.688: `release` (server/estOriginRelease.mjs, only with STORE_RELEASES_OPEN): `/est/v1/` from the
+ *   active store release's directory, read again at each request, and `/est/b/<sha256>/` from every
+ *   release mirrored, then EST_ORIGIN_DIR (the image's baseline); none, the two directories as before.
  * @returns {null | { handle(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): boolean, refuseUpgrade(req: import('node:http').IncomingMessage, socket: import('node:stream').Duplex): boolean }}
  */
 export function createEstOrigin(env, o = {}) {
   const rule = o.anyHost ? { any: true } : hostRule(env.EST_ORIGIN_HOST);
   if (!rule) return null;
   const dir = env.EST_ORIGIN_DIR ? path.resolve(env.EST_ORIGIN_DIR) : null;
-  const registryDir = env.EST_REGISTRY_DIR ? path.resolve(env.EST_REGISTRY_DIR) : null;
+  const baseRegistryDir = env.EST_REGISTRY_DIR ? path.resolve(env.EST_REGISTRY_DIR) : null;
+  const release = o.release ?? null;
+  /** 1.688: a bundle's file, from a mirrored release first (by its hash, never changed), else the baseline. @param {string} hash @param {string} rel */
+  const bundleFile = (hash, rel) => {
+    const mirrored = release ? release.bundleFile(hash, rel) : null;
+    if (mirrored) return mirrored;
+    if (!dir) return null;
+    const root = path.join(dir, hash);
+    const file = path.resolve(root, rel);
+    return file.startsWith(root + path.sep) ? file : null;
+  };
   const ancestors = String(env.EST_APP_ORIGIN || String(env.APP_ORIGIN ?? '').replace(/\/+$/, '') || DEFAULT_APP_ORIGIN).trim();
   const csp = pluginCsp(ancestors);
   const { verifyKey } = devUiKeysOf(env);
@@ -307,8 +340,10 @@ export function createEstOrigin(env, o = {}) {
   const pageOf = (hash) => {
     if (pages.has(hash)) return pages.get(hash) ?? null;
     let page;
-    try { page = dir ? uiPageOf(JSON.parse(fs.readFileSync(path.join(dir, hash, 'est.json'), 'utf8'))) : null; } catch { page = null; }
-    pages.set(hash, page);
+    const manifest = bundleFile(hash, 'est.json');
+    try { page = manifest ? uiPageOf(JSON.parse(fs.readFileSync(manifest, 'utf8'))) : null; } catch { page = null; }
+    // 1.688: with releases a hash not yet mirrored may arrive with the next one, so only a page read is kept.
+    if (page !== null || !release) pages.set(hash, page);
     return page;
   };
   let uploadsInFlight = 0;
@@ -329,7 +364,7 @@ export function createEstOrigin(env, o = {}) {
     if (!gate) return false;
     let u;
     try { u = new URL(req.url ?? '/', 'http://plugin.invalid'); } catch { refuse(res, 404); return true; }
-    const r = gate.allow(u, what);
+    const r = gate.allow(u, what, { take: req.method !== 'HEAD' }); // 1.656: a HEAD never takes the ticket
     if (r.ok) { if (r.paid) paidAnswers.add(res); return false; }
     res.writeHead(r.status, { ...baseHeaders(), ...corsOf(req), 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
     res.end(r.status === 404 ? 'Not found' : `Refused: ${r.why}`);
@@ -388,11 +423,11 @@ export function createEstOrigin(env, o = {}) {
     const headers = { ...baseHeaders(), ...how.cors, 'cache-control': cacheOf(res, how.cache), ...(etag ? { etag } : {}) };
     if (etag && notModified(req, etag)) { res.writeHead(304, headers); res.end(); return; }
     if (body) {
-      res.writeHead(200, { ...headers, 'content-type': MIME[how.ext], 'content-length': body.length });
+      res.writeHead(200, { ...headers, 'content-type': typeOf(how.ext), 'content-length': body.length });
       res.end(req.method === 'HEAD' ? undefined : body);
       return;
     }
-    res.writeHead(200, { ...headers, 'content-type': MIME[how.ext], 'content-length': entry.file.size });
+    res.writeHead(200, { ...headers, 'content-type': typeOf(how.ext), 'content-length': entry.file.size });
     if (req.method === 'HEAD') { res.end(); return; }
     const rs = fs.createReadStream(file);
     rs.on('error', () => res.destroy());
@@ -464,14 +499,20 @@ export function createEstOrigin(env, o = {}) {
 
   /** Phase 5b: `/est/v1/<rel>`, a file of the signed registry (GET or HEAD, checked by the caller). */
   const registryRoute = (req, res, rel) => {
+    // 1.688: the active release's directory, taken once here, so a switch mid-request finishes on this one.
+    const registryDir = release ? release.registryDir() : baseRegistryDir;
     const ext = path.extname(rel).toLowerCase();
-    if (!registryDir || !REGISTRY_EXT.has(ext) || rel.includes('\0') || rel.split('/').some(p => p === '' || p === '.' || p === '..')) { refuse(res, 404); return; }
+    const asset = STORE_ASSET_RE.test(rel);
+    // 1.658: the registry's own 404 carries the CORS header (to an allowed app), so a probe from the app
+    // tells this origin's "nothing published here" from a network that blocks it (src/audio/est/originReach.ts).
+    const notFound = () => { res.writeHead(404, { ...baseHeaders(), ...corsOf(req), 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }); res.end('Not found'); };
+    if (!registryDir || !(REGISTRY_EXT.has(ext) || asset) || rel.includes('\0') || rel.split('/').some(p => p === '' || p === '.' || p === '..')) { notFound(); return; }
     const file = path.resolve(registryDir, rel);
-    if (!file.startsWith(registryDir + path.sep)) { refuse(res, 404); return; }
+    if (!file.startsWith(registryDir + path.sep)) { notFound(); return; }
     // 1.514: a paid version's bundle only with a store ticket.
     const pv = /^plugins\/([^/]+)\/([^/]+)\/bundle\.est$/.exec(rel);
     if (pv && gated(req, res, { id: pv[1], version: pv[2] })) return;
-    void serveFile(req, res, file, { ext, cors: corsOf(req), cache: REGISTRY_VERSION_RE.test(rel) ? 'public, max-age=31536000, immutable' : REGISTRY_SHORT_CACHE }).catch(() => res.destroy()); // serveFile answers its own failures; this only ends a socket on a throw
+    void serveFile(req, res, file, { ext, cors: corsOf(req), cache: asset || REGISTRY_VERSION_RE.test(rel) ? 'public, max-age=31536000, immutable' : REGISTRY_SHORT_CACHE }).catch(() => res.destroy()); // serveFile answers its own failures; this only ends a socket on a throw
   };
 
   /**
@@ -516,12 +557,19 @@ export function createEstOrigin(env, o = {}) {
       }
       const reg = REGISTRY_RE.exec(pathname);
       if (reg) { registryRoute(req, res, reg[1]); return true; }
+      // 1.696: `/est/release/manifest.json` and its `.sig` from the active release; closed (no release), a 404 as before.
+      const rel = RELEASE_MANIFEST_RE.exec(pathname);
+      if (rel) {
+        const dir = release?.manifestDir?.() ?? null;
+        if (!dir) { refuse(res, 404); return true; }
+        void serveFile(req, res, path.join(dir, rel[1]), { ext: path.extname(rel[1]), cors: corsOf(req), cache: RELEASE_MANIFEST_CACHE }).catch(() => res.destroy()); // serveFile answers its own failures
+        return true;
+      }
       const m = PATH_RE.exec(pathname);
       const ext = m ? path.extname(m[2]).toLowerCase() : '';
-      if (!dir || !m || !(ext in MIME) || m[2].includes('\0')) { refuse(res, 404); return true; }
-      const root = path.join(dir, m[1]);
-      const file = path.resolve(root, m[2]);
-      if (!file.startsWith(root + path.sep)) { refuse(res, 404); return true; }
+      if (!m || !(ext in MIME) || m[2].includes('\0')) { refuse(res, 404); return true; }
+      const file = bundleFile(m[1], m[2]);
+      if (!file) { refuse(res, 404); return true; }
       // 1.314 (EST-04): a page only as the bundle's own (est.json's ui.path) and only to a frame.
       if (ext === '.html' && !htmlAllowed(req, m[2], pageOf(m[1]))) { refuse(res, 404); return true; }
       if (ext === '.svg' && !svgAllowed(req)) { refuse(res, 404); return true; }

@@ -47,3 +47,26 @@ export function automationValue(points: readonly AutomationPoint[], beat: number
   if (i >= n - 1) return points[n - 1]!.value;
   return along(points[i]!, points[i + 1]!, beat);
 }
+
+/** 1.655: the song's tick (1/960 beat), the grid a gate's lane is read on. */
+const GATE_TICK = 1 / 960;
+
+/**
+ * 1.655 (the parity fuzzer): a gate's lane over [b0, b1) beats (an on/off control at 0.5 of its 0…1
+ * range: LOOPGRAB's Grab): whether it is on at `b0`, and each beat in (b0, b1) where it turns on or off.
+ * Read at the song's ticks (absolute: tick k is beat k/960), so the transport's windows and a render,
+ * however each cuts its stretch, find the same beats; a step drawn on a beat (two points on it) changes
+ * exactly there. `mod` (a modulator's) moves each value first, as the lanes' sampling does. Pure.
+ */
+export function gateEdges(points: readonly AutomationPoint[], b0: number, b1: number, mod?: (beat: number, v: number) => number): { on: boolean; edges: { beat: number; on: boolean }[] } {
+  const at = (b: number) => { const v = automationValue(points, b); return (mod ? mod(b, v) : v) >= 0.5; };
+  let state = at(b0);
+  const first = state;
+  const edges: { beat: number; on: boolean }[] = [];
+  for (let k = Math.floor(b0 / GATE_TICK + 1e-9) + 1; k * GATE_TICK < b1 - 1e-9; k++) {
+    const b = k * GATE_TICK;
+    const s = at(b);
+    if (s !== state) { edges.push({ beat: b, on: s }); state = s; }
+  }
+  return { on: first, edges };
+}

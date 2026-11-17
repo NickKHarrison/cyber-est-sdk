@@ -81,17 +81,17 @@ export function namesBuildOf(project: EstProject, out: string): { cmd: string; a
 
 /**
  * Build `dir` with names (`namesBuildOf`) and pack it in memory: the bytes `est profile --debug`
- * profiles, never written to `dist/` and never to install (the names change the bundle's hash, not
+ * profiles (and, 1.669, `est replay --debug` replays), never written to `dist/` and never to install (the names change the bundle's hash, not
  * its fuel: a name section holds no code).
  */
-export function buildWithNames(dir: string, ctx: CommandContext): Uint8Array {
+export function buildWithNames(dir: string, ctx: CommandContext, purpose: 'profile' | 'replay' = 'profile'): Uint8Array {
   const d = resolve(ctx.cwd, dir);
   const project = readProject(d);
   const out = mkdtempSync(join(tmpdir(), 'est-profile-'));
   try {
     const plan = namesBuildOf(project, out);
-    if (!plan) throw new Error(`--debug builds AssemblyScript folders and Rust folders whose module is under target/; for C or C++ add -g to est-build.json's flags and run est profile without --debug`);
-    ctx.err(`est: building with names for the profile (${[plan.cmd.split(/[\\/]/).pop(), ...plan.args].join(' ')})`);
+    if (!plan) throw new Error(`--debug builds AssemblyScript folders and Rust folders whose module is under target/; for C or C++ add -g to est-build.json's flags and run est ${purpose} without --debug`);
+    ctx.err(`est: building with names for the ${purpose} (${[plan.cmd.split(/[\\/]/).pop(), ...plan.args].join(' ')})`);
     const r = spawnSync(plan.cmd, plan.args, { cwd: project.dir, stdio: ['ignore', 2, 2], shell: process.platform === 'win32', env: { ...process.env, ...plan.env } });
     if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error(`${plan.cmd} is not installed (run \`est doctor\` for the command that installs it)`);
     if (r.status !== 0) throw new Error(`the build with names failed (${plan.cmd} exited with ${r.status ?? r.signal})`);

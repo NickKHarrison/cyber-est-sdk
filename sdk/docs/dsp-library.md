@@ -93,3 +93,4 @@ From the header of the AssemblyScript library's `index.ts` (`est/index.ts` in an
 - An effect: `est new effect-rust …` or `effect-as` (a smoothed gain into a resonant filter).
 - An instrument: `est new instrument-rust …` or `instrument-as` (four voices of saw into a filter, each with an ADSR).
 - A custom UI for either: `est new … --ui` ([the UI library](ui.md)).
+- Voice stealing, NOTE_ENDs, a step clock on the host's bars, seeded randomness and tails, done once (AssemblyScript): [the DSP toolkit](dsp-toolkit.md).

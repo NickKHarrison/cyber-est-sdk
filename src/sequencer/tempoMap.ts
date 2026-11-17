@@ -312,6 +312,36 @@ export function tempoBreaks(t: Tempo, b0: number, b1: number, rampStep: number):
   return out;
 }
 
+/**
+ * The tempo map release (§2.9): where the tempo changes in (b0, b1) for the synced LFOs and Delay, and
+ * the instruments' tempo: at each tempo point, and once a beat inside a ramp (from the ramp's start),
+ * with the tempo from there (none for a number). 1.655: here (pure), from exportSequence.ts, so the
+ * transport posts at the same beats as every render (`tempoEventAt`).
+ */
+export function tempoEvents(clock: Tempo, b0: number, b1: number): { beat: number; bpm: number }[] {
+  if (typeof clock === 'number') return [];
+  const out: { beat: number; bpm: number }[] = [];
+  let last = bpmAt(clock, b0);
+  for (const b of tempoBreaks(clock, b0, b1, 1)) {
+    const bpm = bpmAt(clock, b);
+    if (Math.abs(bpm - last) < 1e-6) continue;
+    out.push({ beat: b, bpm });
+    last = bpm;
+  }
+  return out;
+}
+
+/**
+ * 1.655: whether `beat` is where `tempoEvents` may post (a point, or a whole beat into a ramp), with the
+ * tempo there; null if not. Whether the tempo changed since the last one posted is the caller's to ask
+ * (the transport against its held tempo), as `tempoEvents` asks against its last event.
+ */
+export function tempoEventAt(clock: Tempo, beat: number): { beat: number; bpm: number } | null {
+  if (typeof clock === 'number') return null;
+  const b = tempoBreaks(clock, beat - 1e-6, beat + 1e-6, 1)[0];
+  return b !== undefined && Math.abs(b - beat) < 1e-6 ? { beat: b, bpm: bpmAt(clock, b) } : null;
+}
+
 /** The slowest BPM between beats a and b (inclusive). */
 export function minBpmBetween(t: Tempo, a: number, b: number): number {
   return extremeBpm(t, a, b, Math.min);

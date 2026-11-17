@@ -27,11 +27,18 @@ function levelsFor(file: string | undefined, id: string): Record<string, number>
   return raw[id]?.levels ?? (raw.levels as Record<string, number> | undefined);
 }
 
+/** A values file (1.664): `{ values: { "<preset>": { "<param id>": value } } }`, or such by plugin id. */
+function valuesFor(file: string | undefined, id: string): Record<string, Record<number, number>> | undefined {
+  if (!file) return undefined;
+  const raw = JSON.parse(readFileSync(file, 'utf8')) as { values?: Record<string, Record<number, number>> } & Record<string, { values?: Record<string, Record<number, number>> }>;
+  return raw[id]?.values ?? (raw.values as Record<string, Record<number, number>> | undefined);
+}
+
 const command: EstCommand = {
   name: 'quality',
   summary: 'Measure every factory preset of an instrument: loudness, true peak, DC, clicks, denormals, aliasing, fuel, stuck notes',
   usage: [
-    'est quality <bundle|dir> [more…] [--profile <file.json>] [--preset <name>] [--levels <file.json> [--only-listed]] [--json <file>] [--md <file>] [--no-build]',
+    'est quality <bundle|dir> [more…] [--profile <file.json>] [--preset <name>] [--levels <file.json> [--only-listed]] [--values <file.json>] [--json <file>] [--md <file>] [--no-build]',
     '',
     '  bundle|dir     a .est bundle, a plugin folder (built and packed first), or a folder of bundles',
     '  --profile      a quality profile (or profiles by plugin id): kitKeys, kinds by preset name,',
@@ -40,6 +47,8 @@ const command: EstCommand = {
     '  --levels       try presets\' Level (dB) by name before writing them: a presets.levels.json',
     '                 ({ "levels": { "<preset>": -4.5 } }), or such files\' levels by plugin id',
     '  --only-listed  measure only the presets --levels names',
+    '  --values       try presets\' other values by name and parameter id before writing them',
+    '                 ({ "values": { "<preset>": { "12": 0.4 } } }), or such by plugin id',
     '  --json, --md   also write the reports as JSON, or as Markdown tables',
     '',
     'Each preset is played at 48 kHz with a phrase for its kind (from its tags: a chord, a melody, a',
@@ -47,7 +56,7 @@ const command: EstCommand = {
     'for leads, keys and pads, -14 for basses and drums, the true peak under -1 dBTP. Exit 1 when a',
     'preset has a flag other than its level.',
   ].join('\n'),
-  valueFlags: ['profile', 'preset', 'levels', 'json', 'md'],
+  valueFlags: ['profile', 'preset', 'levels', 'values', 'json', 'md'],
   async run(args, ctx) {
     if (!args.positional.length) throw new UsageError('est quality needs a bundle or a plugin folder');
     const files: { name: string; bytes: () => Uint8Array }[] = [];
@@ -65,13 +74,15 @@ const command: EstCommand = {
     const only = flagString(args, 'preset');
     const levelsFile = flagString(args, 'levels') && resolve(ctx.cwd, flagString(args, 'levels')!);
     if (levelsFile && !existsSync(levelsFile)) throw new UsageError(`--levels: ${flagString(args, 'levels')} is not there`);
+    const valuesFile = flagString(args, 'values') && resolve(ctx.cwd, flagString(args, 'values')!);
+    if (valuesFile && !existsSync(valuesFile)) throw new UsageError(`--values: ${flagString(args, 'values')} is not there`);
     const reports: QualityReport[] = [];
     let bad = 0;
     for (const f of files) {
       const bytes = f.bytes();
       const { readBundle } = await import('../../../../../src/audio/est/install/bundle');
       const id = (await readBundle(bytes)).manifest.id;
-      const report = await qualityOf(bytes, profileFor(profileFile && resolve(ctx.cwd, profileFile), id), { only: only ? [only] : args.flags['only-listed'] === true ? Object.keys(levelsFor(levelsFile, id) ?? {}) : undefined, progress: s => ctx.err(s), levels: levelsFor(levelsFile, id) });
+      const report = await qualityOf(bytes, profileFor(profileFile && resolve(ctx.cwd, profileFile), id), { only: only ? [only] : args.flags['only-listed'] === true ? Object.keys(levelsFor(levelsFile, id) ?? {}) : undefined, progress: s => ctx.err(s), levels: levelsFor(levelsFile, id), values: valuesFor(valuesFile, id) });
       reports.push(report);
       ctx.out(qualityTable(report));
       bad += report.presets.filter(p => p.error || p.flags.some(x => !x.startsWith('level '))).length;

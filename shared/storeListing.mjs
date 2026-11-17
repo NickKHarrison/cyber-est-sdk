@@ -7,7 +7,7 @@
 //     tier: 'cyber' | 'reviewed' | 'community', early, tags, summary,
 //     latest: { version, contentHash, sizeBytes, publishedAt },
 //     counts: { installs, plays, wishlists }, price: null | { display }, licence: 'free' | 'paid', hasOwnUi,
-//     art: null | { url, width, height }, demo: { url, seconds } | null, links: { homepage?, source?, support? },
+//     art: null | { url, width, height }, checked: boolean, demo: { url, seconds } | null, links: { homepage?, source?, support? },
 //     reviewApproved, sale: null | { display, endsAt } }
 //
 // 1.504: `art` is a picture of the plugin's own window (shared/storeArt.mjs: made at build time by
@@ -164,7 +164,7 @@ const count = (v) => Math.max(0, Math.floor(Number(v) || 0));
  *   counts?: { installs?: number, plays?: number, wishlists?: number }, price?: { display: string } | null, licence?: string, hasOwnUi?: boolean,
  *   art?: { url: string, width: number, height: number } | null,
  *   demo?: { url: string, seconds: number } | null, links?: Record<string, string> | null, reviewApproved?: boolean,
- *   sale?: { display: string, endsAt: string } | null }} p
+ *   sale?: { display: string, endsAt: string } | null, checked?: boolean }} p
  * @returns {StoreListing}
  */
 export function buildStoreListing(p) {
@@ -199,6 +199,8 @@ export function buildStoreListing(p) {
     demo: demoOf(p.demo),
     links: linksOf(p.links),
     reviewApproved: p.reviewApproved === true && tier === 'community',
+    // 1.668: the plugin checks passed on the latest version's bytes (shared/storeChecked.mjs; the server's index only).
+    checked: p.checked === true,
     // 1.519: a running sale shows only on a paid listing (its normal price stays in `price`).
     sale: licence === 'paid' ? saleOf(p.sale) : null,
   };
@@ -222,6 +224,7 @@ function saleOf(v) {
  *   demo: { url: string, seconds: number } | null, links: Record<string, string>,
  *   reviewApproved: boolean,
  *   sale: { display: string, endsAt: string } | null,
+ *   checked: boolean,
  * }} StoreListing
  */
 

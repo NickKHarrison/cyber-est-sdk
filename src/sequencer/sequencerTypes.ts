@@ -14,7 +14,7 @@ import { kitHashes, sanitiseDrumKit, type DrumKit } from '../audio/drums/drumTyp
 import { defaultDrumKit } from '../audio/drums/drumKits';
 import { defaultWavePatch, sanitiseWavePatch, type WavePatch } from '../audio/wave/waveTypes';
 import { defaultFx, delayToneLaneValue, sanitiseFxList, type FxSlot } from '../audio/mixer/fxDefs';
-import { cyberPatch, eqToSlot, type CyberType } from '../audio/mixer/cyberDefs';
+import { cyberLegacyValues, cyberPatch, eqToSlot, type CyberType } from '../audio/mixer/cyberDefs';
 import { faderToMasterDbBefore133, masterDbToTrackFader } from '../audio/masterGain';
 import { bpmAt, secondsAt, songTempo } from './tempoMap';
 import { sanitiseMeterMap } from './meterMap';
@@ -22,6 +22,11 @@ import { sanitiseGrooveAmount, sanitiseGrooveRef, sanitiseGrooves, type Groove }
 import { sanitiseEstBlock, type EstSlotBlock } from '../audio/est/slot';
 import { defaultRackPatch, rackHashes, sanitiseRackPatch, type RackPatch } from '../audio/rack/rackTypes';
 import { findFxDeep } from '../audio/rack/fxRackTypes';
+import { holdNewer, keepExtras, NEWER_WORDS, unwrapNewer, withExtrasBudget } from '../lib/forwardFields';
+import {
+  AUDIO_CLIP_FIELDS, CLIP_FIELDS, LANE_FIELDS, LOCATOR_FIELDS, MASTER_FIELDS, NOTE_FIELDS, RETURN_FIELDS, SCENE_FIELDS,
+  SESSION_FIELDS, SONG_FIELDS, TRACK_FIELDS,
+} from './songFields';
 import type { ChainModule, DynamicsParams, EQParams, MaximizerParams, ModuleId, SaturationParams } from '../audio/types';
 import {
   DIVISIONS, divisionBeats, defaultArpState, defaultSynthPatch, sanitiseArp, sanitiseSynthPatch,
@@ -307,7 +312,17 @@ interface TrackBase {
 }
 
 /** A track rendered to audio (1.7, Freeze): `hash` is the upload, `renderedKey` what it was rendered from. */
-export interface Frozen { hash: string; renderedKey: string }
+export interface Frozen {
+  hash: string;
+  renderedKey: string;
+  /**
+   * 1.673: frozen **with its effects** (Freeze with effects: a track holding an Audio Effect Rack or
+   * LOOPGRAB, `freezeWithFxOffered`): the render holds the track's inserts and its delay too, so it
+   * plays into the strip after them (`Strip.postFx`) while the inserts hear nothing; absent: 1.7's
+   * freeze, the instrument alone into the live inserts.
+   */
+  fx?: true;
+}
 
 /** A return bus (1.6): fed by the tracks' sends, through its own inserts into the master. */
 export type ReturnId = 'ret-a' | 'ret-b' | 'ret-c' | 'ret-d' | 'ret-e' | 'ret-f' | 'ret-g' | 'ret-h';
@@ -1143,7 +1158,8 @@ export function migrateMasterFromChain(chain: readonly ChainModule[], params: Ch
     seen.add(c.id);
     const base = defaultFx(m.type, m.id);
     const conv = c.id === 'eq' ? eqToSlot(params.eq) : cyberPatch(m.type, params[c.id]);
-    fx.push({ ...base, on: c.enabled, params: { ...base.params, ...conv } });
+    // 1.716: the chain's modules were Classic (the EQ's biquads, the Saturator at 4×): so are its slots.
+    fx.push({ ...base, on: c.enabled, params: { ...base.params, ...cyberLegacyValues(m.type), ...conv } });
   }
   return { fx: sanitiseFxList(fx) };
 }
@@ -1162,7 +1178,8 @@ export function sanitiseMaster(raw: unknown): MasterBus {
   if (!isObj(raw) || !Array.isArray(raw.fx)) return defaultMaster();
   // 1.118: the crossfader, kept only off the middle (a song without one keeps its shape).
   const xfade = sanitiseXfade(raw.xfade);
-  return { fx: sanitiseFxList(raw.fx), ...(xfade ? { xfade } : {}) };
+  // 1.661: a newer build's fields kept beside these (forwardFields.ts).
+  return keepExtras(raw, { fx: sanitiseFxList(raw.fx), ...(xfade ? { xfade } : {}) }, MASTER_FIELDS);
 }
 
 /** A new project's sequencer: Analog 1 (id `synth-1`) and the pads, no clips. */
@@ -1221,6 +1238,11 @@ const name = (v: unknown, d: string) => {
 
 /** A note in range for its track's kind and its clip's content, or null. */
 export function sanitiseNote(raw: unknown, kind: TrackKind, contentLength: number): Note | null {
+  const note = sanitiseNoteKnown(raw, kind, contentLength);
+  // 1.661: a newer build's fields kept beside these (forwardFields.ts).
+  return note && keepExtras(raw, note, NOTE_FIELDS);
+}
+function sanitiseNoteKnown(raw: unknown, kind: TrackKind, contentLength: number): Note | null {
   if (!isObj(raw)) return null;
   const nid = id(raw.id);
   if (!nid) return null;
@@ -1252,6 +1274,35 @@ export function sanitiseNote(raw: unknown, kind: TrackKind, contentLength: numbe
 
 /** A clip in range, its notes checked, or null (no id, or a track that is not there). */
 export function sanitiseClip(raw: unknown, tracks: readonly Track[]): Clip | null {
+  const r = unwrapNewer(raw);
+  // 1.661: an unknown kind of clip (a `kind` this build does not know) is an inert placeholder.
+  if (isObj(r) && isNewerClipKind(r)) return clipPlaceholder(r, tracks);
+  const clip = sanitiseClipKnown(r, tracks);
+  // 1.661: a newer build's fields kept beside these (forwardFields.ts).
+  return clip && keepExtras(r, clip, CLIP_FIELDS);
+}
+
+/**
+ * 1.661: a clip of a kind a newer Cyber made: a muted, empty MIDI clip in its place (its id, track,
+ * place and length), named in words, holding the clip as it was, given back unchanged on save
+ * (its id, track and start, or a slot's id, track and scene, as they are then: it can be moved or
+ * deleted here). Null where
+ * this build could not place it (no such track, an audio track) or past the bounds.
+ */
+function clipPlaceholder(raw: Record<string, unknown>, tracks: readonly Track[], sceneId?: string): Clip | null {
+  const inert = sanitiseClipKnown({
+    id: raw.id, trackId: raw.trackId, start: sceneId ? 0 : raw.start, length: raw.length, contentLength: raw.contentLength ?? raw.length,
+    offset: sceneId ? 0 : raw.offset, color: raw.color, name: NEWER_WORDS, notes: [], muted: true,
+  }, tracks);
+  if (!inert) return null;
+  const placed = sceneId ? { ...inert, length: inert.contentLength, sceneId } : inert;
+  // A slot's clip has no place of its own (its start is always 0): only its slot is this build's to change.
+  return holdNewer(raw, placed, { own: sceneId ? ['id', 'trackId', 'sceneId'] : ['id', 'trackId', 'start'] });
+}
+
+const isNewerClipKind = (r: Record<string, unknown>) => typeof r.kind === 'string' && r.kind !== 'midi';
+
+function sanitiseClipKnown(raw: unknown, tracks: readonly Track[]): Clip | null {
   if (!isObj(raw)) return null;
   const cid = id(raw.id);
   const track = tracks.find(t => t.id === raw.trackId);
@@ -1397,6 +1448,16 @@ export function sanitiseClipEnvelopes(raw: unknown): ClipEnvelope[] | undefined 
 }
 
 function sanitiseTrack(raw: unknown): Track | null {
+  const r = unwrapNewer(raw);
+  const t = sanitiseTrackKnown(r);
+  // 1.661: a newer build's fields kept beside these (forwardFields.ts).
+  return t && keepExtras(r, t, TRACK_FIELDS);
+}
+
+/** The engines a synth track's `engine` names (absent: ANALOG, every synth track before 1.6). */
+const KNOWN_ENGINES = new Set(['analog', 'wave', 'sampler', 'fm', 'chip', 'drums', 'none', 'pads', 'est', 'rack']);
+
+function sanitiseTrackKnown(raw: unknown): Track | null {
   if (!isObj(raw)) return null;
   const tid = id(raw.id);
   if (!tid || (raw.kind !== 'synth' && raw.kind !== 'pads' && raw.kind !== 'audio' && raw.kind !== 'group')) return null;
@@ -1453,6 +1514,14 @@ function sanitiseTrack(raw: unknown): Track | null {
   }
   // 1.356: an Instrument Rack (its chains each through their engine's sanitiser). A client before it reads it as ANALOG (DOC_VERSION refuses it in a room).
   if (raw.engine === 'rack') return { ...synth, engine: 'rack', patch: sanitiseRackPatch(raw.patch) };
+  // 1.661: an engine a newer Cyber has: a MIDI track (silent, its notes and clips kept) holding the
+  // engine and its patch, given back over it on save while it is still a MIDI track. Past the
+  // bounds, ANALOG as before 1.661.
+  if (typeof raw.engine === 'string' && !KNOWN_ENGINES.has(raw.engine)) {
+    const held = holdNewer({ engine: raw.engine, ...(raw.patch !== undefined ? { patch: raw.patch } : {}) },
+      { ...synth, engine: 'none' as const, patch: null }, { merge: { key: 'engine', is: 'none' } });
+    if (held) return held;
+  }
   return { ...synth, engine: 'analog', patch: sanitiseSynthPatch(raw.patch) };
 }
 
@@ -1517,7 +1586,7 @@ const HASH_RE = /^[a-f0-9]{64}$/;
 function sanitiseFrozen(raw: unknown): Frozen | null {
   if (!isObj(raw) || typeof raw.hash !== 'string' || !HASH_RE.test(raw.hash)) return null;
   const key = typeof raw.renderedKey === 'string' && raw.renderedKey.length <= 128 ? raw.renderedKey : '';
-  return { hash: raw.hash, renderedKey: key };
+  return { hash: raw.hash, renderedKey: key, ...(raw.fx === true ? { fx: true as const } : {}) };
 }
 
 /** Humanise from anything, or null when absent or all zero. */
@@ -1529,6 +1598,11 @@ export function sanitiseHumanise(raw: unknown): Humanise | null {
 
 /** An audio clip in range on an audio track, or null. */
 export function sanitiseAudioClip(raw: unknown, tracks: readonly Track[]): AudioClip | null {
+  const c = sanitiseAudioClipKnown(raw, tracks);
+  // 1.661: a newer build's fields kept beside these (forwardFields.ts).
+  return c && keepExtras(raw, c, AUDIO_CLIP_FIELDS);
+}
+function sanitiseAudioClipKnown(raw: unknown, tracks: readonly Track[]): AudioClip | null {
   if (!isObj(raw)) return null;
   const cid = id(raw.id);
   const track = tracks.find(t => t.id === raw.trackId);
@@ -1711,7 +1785,8 @@ export function sanitiseAutomationLane(raw: unknown, tracks: readonly Track[]): 
   const lid = id(raw.id);
   const target = sanitiseAutomationTarget(raw.target, tracks);
   if (!lid || !target) return null;
-  return { id: lid, target, points: sanitisePoints(raw.points), on: bool(raw.on, true) };
+  // 1.661: a newer build's fields kept beside these (forwardFields.ts).
+  return keepExtras(raw, { id: lid, target, points: sanitisePoints(raw.points), on: bool(raw.on, true) }, LANE_FIELDS);
 }
 
 /**
@@ -1809,7 +1884,7 @@ export function sanitiseLocators(raw: unknown): Locator[] {
     const lid = id(r.id);
     if (!lid || seen.has(lid) || typeof r.beat !== 'number' || !Number.isFinite(r.beat)) continue;
     seen.add(lid);
-    out.push({ id: lid, beat: tk(num(r.beat, 0, MAX_BEATS, 0)), name: name(r.name, 'Locator') });
+    out.push(keepExtras(r, { id: lid, beat: tk(num(r.beat, 0, MAX_BEATS, 0)), name: name(r.name, 'Locator') }, LOCATOR_FIELDS));
   }
   return sortLocators(out).slice(0, MAX_LOCATORS);
 }
@@ -1843,14 +1918,14 @@ export function sanitiseReturns(raw: unknown): ReturnBus[] {
     if (!isObj(r)) break;
     const fallback = d[i] ?? defaultReturn(rid);
     rawSends.push(r.sends);
-    out.push({
+    out.push(keepExtras(r, {
       id: rid, name: name(r.name, fallback.name), volume: num(r.volume, MIN_VOLUME_DB, MAX_VOLUME_DB, 0),
       pan: num(r.pan, -1, 1, 0), mute: bool(r.mute, false), fx: sanitiseFxList(r.fx), ...heightOf(r.height),
       color: color(r.color, returnColorAt(i)), // 1.79: kept; one from before 1.79 takes its index's
       ...xfadeAssignOf(r.xfadeAssign),
       // 1.127: its output, to a later return only (fitted below, once the count is known).
       ...(typeof r.output === 'string' && (RETURN_IDS as readonly string[]).includes(r.output) ? { output: r.output } : {}),
-    });
+    } as ReturnBus, RETURN_FIELDS));
   }
   // 1.111: each return's sends, to the returns after it only, fitted once the count is known.
   return out.map((r, i) => {
@@ -2005,6 +2080,14 @@ export function songSummary(s: Pick<SequencerState, 'tempo' | 'tracks' | 'clips'
 
 /** The SEQUENCER's state with every field present and in range; unknown fields dropped. */
 export function sanitiseSequencerState(raw: unknown): SequencerState {
+  // 1.661: one song is one document for the bound on what a newer build's parts may take.
+  return withExtrasBudget(() => {
+    const song = sanitiseSequencerStateKnown(raw);
+    return isObj(raw) ? keepExtras(raw, song, SONG_FIELDS) : song;
+  });
+}
+
+function sanitiseSequencerStateKnown(raw: unknown): SequencerState {
   const d = defaultSequencerState();
   if (!isObj(raw)) return d;
   const returns = sanitiseReturns(raw.returns);
@@ -2201,6 +2284,13 @@ export interface ClipLaunch {
    */
   loopStart?: number;
   loopEnd?: number;
+  /**
+   * 1.674, a Session clip's own time signature (as a scene may have one): while the clip plays its
+   * launch quantise, its follow action's time and its grid's bars count in it (`clipSigIn` in
+   * sessionPlayback.ts). Absent: the Session's (the launched scene's, else the song's meter). It
+   * never changes the Session's signature: a scene's does.
+   */
+  sig?: TimeSig;
 }
 export const DEFAULT_CLIP_LAUNCH: ClipLaunch = { mode: 'trigger', quantize: 'global', follow: DEFAULT_FOLLOW };
 /** A clip's launch settings, or the defaults. */
@@ -2279,6 +2369,9 @@ export function sanitiseClipLaunch(raw: unknown): ClipLaunch | undefined {
     follow: sanitiseFollow(raw.follow),
     ...(raw.legato === true ? { legato: true } : {}),
   };
+  // 1.674: a clip's own signature, 4/4 too (a 4/4 clip in a 3/4 song is a choice).
+  const sig = isObj(raw.sig) ? sanitiseSig(raw.sig) : undefined;
+  if (sig) out.sig = sig;
   return JSON.stringify(out) === JSON.stringify(d) ? undefined : out;
 }
 export interface SessionState {
@@ -2383,8 +2476,11 @@ export function midiClipById(s: Pick<SequencerState, 'clips' | 'session'>, id: s
 export const isSessionClip = (c: Clip | AudioClip): c is SessionClip | SessionAudioClip => typeof (c as { sceneId?: unknown }).sceneId === 'string';
 
 /** A session MIDI clip in range: as `sanitiseClip`, then start and offset 0 and its length its loop. */
-export function sanitiseSessionClip(raw: unknown, tracks: readonly Track[], sceneIds: ReadonlySet<string>): SessionClip | null {
+export function sanitiseSessionClip(rawIn: unknown, tracks: readonly Track[], sceneIds: ReadonlySet<string>): SessionClip | null {
+  const raw = unwrapNewer(rawIn);
   if (!isObj(raw) || typeof raw.sceneId !== 'string' || !sceneIds.has(raw.sceneId)) return null;
+  // 1.661: an unknown kind of clip in a slot: the placeholder, as an arranged one's.
+  if (isNewerClipKind(raw)) return clipPlaceholder(raw, tracks, raw.sceneId) as SessionClip | null;
   // 1.109: a slot's clip is never a take.
   const c = sanitiseClip({ ...raw, start: 0, offset: 0, take: undefined, takeGroup: undefined, loopOff: undefined }, tracks);
   if (!c) return null;
@@ -2422,9 +2518,9 @@ export function sanitiseSession(raw: unknown, tracks: readonly Track[], takenIds
     const sig = sanitiseSig(r.sig);
     // 1.118: a scene's colour.
     const sceneColor = typeof r.color === 'string' && COLOR_RE.test(r.color) ? r.color : undefined;
-    scenes.push({ id: sid, name: typeof r.name === 'string' ? r.name.slice(0, 40) : '', ...(tempo !== undefined ? { tempo } : {}), ...(sig ? { sig } : {}), ...(sceneColor ? { color: sceneColor } : {}) });
+    scenes.push(keepExtras(r, { id: sid, name: typeof r.name === 'string' ? r.name.slice(0, 40) : '', ...(tempo !== undefined ? { tempo } : {}), ...(sig ? { sig } : {}), ...(sceneColor ? { color: sceneColor } : {}) }, SCENE_FIELDS));
   }
-  if (!scenes.length) return { ...d, quantize: quantizeOf(raw.quantize), ...overdubModeOf(raw.overdubMode) };
+  if (!scenes.length) return keepExtras(raw, { ...d, quantize: quantizeOf(raw.quantize), ...overdubModeOf(raw.overdubMode) }, SESSION_FIELDS);
   const slots = new Set<string>();
   const ids = new Set(takenIds);
   const clips: SessionClip[] = [];
@@ -2443,7 +2539,8 @@ export function sanitiseSession(raw: unknown, tracks: readonly Track[], takenIds
     const c = sanitiseSessionAudioClip(r, tracks, sceneIds);
     if (c && take(c)) audioClips.push(c);
   }
-  return { scenes, clips, audioClips, quantize: quantizeOf(raw.quantize), ...overdubModeOf(raw.overdubMode), ...noStopOf(raw.noStop, tracks, sceneIds) };
+  // 1.661: a newer build's fields kept beside these (forwardFields.ts).
+  return keepExtras(raw, { scenes, clips, audioClips, quantize: quantizeOf(raw.quantize), ...overdubModeOf(raw.overdubMode), ...noStopOf(raw.noStop, tracks, sceneIds) }, SESSION_FIELDS);
 }
 const quantizeOf = (v: unknown): LaunchQuantize => (typeof v === 'string' && (LAUNCH_QUANTIZE as readonly string[]).includes(v) ? v as LaunchQuantize : '1');
 

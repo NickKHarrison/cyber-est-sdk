@@ -17,6 +17,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { BROKEN, packFixture } from '../../../fixtures/broken/index.mjs';
+import { EST_RULES } from '../../../../src/audio/est/install/rules';
 import { parseArgs, UsageError } from '../src/command';
 import { crateNameOf, renameInCode, scaffold, typeNameOf } from '../src/scaffold';
 
@@ -66,8 +67,9 @@ function scaffoldPackValidate(template: string) {
   // other files an agent reads, so no doc has to point outside the folder.
   for (const f of ['est-manifest-1.schema.json', 'est-validator-rules.json', 'est-abi-1.0.json', 'est-abi-1.1.json', 'est-ui.d.ts']) expect(existsSync(join(dir, f)), f).toBe(true);
   expect(existsSync(join(dir, 'ui-example'))).toBe(false);
-  // Only a template with its own page (the visualiser) has ui/ without --ui.
-  expect(existsSync(join(dir, 'ui'))).toBe(existsSync(join(TEMPLATES, template, 'ui')));
+  // Only a start with its own page (the visualiser templates, 1.672's spectrum-tilt recipe) has ui/ without --ui.
+  const from = recipes.includes(template) ? join(REPO, 'sdk', 'cookbook', template) : join(TEMPLATES, template);
+  expect(existsSync(join(dir, 'ui'))).toBe(existsSync(join(from, 'ui')));
   // The crate and the plugin's type are named from the id, not the template.
   const type = typeNameOf(`com.example.${template}`);
   const source = readFileSync(join(dir, isAs(template) ? 'assembly/index.ts' : 'src/lib.rs'), 'utf8');
@@ -101,7 +103,7 @@ function scaffoldPackValidate(template: string) {
 describe('est new, pack and validate', () => {
   it('has the AssemblyScript templates to run', () => { expect(asTemplates).toContain('instrument-as'); });
   for (const t of asTemplates) it(`${t} (AssemblyScript)`, () => scaffoldPackValidate(t), 240_000);
-  it('has the cookbook\'s ten recipes to run', () => { expect(recipes).toHaveLength(10); });
+  it('has the cookbook\'s eleven recipes to run (1.672: the spectrum tilt)', () => { expect(recipes).toHaveLength(11); });
   for (const t of recipes) it(`the cookbook's ${t} (AssemblyScript)`, () => scaffoldPackValidate(t), 240_000);
   for (const t of rustTemplates) it.skipIf(!rust)(`${t} (Rust; skipped where cargo or the wasm32-unknown-unknown target is missing)`, () => scaffoldPackValidate(t), 240_000);
 
@@ -158,10 +160,12 @@ describe('est validate and inspect on the broken fixtures', () => {
       const file = join(dir, `${f.name}.est`);
       writeFileSync(file, packFixture(f).bytes);
       const v = est(['validate', file, '--json', '--seconds', '2']);
-      expect(v.code, `${f.name}: ${v.err}`).toBe(1);
       const report = JSON.parse(v.out) as { ok: boolean; checks: { rule: string; status: string }[] };
-      expect(report.ok).toBe(false);
-      got[f.name] = report.checks.find(c => c.status === 'fail' && c.rule === f.rule)?.rule ?? null;
+      // 1.652: a behaviour check of warning severity flags its fixture `warn` and exits 0 (a warning never fails).
+      const warning = EST_RULES.find(r => r.id === f.rule)?.severity === 'warning';
+      expect(v.code, `${f.name}: ${v.err}`).toBe(warning ? 0 : 1);
+      expect(report.ok).toBe(warning);
+      got[f.name] = report.checks.find(c => c.status === (warning ? 'warn' : 'fail') && c.rule === f.rule)?.rule ?? null;
       expect(JSON.parse(readFileSync(join(dir, 'validation.json'), 'utf8'))).toEqual(JSON.parse(v.out));
     }
     expect(got).toEqual(Object.fromEntries(BROKEN.map(f => [f.name, f.rule])));
@@ -248,6 +252,22 @@ describe('est test, doctor, help', () => {
     // 1.319 (DEV-A §4): `est version` names the oldest Cyber the kit's bundles are for.
     expect(est(['version']).out.trim()).toMatch(/^est \d+\.\d+\.\d+ \(EST 1\.0, for Cyber 1\.\d+\.\d+ or newer\)$/);
   });
+
+  it('1.686: est release is the owner\'s (listed apart), runs scripts/est-release.mjs, and reads an empty content store as nothing live', () => {
+    const h = est(['help']).out;
+    const ownerPart = h.slice(h.indexOf("Cyber's own registry"));
+    expect(ownerPart).toMatch(/^ {2}release\s+build, verify, sign, push, status or revert/m);
+    expect(h.slice(0, h.indexOf("Cyber's own registry"))).not.toMatch(/^ {2}release\s/m);
+    expect(est(['help', 'release']).out).toMatch(/est release push\s+\[--dry-run\]/);
+    expect(est(['release']).code).toBe(2);
+    const bucket = join(tmp, 'release-bucket');
+    mkdirSync(bucket, { recursive: true });
+    // Any Ed25519 public key will do for an empty store: nothing is there to verify.
+    const r = est(['release', 'status', '--to', bucket, '--public-key', 'MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=']);
+    expect(r.out + r.err).toMatch(/Nothing is live yet/);
+    expect(r.code).toBe(0);
+    expect(est(['release', 'nonsense', '--to', bucket]).code).toBe(2);
+  }, 60_000);
 
   it("a template's .gitignore, packed as _gitignore (npm never packs .gitignore), comes back under its own name", () => {
     const templatesDir = join(tmp, 'packed-templates');

@@ -11,8 +11,9 @@
 - [README.md](README.md): what the kit is and the loop (`est new`, `est validate`, `est test`, `est pack`, `est dev`)
 - [docs/for-agents.md](docs/for-agents.md): the page for coding agents: the loop, the files, the limits
 - [docs/templates.md](docs/templates.md): which template to start from
-- [docs/cookbook.md](docs/cookbook.md): ten short tested plugins, each with a prompt
+- [docs/cookbook.md](docs/cookbook.md): eleven short tested plugins, each with a prompt
 - [docs/getting-started.md](docs/getting-started.md), [docs/concepts.md](docs/concepts.md), [docs/dsp-library.md](docs/dsp-library.md), [docs/ui.md](docs/ui.md), [docs/dev-host.md](docs/dev-host.md), [docs/quality.md](docs/quality.md)
+- [docs/dsp-toolkit.md](docs/dsp-toolkit.md): the DSP toolkit (AssemblyScript, to copy into a plugin): a voice allocator that sends every NOTE_END, envelopes and smoothers that flush, a step clock on the host's bars, randomness seeded by position, a tail calculator
 - [docs/manifest.md](docs/manifest.md) and [docs/validator-rules.md](docs/validator-rules.md): generated from the schema and the rules table
 
 ## Templates (`est new <name> <folder>`)
@@ -35,6 +36,7 @@
 - [cookbook/auto-wah/](cookbook/auto-wah/): an envelope follower sweeping a band-pass
 - [cookbook/schroeder-reverb/](cookbook/schroeder-reverb/): four combs and two all-passes per channel
 - [cookbook/step-sequencer/](cookbook/step-sequencer/): a note effect: eight steps synced to the tempo
+- [cookbook/spectrum-tilt/](cookbook/spectrum-tilt/): a tilt EQ whose own window draws its spectrum (EST 1.1's `est:spectrum`, never samples)
 
 ## The contract, machine-readable
 

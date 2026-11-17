@@ -147,14 +147,16 @@ const KEY_KEYS = 'code,down,key,nonce,repeat,shift,type,v';
 /** The codes a forwarded key may carry: a printable key of the main block (the guard's own list). */
 export const KEY_CODE_RE = /^(Key[A-Z]|Digit[0-9]|Space|Semicolon|Quote|Comma|Period|Slash|Backslash|BracketLeft|BracketRight|Minus|Equal|Backquote)$/;
 
-/** A forwarded key checked (schema, nonce, a printable key): the key, or null. */
+/** A forwarded key checked (schema, nonce, a printable key or, 1.662, Escape): the key, or null. */
 export function checkKeyMessage(raw: unknown, nonce: string): FrameKey | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const m = raw as Record<string, unknown>;
   if (m.type !== 'est:key' || m.v !== 1 || m.nonce !== nonce) return null;
   if (Object.keys(m).sort().join(',') !== KEY_KEYS) return null;
-  if (typeof m.key !== 'string' || !/^[\x20-\x7e]$/.test(m.key)) return null;
-  if (typeof m.code !== 'string' || !KEY_CODE_RE.test(m.code)) return null;
+  // 1.662: Escape, the one named key the guard hands back (a window or dialog around the frame closes).
+  if (typeof m.key !== 'string' || typeof m.code !== 'string') return null;
+  const esc = m.key === 'Escape' && m.code === 'Escape';
+  if (!esc && (!/^[\x20-\x7e]$/.test(m.key) || !KEY_CODE_RE.test(m.code))) return null;
   if (typeof m.shift !== 'boolean' || typeof m.down !== 'boolean' || typeof m.repeat !== 'boolean') return null;
   return { key: m.key, code: m.code, shift: m.shift, down: m.down, repeat: m.repeat };
 }

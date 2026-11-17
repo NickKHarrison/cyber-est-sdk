@@ -77,7 +77,7 @@ export function canonicalJson(v) {
   throw new Error('a registry file holds a value JSON cannot carry');
 }
 
-/** The bytes a signature of `kind` covers (1.515: a sound pack's record, 'pack'). @param {'index' | 'blocklist' | 'version' | 'pack'} kind @param {unknown} obj */
+/** The bytes a signature of `kind` covers (1.515: a sound pack's record, 'pack'; 1.685: a store release's manifest, 'manifest', shared/storeRelease.mjs). @param {'index' | 'blocklist' | 'version' | 'pack' | 'manifest'} kind @param {unknown} obj */
 export function signedBytes(kind, obj) {
   return new TextEncoder().encode(`est-registry/1 ${kind}\n${canonicalJson(obj)}`);
 }
@@ -146,7 +146,7 @@ export async function sha256Hex(bytes) {
 /**
  * Whether `sig` (base64) is the key's Ed25519 signature of `kind`'s bytes of `obj`. False for any
  * malformed input; throws only when this runtime has no Ed25519 (the caller says so).
- * @param {'index' | 'blocklist' | 'version'} kind @param {unknown} obj @param {unknown} sig @param {Uint8Array} pub
+ * @param {'index' | 'blocklist' | 'version' | 'pack' | 'manifest'} kind @param {unknown} obj @param {unknown} sig @param {Uint8Array} pub
  */
 export async function verifySigned(kind, obj, sig, pub) {
   const s = typeof sig === 'string' ? fromBase64(sig) : null;
@@ -257,8 +257,8 @@ export function sanitiseIndex(raw) {
 
 /**
  * 1.405 (LOW-2, the pre-review of 2026-11-09): from this instant an index or a blocklist file must
- * carry a signed `expiresAt`. Every file the live registry has published since 1.314 does (7 days from
- * its publish); one signed before 1.314 has none and is still validly signed, so without this a device
+ * carry a signed `expiresAt`. Every file the live registry has published since 1.314 does (`REGISTRY_EXPIRES_DAYS`
+ * from its publish: 7 days then, 14 since the n572 integration); one signed before 1.314 has none and is still validly signed, so without this a device
  * holding no newer copy (a new device, cleared site data) would take a frozen old index from whoever
  * serves `/est/v1/` and never call it stale. Set to the day of the fix: the live registry's files all
  * carried `expiresAt` that day (est-plugins/registry-dist/v1/, published 2026-11-08).

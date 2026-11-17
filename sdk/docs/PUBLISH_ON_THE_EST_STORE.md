@@ -36,7 +36,7 @@ Every check below is the one Cyber runs at install, at publish (again, on Cyber'
 
 **Sample rates.** People run 44.1 and 48 kHz, and an export renders at the project's rate. Size every time, buffer and coefficient in seconds from the rate `activate` receives ([concepts: Sample rates](concepts.md#sample-rates)). Cyber holds its own plugins to this at both rates in `src/audio/est/install/parity.test.ts`. Check yours: the golden spec takes a `sampleRate`, and `npx est compare` takes `--sample-rate`, so render at 44100 and at 48000 and listen for anything that moves.
 
-**Denormals.** WebAssembly has no flush-to-zero, so a filter or reverb tail decaying in silence can run on denormal numbers, which are very slow and which the fuel meter cannot see. Set any recursive state below 1e-20 to 0 (Cyber's catalogue plugins do; `src/audio/est/install/estDenormals.test.ts` counts them over 240 s of zeros). The automatic review renders your plugin and reports denormal-prone silence (step 6).
+**Denormals.** WebAssembly has no flush-to-zero, so a filter or reverb tail decaying in silence can run on denormal numbers, which are very slow and which the fuel meter cannot see. Set any recursive state below 1e-20 to 0 (Cyber's catalogue plugins do; `src/audio/est/install/estDenormalsHarness.ts` counts them over 240 s of zeros). The automatic review renders your plugin and reports denormal-prone silence (step 6).
 
 **Comparing versions.** `npx est compare dist/old.est dist/new.est` renders the same input through both and reports where they part, which is the check to run before you publish an update that should sound the same.
 

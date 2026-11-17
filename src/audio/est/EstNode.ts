@@ -15,6 +15,7 @@
 
 import { importWithRetry } from '@/lib/lazyWithRetry';
 import { forgetEstHealth, noteEstStats } from './health';
+import type { RawCapture } from './crashCapture';
 import { disposeWorkletNode } from '../workletDispose';
 import { compactAbi } from './abi/layout';
 import { buildEstShim } from './runtime/shim';
@@ -222,6 +223,8 @@ export interface EstNode {
   on(type: 'notes', cb: (n: EstNotesOut) => void): () => void;
   /** The error that stopped the instance, if one did. */
   error(): EstError | null;
+  /** 1.669: the crash capture the processor posted with its fault (only an instance made with `capture`), or null. */
+  capture(): RawCapture | null;
   dispose(): void;
 }
 
@@ -257,6 +260,8 @@ export interface EstNodeOptions {
   sidechain?: number;
   /** EST 1.1: post the plugin's note output (`on('notes')`). */
   notesOut?: boolean;
+  /** 1.669: keep the last this many blocks for a crash capture (crashCapture.ts; `captureSetting.ts` decides). */
+  capture?: number;
 }
 
 /** The message port of the node, as the tests stand it in. */
@@ -275,6 +280,7 @@ export function wrapEstNode(node: AudioWorkletNode, port: PortLike, started: num
   const pending = new Map<number, { resolve: (m: Record<string, unknown>) => void; reject: (e: Error) => void }>();
   let nextReq = 1;
   let failed: EstError | null = null;
+  let captured: RawCapture | null = null;
   let disposed = false;
   let ready: EstReady | null = null;
   let settle: { resolve: (r: EstReady) => void; reject: (e: Error) => void } | null = null;
@@ -285,6 +291,9 @@ export function wrapEstNode(node: AudioWorkletNode, port: PortLike, started: num
     if (m.type === 'ready') {
       ready = m as unknown as EstReady;
       settle?.resolve(ready);
+    } else if (m.type === 'capture') {
+      // 1.669: posted just before the fault's `error`, so the error's listeners can read it.
+      if (Array.isArray(m.blocks)) captured = m as unknown as RawCapture;
     } else if (m.type === 'error') {
       failed = { phase: String(m.phase), message: String(m.message), ...(Number.isSafeInteger(m.block) ? { block: Number(m.block) } : {}) };
       settle?.reject(Object.assign(new Error(failed.message), failed));
@@ -377,6 +386,7 @@ export function wrapEstNode(node: AudioWorkletNode, port: PortLike, started: num
         };
       },
       error: () => failed,
+      capture: () => captured,
       dispose() {
         if (disposed) return;
         disposed = true;
@@ -432,6 +442,7 @@ export async function createEstNode(ctx: BaseAudioContext, compiled: EstCompiled
       maxChannels: opts.maxChannels,
       sidechain: opts.sidechain,
       notesOut: opts.notesOut,
+      ...(opts.capture ? { capture: opts.capture } : {}),
     },
   });
   return wrapEstNode(node, node.port as unknown as PortLike, started, opts);

@@ -29,12 +29,17 @@ async function install(bytes: Uint8Array): Promise<WorkerReply> {
 }
 
 const install_ = new Set(EST_RULES.filter(r => r.install).map(r => r.id));
+const estRuleSeverity = (id: string) => EST_RULES.find(r => r.id === id)?.severity;
 const firstFail = (v: ValidationReport, installOnly: boolean) => v.checks.find(c => c.status === 'fail' && (!installOnly || install_.has(c.rule)))?.rule ?? null;
 
 describe('the broken fixtures', () => {
   it('cover the work order\'s cases: a forbidden import, a memory cap, an instrument without notes, a state that drifts, randomness, an external UI, Trap and Spin', () => {
     const rules = BROKEN.map(f => f.rule);
     for (const r of ['EST-W004', 'EST-W009', 'EST-M012', 'EST-C004', 'EST-C010', 'EST-C018', 'EST-U002', 'EST-C013']) expect(rules).toContain(r);
+    // 1.652: one planted fault for each behaviour check (EST-C024 to EST-C030), every one validator-only.
+    for (const r of ['EST-C024', 'EST-C025', 'EST-C026', 'EST-C027', 'EST-C028', 'EST-C029', 'EST-C030']) {
+      expect(BROKEN.filter(f => f.rule === r).map(f => f.install), r).toEqual([false]);
+    }
     expect(BROKEN.filter(f => f.rule === 'EST-C013').map(f => f.name)).toEqual(['trap', 'spin']);
     for (const f of BROKEN) expect(EST_RULES.some(r => r.id === f.rule), f.name).toBe(true);
   });
@@ -43,6 +48,17 @@ describe('the broken fixtures', () => {
     it(`${f.name}: ${f.rule} in validate and ${f.install ? 'in the Worker\'s refusal' : 'not at install'}`, async () => {
       const bytes = packFixture(f).bytes;
       const v = await validate(bytes, { seconds: 2 });
+      // 1.652: a behaviour check of warning severity (EST-C026, C027, C029, C030) flags its fixture as `warn`, which
+      // leaves `ok` true; the fixture must still be flagged by exactly that rule first.
+      const warning = estRuleSeverity(f.rule) === 'warning';
+      if (warning) {
+        expect(v.checks.find(c => c.rule === f.rule)?.status, f.name).toBe('warn');
+        expect(v.checks.find(c => c.status === 'fail' || c.status === 'warn')?.rule, f.name).toBe(f.rule);
+        expect(v.checks.find(c => c.rule === f.rule)!.fix.length, f.name).toBeGreaterThan(10);
+        expect(f.install, f.name).toBe(false);
+        expect((await install(bytes)).type, f.name).toBe('installed');
+        return;
+      }
       expect(v.ok, f.name).toBe(false);
       const failing = v.checks.filter(c => c.status === 'fail');
       expect(failing.map(c => c.rule), f.name).toContain(f.rule);
@@ -69,11 +85,16 @@ describe('the passing fixtures (EST tidy, 1.286)', () => {
   it('include init-ok, whose output is NaN unless the host ran its _initialize', () => {
     expect(PASSING.map(f => f.name)).toContain('init-ok');
   });
+  it('include behave-ok, the behaviour fixtures\' plugin done right (1.652)', () => {
+    expect(PASSING.map(f => f.name)).toContain('behave-ok');
+  });
   for (const f of PASSING) {
     it(`${f.name}: passes validate and installs in the Worker`, async () => {
       const bytes = packFixture(f).bytes;
       const v = await validate(bytes, { seconds: 2 });
       expect(v.checks.filter(c => c.status === 'fail').map(c => `${c.rule}: ${c.message}`), f.name).toEqual([]);
+      // 1.652: and no behaviour check flags it, a warning either.
+      expect(v.checks.filter(c => c.status === 'warn' && /^EST-C02[4-9]|^EST-C030/.test(c.rule)).map(c => `${c.rule}: ${c.message}`), f.name).toEqual([]);
       expect(v.ok, f.name).toBe(true);
       const reply = await install(bytes);
       expect(reply.type, f.name).toBe('installed');
