@@ -47,6 +47,8 @@ pub use state::{StateReader, StateWriter};
 pub mod prelude {
     pub use crate::dsp::*;
     pub use crate::{Effect, Event, EventKind, Events, Expression, Instrument, Io, Note, Param, StateReader, StateWriter, Transport};
+    // 1.789 (V3): the maths a plugin reaches for, so `use est::prelude::*;` does bring everything AGENTS.md says.
+    pub use crate::math::{clamp, cos_turns, exp, exp2, ln, log2, one_pole, sin_turns};
 }
 
 // --- The allocator ------------------------------------------------------------------------------

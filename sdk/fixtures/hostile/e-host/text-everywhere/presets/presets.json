@@ -1,0 +1,22 @@
+{
+  "presets": [
+    {
+      "name": "<img src=x onerror=\"window.__estPwned=1\"><svg/onload=window.",
+      "path": "presets/a.state",
+      "tags": [
+        "<u onclick=window.__estPwned=1><",
+        "__proto__"
+      ]
+    },
+    {
+      "name": "__proto__ · constructor",
+      "path": "presets/b.state",
+      "tags": []
+    },
+    {
+      "name": "javascript:window.__estPwned=1 · </option><script>window.__e",
+      "path": "presets/c.state",
+      "tags": []
+    }
+  ]
+}

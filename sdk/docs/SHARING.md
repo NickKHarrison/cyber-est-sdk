@@ -4,7 +4,7 @@ You have a `.est` that passes `npx est validate` and `npx est test` (the [prompt
 
 ## 1. Install your own plugin
 
-**The quick way (while adding your own plugins is open on Cyber):** on Home, **EST PLUGINS → Add a plugin**, then drop `dist/<id>-<version>.est` on the dialog (or **Choose a file…**). No key is needed. Cyber runs the same checks `est validate` ran, names the same rule id if it refuses, and installs it on your own account.
+**The quick way (any signed-in account):** on Home, **EST PLUGINS → Add a plugin**, then drop `dist/<id>-<version>.est` on the dialog (or **Choose a file…**). No key is needed. Cyber runs the same checks `est validate` ran, names the same rule id if it refuses, and installs it on your own account.
 
 **As a developer** (for Follow `est dev` and your plugin's own window), in Cyber, signed in:
 
@@ -43,7 +43,7 @@ Until Community publishing opens on Cyber:
 - nobody else can install your plugin, from a listen link or anywhere;
 - `npx est publish <file.est>`, `est login` and `est yank` are built but answer that developer accounts or Community are not open ([publishing.md](publishing.md));
 - there is no public page for your plugin, no Featured list and no reports;
-- a `.est` file you send someone installs only through **Add a plugin** (while adding your own is open) or Developer tools' **Load a bundle file…**, on their own account, and Cyber marks it unsigned.
+- a `.est` file you send someone installs only through **Add a plugin** or Developer tools' **Load a bundle file…**, on their own account, and Cyber marks it unsigned.
 
 Once it opens, a published version gets its own page with Play, Open in Cyber offers Install from a shared project (an early version behind "Early: new, not reviewed by Cyber"), and the same song plays for everyone.
 

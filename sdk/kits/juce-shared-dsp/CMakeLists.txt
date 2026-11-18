@@ -45,7 +45,7 @@ endif()
 
 # The EST half: est builds it with its own clang (never CMake's compiler: the module is wasm32).
 find_program(NODE_EXECUTABLE node)
-set(EST_CLI "" CACHE FILEPATH "est's launcher, <cyber>/sdk/packages/cli/bin/est.mjs (empty: `est` on PATH)")
+set(EST_CLI "" CACHE FILEPATH "est's launcher, node_modules/@cyber-est/cli/bin/est.mjs (empty: `est` on PATH)")
 if(EST_CLI)
   set(EST_COMMAND ${NODE_EXECUTABLE} ${EST_CLI})
 else()

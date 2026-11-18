@@ -6,7 +6,7 @@
  */
 
 import { LOOPGRAB_LENGTHS, LOOPGRAB_REPEATS } from './loopGrabCore';
-import { CYBER_NAMES, CYBER_PARAMS, CYBER_TYPES, LEGACY_LIMITER_STYLE, LIMITER_STYLES, migrateCyberParams, NEW_SLOT_PARAMS, type CyberType } from './cyberDefs';
+import { CYBER_NAMES, CYBER_PARAMS, CYBER_TYPES, LEGACY_LIMITER_STYLE, LIMITER_KEPT_KEYS, LIMITER_STYLES, migrateCyberParams, NEW_SLOT_PARAMS, type CyberType } from './cyberDefs';
 import { sanitiseEstBlock, type EstSlotBlock } from '../est/slot';
 import { holdNewer, keepExtras, newerOf, unwrapNewer } from '../../lib/forwardFields';
 import { FX_SLOT_FIELDS } from '../../sequencer/songFields';
@@ -488,6 +488,13 @@ function sanitiseFxKnown(raw: unknown): FxSlot | null {
     let n = typeof v === 'number' && Number.isFinite(v) ? Math.min(p.max, Math.max(p.min, v)) : p.default;
     if (p.choices) n = Math.round(n);
     params[p.key] = n;
+  }
+  // 1.756: a Cyber Limiter's retired keys (`audition`) kept as stored, never read, so an older client is unaffected.
+  if (def.type === 'cyberLimit') {
+    for (const [k, b] of Object.entries(LIMITER_KEPT_KEYS)) {
+      const v = ps[k];
+      if (typeof v === 'number' && Number.isFinite(v)) params[k] = Math.min(b.max, Math.max(b.min, v));
+    }
   }
   const slot: FxSlot = { id: r.id, type: def.type, on: r.on !== false, params };
   // 1.543: a rack's chains (never another rack inside: `fxRackTakes`).

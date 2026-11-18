@@ -8,7 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { EstPluginFrame, analyserTap, type EstAudioTap } from '@/components/est/EstPluginFrame';
 import type { EstInstalled } from '@/audio/est/library';
 import { decodeBase64 } from '@/audio/est/base64';
-import { DevEngine, installCheck, type DevLog, type InstallCheck } from './engine';
+import { DevEngine, KEY_KINDS, installCheck, isKeyKind, type DevLog, type InstallCheck, type KeyKind } from './engine';
+import { reloadLine, type Kept } from './handover';
 import { ParamModel, type Origin } from './model';
 import { emitter, getBundle, getPreset, getSession, onEvents, rebuild, type Build, type Session } from './session';
 import { Generated } from './Generated';
@@ -22,12 +23,14 @@ import { watchFrame } from './frameWatch';
 const query = new URLSearchParams(location.search);
 const JSON_MODE = query.get('json') === '1';
 const AUTOSTART = query.get('autostart') === '1';
+/** `est dev --json --key <kind>`: the sidechain's source from the start. */
+const START_KEY: KeyKind = isKeyKind(query.get('key')) ? (query.get('key') as KeyKind) : 'off';
 const MAX_LOG = 300;
 
 declare global {
   interface Window {
     /** For tests and agents: read-only views of the page's state. */
-    estDev?: { meters: () => ReturnType<DevEngine['meters']> | null; log: () => LogLine[]; model: ParamModel; check: () => InstallCheck | null; running: () => boolean };
+    estDev?: { meters: () => ReturnType<DevEngine['meters']> | null; log: () => LogLine[]; model: ParamModel; check: () => InstallCheck | null; running: () => boolean; beat: () => number };
   }
 }
 
@@ -44,12 +47,16 @@ export function App() {
   const [tempo, setTempo] = useState(120);
   const [playing, setPlaying] = useState(false);
   const [roundTrip, setRoundTrip] = useState<string>('');
+  /** 1.803: the last rebuild's hand-over (or why the new build was not taken), and the sidechain's source. */
+  const [reload, setReload] = useState<{ ok: boolean; text: string; next?: string } | null>(null);
+  const [keyKind, setKeyKind] = useState<KeyKind>(START_KEY);
   const model = useMemo(() => new ParamModel(), []);
   const engine = useRef<DevEngine | null>(null);
   const modules = useRef<{ module: WebAssembly.Module; shim: WebAssembly.Module; hash: string } | null>(null);
   const logRef = useRef<LogLine[]>([]);
   const checkRef = useRef<InstallCheck | null>(null);
   const emit = useMemo(() => emitter(JSON_MODE), []);
+  const keyRef = useRef<KeyKind>(START_KEY);
   const seq = useRef(0);
 
   const write = useCallback((e: DevLog) => {
@@ -66,6 +73,7 @@ export function App() {
       model,
       check: () => checkRef.current,
       running: () => !!engine.current?.est,
+      beat: () => engine.current?.beat ?? 0,
     };
   }, [model]);
 
@@ -78,19 +86,34 @@ export function App() {
   }, [model, write]);
 
   /** Fetch the bundle and run Cyber's install check on it (the Worker: reader, meter, conformance). */
-  const checkBundle = useCallback(async (s: Session) => {
+  const checkBundle = useCallback(async (s: Session, live = false) => {
     if (!s.plugin || s.plugin.kind === 'preview') return null;
-    setPhase('checking');
+    // 1.803: while an instance plays (a rebuild), the page stays as it is: the old build is still running.
+    if (!live) setPhase('checking');
     const { bytes, hash } = await getBundle();
     const r = await installCheck(bytes, hash || s.plugin.hash);
     checkRef.current = r.check;
     setCheck(r.check);
     write({ type: 'install', ok: r.check.ok, code: r.check.code ?? null, rule: r.check.rule ?? null, message: r.check.message ?? null, points: r.check.points ?? null, blockUs: r.check.report?.blockUs ?? null, deterministic: r.check.report?.deterministic ?? null });
     if (r.module && r.shim) modules.current = { module: r.module, shim: r.shim, hash };
-    else modules.current = null;
-    setPhase(r.check.ok ? 'checked' : 'failed');
+    // A refused build while one plays: the modules of the build that is playing stay (Restart restarts that one).
+    else if (!live) modules.current = null;
+    if (!live) setPhase(r.check.ok ? 'checked' : 'failed');
     return r;
   }, [write]);
+
+  /** This build's settings for the engine (est.json may have changed with the rebuild). */
+  const engineOptions = (s: Session) => {
+    const m = s.plugin!.manifest;
+    const v11 = m.edition === '1.1';
+    return {
+      kind: s.plugin!.kind as 'effect' | 'instrument', pluginId: s.plugin!.id, memoryPagesMax: m.limits.memoryPagesMax,
+      logParams: m.parameters.filter(p => p.scale === 'log').map(p => p.id),
+      // EST 1.1, as Cyber's `est11Options`: the main ports' channels and the sidechain.
+      sidechain: v11 ? m.sidechain ?? 0 : 0,
+      maxChannels: v11 ? Math.min(8, Math.max(2, m.audio?.inputs ?? 2, m.audio?.outputs ?? 2)) : undefined,
+    };
+  };
 
   /** Start (or restart, keeping the state) the instance. */
   const startAudio = useCallback(async (given?: Session | null) => {
@@ -100,22 +123,55 @@ export function App() {
     try {
       let state: Uint8Array | undefined;
       if (engine.current?.est) state = (await engine.current.getState().catch(() => null)) ?? undefined;
-      engine.current ??= new DevEngine({
-        kind: s.plugin.kind, pluginId: s.plugin.id, memoryPagesMax: s.plugin.manifest.limits.memoryPagesMax,
-        logParams: s.plugin.manifest.parameters.filter(p => p.scale === 'log').map(p => p.id), log: write,
-      });
+      engine.current ??= new DevEngine({ ...engineOptions(s), log: write });
+      engine.current.configure(engineOptions(s));
       await engine.current.resume();
       const est = await engine.current.start(modules.current.module, modules.current.shim, state);
       model.reset(est.params);
       // A change the plugin makes itself (its own UI logic, a preset it loads) shows everywhere.
       est.on('param', changes => { for (const c of changes) model.apply(c.id, c.value, 'plugin', false); });
       if (s.plugin.kind === 'effect' && !state) engine.current.signal('sine');
+      // The sidechain's source (est dev --json --key <kind>; the Key menu) follows the instance.
+      if (engine.current.hasSidechain && engine.current.keyKind !== keyRef.current) engine.current.key(keyRef.current);
       setPhase('running');
     } catch (err) {
       write({ type: 'error', phase: (err as { phase?: string }).phase ?? 'start', message: err instanceof Error ? err.message : String(err) });
       setPhase('failed');
     }
   }, [model, write]);
+
+  /**
+   * 1.803: a rebuild while an instance plays **hands over** (handover.ts, engine.handOver): the old
+   * instance plays until the new module is checked and made, then a short crossfade; the keys still
+   * held, the values, the state where it loads and the transport go with it. A build that is
+   * refused, or does not start, changes nothing: the old instance is still the one playing, and the
+   * page says why with the one `Next:` line.
+   */
+  const reloadLive = useCallback(async (s: Session) => {
+    const e = engine.current;
+    if (!e?.est || !s.plugin || s.plugin.kind === 'preview') return false;
+    const t0 = performance.now();
+    const refuse = (message: string) => {
+      const next = s.build.next || undefined;
+      write(reloadLine({ ok: false, ms: performance.now() - t0, message, next }));
+      setReload({ ok: false, text: `The new build was not taken (${message}). The last good build is still playing.`, next });
+    };
+    try {
+      const r = await checkBundle(s, true);
+      if (!r?.check.ok || !r.module || !r.shim) { refuse(`${r?.check.rule ? `${r.check.rule}: ` : ''}${r?.check.message ?? 'the install check failed'}`); return true; }
+      e.configure(engineOptions(s));
+      const { est, kept } = await e.handOver(r.module, r.shim);
+      model.reset(est.params);
+      est.on('param', changes => { for (const c of changes) model.apply(c.id, c.value, 'plugin', false); });
+      if (e.hasSidechain && e.keyKind !== keyRef.current) e.key(keyRef.current);
+      write(reloadLine({ ok: true, ms: performance.now() - t0, kept, hash: s.plugin.hash }));
+      setReload({ ok: true, text: `Reloaded in ${Math.round(performance.now() - t0)} ms without stopping: ${keptWords(kept)}.` });
+      setPhase('running');
+    } catch (err) {
+      refuse(err instanceof Error ? err.message : String(err));
+    }
+    return true;
+  }, [checkBundle, model, write]);
 
   const load = useCallback(async (restart: boolean) => {
     try {
@@ -125,20 +181,28 @@ export function App() {
       setBuild(s.build);
       setError('');
       if (s.uiPreview) { model.reset(s.uiPreview); setPhase('running'); write({ type: 'preview', params: s.uiPreview.length }); return; }
+      if (restart && await reloadLive(s)) return;
       const r = await checkBundle(s);
       if (r?.check.ok && (restart || AUTOSTART)) await startAudio(s);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setPhase('failed');
     }
-  }, [checkBundle, model, startAudio, write]);
+  }, [checkBundle, model, reloadLive, startAudio, write]);
 
   useEffect(() => { void load(false); }, [load]);
 
   // The server's stream: a build's progress, a new bundle (re-check and restart), commands.
   const commandRef = useRef<(c: Record<string, unknown>) => void>(() => {});
   useEffect(() => onEvents({
-    build: b => setBuild(b),
+    build: b => {
+      setBuild(b);
+      // 1.803: a build that failed while an instance plays changes nothing: the last good build goes on, and the log says so in one line.
+      if (!b.ok && b.message !== 'building' && engine.current?.est) {
+        write(reloadLine({ ok: false, ms: 0, message: b.message, next: b.next || undefined }));
+        setReload({ ok: false, text: 'The new build failed. The last good build is still playing.', next: b.next || undefined });
+      }
+    },
     bundle: d => { write({ type: 'rebuilt', hash: d.hash }); void load(!!engine.current?.est); },
     command: c => commandRef.current(c),
   }), [load, write]);
@@ -185,6 +249,13 @@ export function App() {
     setPlaying(e.playing);
   }, []);
 
+  /** The sidechain's source (the Key menu, `{"cmd":"key"}`, `--key`). */
+  const chooseKey = (kind: KeyKind) => {
+    keyRef.current = kind;
+    setKeyKind(kind);
+    engine.current?.key(kind);
+  };
+
   /** One command (`est dev --json`'s stdin, through the server): resolves when it has finished. */
   const runCommand = async (c: Record<string, unknown>) => {
     const e = engine.current;
@@ -207,6 +278,7 @@ export function App() {
       case 'play': if (e && !e.playing) togglePlay(); break;
       case 'stop': if (e?.playing) togglePlay(); break;
       case 'tempo': e?.setTempo(n('bpm', 120)); setTempo(e?.tempo ?? 120); break;
+      case 'key': chooseKey(isKeyKind(c.kind) ? c.kind : 'off'); break;
       case 'signal': e?.signal((['off', 'sine', 'noise', 'pulse'].includes(String(c.kind)) ? c.kind : 'sine') as 'sine'); break;
       case 'state': await doRoundTrip(); break;
       case 'preset': await loadPreset(String(c.id ?? '')); break;
@@ -291,6 +363,8 @@ export function App() {
           <section aria-labelledby="h-build" className="card wide">
             <h2 id="h-build">Build</h2>
             <p className="alert-text">{build.message}</p>
+            {build.next && <p className="next" data-testid="build-next"><strong>{build.next}</strong></p>}
+            {engine.current?.est && <p data-testid="build-kept">The last good build is still playing.</p>}
             {build.log && <pre className="pre">{build.log}</pre>}
           </section>
         )}
@@ -331,16 +405,43 @@ export function App() {
 
         {!preview && (plugin?.kind === 'instrument' || (plugin?.manifest.notes?.inputs ?? 0) > 0) && <Keyboard engine={engine} disabled={!running} log={write} />}
         {!preview && plugin?.kind === 'effect' && <InputPlayer engine={engine} disabled={!running} />}
+        {!preview && plugin?.kind === 'effect' && (
+          <section aria-labelledby="h-key" className="card">
+            <h2 id="h-key">Sidechain key</h2>
+            {(manifest?.sidechain ?? 0) > 0 ? (
+              <>
+                <div className="row">
+                  <label className="field">Key
+                    <select value={keyKind} disabled={!running} data-testid="key" onChange={e => chooseKey(e.target.value as KeyKind)}>
+                      {KEY_KINDS.map(k => <option key={k.kind} value={k.kind}>{k.label}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <p className="dim">What feeds the plugin's sidechain input. In Cyber a person picks a track or a return as the key; Off is no key chosen.</p>
+              </>
+            ) : (
+              <p className="dim" data-testid="key-none">This plugin has no sidechain input (EST 1.1: a second entry in est.json's audio inputs with "role": "sidechain").</p>
+            )}
+          </section>
+        )}
 
         <section aria-labelledby="h-ui" className="card wide">
-          <h2 id="h-ui">Generated UI and custom UI</h2>
-          <div className="uis">
-            <div>
-              <h3>Generated</h3>
+          <h2 id="h-ui">Generated panel and your window</h2>
+          <p className="dim">Both show the same running plugin: a change in one reaches the other and the sound.</p>
+          {reload && (
+            <p className={reload.ok ? 'reload' : 'reload alert-text'} data-testid="reload-status" data-ok={reload.ok ? '1' : '0'} role="status">
+              {reload.text}{reload.next && <> <strong data-testid="reload-next">{reload.next}</strong></>}
+            </p>
+          )}
+          <div className={`uis${installed ? ' two' : ''}`} data-testid="uis">
+            <div data-testid="ui-generated">
+              <h3>Generated panel</h3>
+              <p className="dim">Cyber draws this from your parameters. People see it wherever your own window is not shown.</p>
               {running ? <Generated model={model} params={params} units={units} /> : <p className="dim">Start the audio to see the parameters.</p>}
             </div>
-            <div>
-              <h3>Custom</h3>
+            <div data-testid="ui-custom">
+              <h3>Your window</h3>
+              {manifest?.ui && <p className="dim">The page in ui/, in the same sandboxed frame Cyber puts it in.</p>}
               {installed && running && session ? (
                 <div ref={frameHost} className="frame-host">
                   <EstPluginFrame installed={installed} params={params} edit={frameEdit} origin={session.filesOrigin}
@@ -348,7 +449,9 @@ export function App() {
                   <FrameMeters read={frameMeters} protocol={uiProtocol} rate={engine.current?.ctx.sampleRate ?? null} />
                 </div>
               ) : (
-                <p className="dim">{manifest?.ui ? 'Start the audio to open it.' : 'This plugin has no custom UI (no "ui" in est.json).'}</p>
+                <p className="dim" data-testid="ui-none">{manifest?.ui ? 'Start the audio to open it.'
+                  : session?.uiFolder ? 'The folder has ui/index.html but est.json has no "ui" entry, so it is not packed. Add "ui": { "path": "ui/index.html", "size": { "w": 660, "h": 480 } } to est.json to see it here.'
+                  : 'This plugin has no window of its own (no "ui" in est.json): people get the generated panel.'}</p>
               )}
             </div>
           </div>
@@ -381,6 +484,16 @@ export function App() {
       </main>
     </>
   );
+}
+
+/** What a hand-over carried, in words. */
+function keptWords(k: Kept): string {
+  const parts = [
+    k.notes ? `${k.notes} held note${k.notes === 1 ? '' : 's'}` : '',
+    k.params ? `${k.params} parameter value${k.params === 1 ? '' : 's'}` : '',
+    k.state ? 'the state' : '',
+  ].filter(Boolean);
+  return parts.length ? `kept ${parts.join(', ')}` : 'nothing to carry over';
 }
 
 /** An effect's input: a test signal or a file, looped. */

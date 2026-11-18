@@ -19,6 +19,7 @@ pub trait Core: Sized + 'static {
     const STATE_MAGIC: u32;
     const STATE_VERSION: u32;
     const INSTRUMENT: bool;
+    const SIDECHAIN: u32;
     fn make() -> Self;
     fn activate(&mut self, sample_rate: f64, max_frames: u32) -> bool;
     fn deactivate(&mut self);
@@ -36,12 +37,13 @@ pub struct AsEffect<T: Effect>(pub T);
 pub struct AsInstrument<T: Instrument>(pub T);
 
 macro_rules! core_for {
-    ($wrap:ident, $tr:ident, $inst:expr) => {
+    ($wrap:ident, $tr:ident, $inst:expr, $sc:expr) => {
         impl<T: $tr> Core for $wrap<T> {
             const PARAMS: &'static [Param] = T::PARAMS;
             const STATE_MAGIC: u32 = T::STATE_MAGIC;
             const STATE_VERSION: u32 = T::STATE_VERSION;
             const INSTRUMENT: bool = $inst;
+            const SIDECHAIN: u32 = $sc;
             fn make() -> Self { $wrap(T::new()) }
             fn activate(&mut self, sr: f64, max: u32) -> bool { self.0.activate(sr, max) }
             fn deactivate(&mut self) { self.0.deactivate() }
@@ -56,8 +58,8 @@ macro_rules! core_for {
         }
     };
 }
-core_for!(AsEffect, Effect, false);
-core_for!(AsInstrument, Instrument, true);
+core_for!(AsEffect, Effect, false, T::SIDECHAIN_CHANNELS);
+core_for!(AsInstrument, Instrument, true, 0);
 
 /// One instance: CLAP's plugin struct first (its address is the instance's), then the values.
 #[repr(C)]
@@ -178,6 +180,7 @@ extern "C" fn plugin_process<C: Core>(p: *const ClapPlugin, proc_: *const ClapPr
         let frames = pr.frames_count as usize;
         let mut io = Io {
             ins: [null(); 2], outs: [null_mut(); 2], channels: 0, frames,
+            side: [null(); 2], side_channels: 0, side_live: false,
             transport: Transport::read(pr.transport), values: inst.values.as_mut_ptr(), params: C::PARAMS, out_events: pr.out_events,
         };
         let outs = output.channel_count as usize;
@@ -192,6 +195,16 @@ extern "C" fn plugin_process<C: Core>(p: *const ClapPlugin, proc_: *const ClapPr
             io.channels = if n > 2 { 2 } else { n };
             for c in 0..io.channels { io.ins[c] = *input.data32.add(c) }
             for c in io.channels..outs { core::ptr::write_bytes(*output.data32.add(c), 0, frames) }
+            if C::SIDECHAIN > 0 && pr.audio_inputs_count >= 2 {
+                let sc = &*pr.audio_inputs.add(1);
+                if !sc.data32.is_null() {
+                    let k = sc.channel_count as usize;
+                    io.side_channels = if k > 2 { 2 } else { k };
+                    for c in 0..io.side_channels { io.side[c] = *sc.data32.add(c) }
+                    let all = if io.side_channels >= 64 { u64::MAX } else { (1u64 << io.side_channels) - 1 };
+                    io.side_live = io.side_channels > 0 && (sc.constant_mask & all) != all;
+                }
+            }
         }
         for c in 0..io.channels { io.outs[c] = *output.data32.add(c) }
         let events = Events::new(pr.in_events, frames);
@@ -274,9 +287,25 @@ pub extern "C" fn state_load<C: Core>(p: *const ClapPlugin, s: *const ClapIstrea
 }
 
 // clap.audio-ports: an effect has one stereo main port each way; an instrument no input.
-pub extern "C" fn ports_count<C: Core>(_p: *const ClapPlugin, is_input: bool) -> u32 { if is_input && C::INSTRUMENT { 0 } else { 1 } }
+pub extern "C" fn ports_count<C: Core>(_p: *const ClapPlugin, is_input: bool) -> u32 {
+    if is_input && C::INSTRUMENT { 0 } else if is_input && C::SIDECHAIN > 0 { 2 } else { 1 }
+}
 pub extern "C" fn ports_get<C: Core>(_p: *const ClapPlugin, index: u32, is_input: bool, info: *mut ClapAudioPortInfo) -> bool {
-    if index != 0 || info.is_null() || (is_input && C::INSTRUMENT) { return false }
+    if info.is_null() || (is_input && C::INSTRUMENT) { return false }
+    if index == 1 && is_input && C::SIDECHAIN > 0 {
+        unsafe {
+            core::ptr::write_bytes(info as *mut u8, 0, core::mem::size_of::<ClapAudioPortInfo>());
+            let i = &mut *info;
+            i.id = 1;
+            text::copy(b"Sidechain", i.name.as_mut_ptr(), CLAP_NAME_SIZE as u32);
+            i.flags = 0;
+            i.channel_count = C::SIDECHAIN;
+            i.port_type = if C::SIDECHAIN == 1 { b"mono\0".as_ptr() } else { b"stereo\0".as_ptr() } as *const c_char;
+            i.in_place_pair = CLAP_INVALID_ID;
+        }
+        return true;
+    }
+    if index != 0 { return false }
     unsafe {
         core::ptr::write_bytes(info as *mut u8, 0, core::mem::size_of::<ClapAudioPortInfo>());
         let i = &mut *info;

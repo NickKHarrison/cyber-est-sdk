@@ -154,6 +154,8 @@ Finally `npx est pack` and tell me the .est's path.
 
 ### A C++ CLAP plugin (`cpp-clap`)
 
+For code you already have, the quicker way is `npx @cyber-est/cli port <your source folder>`: it writes this folder with your parameters declared and a `PORT_PLAN.md`, and the prompt is then one line, "Follow PORT_PLAN.md" ([Port your plugin](PORT_YOUR_VST.md)). To start from the bare template instead:
+
 ```
 Port my C++ audio code to an EST plugin for Cyber.
 Start with: npx @cyber-est/cli new cpp-clap my-port --id com.example.my-port --name "My Port"
@@ -167,7 +169,7 @@ Rules (the validator enforces them):
 - No allocation in process(): no new, malloc, std::vector growth or std::string there; size everything in activate().
 - No randomness or clock from the host: no rand(), random_device, time() or chrono. A seeded xorshift.
 - Sizes in seconds from the sample rate activate() receives; never assume 44.1 or 48 kHz.
-- No exceptions, threads, files or console; the runtime is freestanding (<est/runtime.hpp>).
+- No exceptions, threads, files or console; the runtime is freestanding (<est/runtime.hpp>; <cmath> works).
 - Every parameter has a range, a default and a unit; est.json's parameters match the plugin's, ids never renumbered.
 
 Tests: set test/golden.json's events to move every parameter; render with `npx est test --update`

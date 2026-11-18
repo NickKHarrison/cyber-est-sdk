@@ -13,7 +13,7 @@
  */
 import { checkBundle, type InstallCheck } from '../../../../src/audio/est/install/pipeline';
 import { EST_BLOCK_BUDGET_US, EST_RULES, EST_RULES_VERSION, EST_RULE_STEPS, type EstRule } from '../../../../src/audio/est/install/rules';
-import { standInInstance, type ConformanceReport } from '../../../../src/audio/est/install/conformance';
+import { bestBlockCost, blockCostAgain, standInInstance, type ConformanceReport } from '../../../../src/audio/est/install/conformance';
 import { behaviourChecks, type BehaviourFinding } from '../../../../src/audio/est/review/behaviour';
 import { nodeDeps } from './host';
 import { packDir, sha256 } from './pack.mjs';
@@ -104,6 +104,10 @@ export async function validate(input: Uint8Array | { dir: string }, opts: Valida
   const r = await checkBundle(bytes, { expectHash: null, seconds: opts.seconds, sampleRate: opts.sampleRate }, nodeDeps);
   const extra: ExtraChecks = {};
   if (r.ok) {
+    // 1.803: the block cost is the best of up to three runs before EST-P001 may warn (`BLOCK_COST_RUNS`
+    // in conformance.ts has the reasoning): the install check's two, and one more here only when both
+    // were over the budget. The rule, its id and its budget are as they were.
+    r.report.blockUs = bestBlockCost(r.report.blockUs, EST_BLOCK_BUDGET_US, () => blockCostAgain({ module: r.module, shim: r.shim, manifest: r.bundle.manifest, seconds: opts.seconds, sampleRate: opts.sampleRate, presets: r.bundle.presets }));
     extra.state = probeState(r);
     if (opts.behaviour !== false) extra.behaviour = behaviourChecks({ bundle: r.bundle, module: r.module, shim: r.shim }, { presets: opts.behaviour ?? 3 });
   }

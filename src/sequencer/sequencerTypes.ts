@@ -309,6 +309,12 @@ interface TrackBase {
   delayMs?: number;
   /** 1.118: its side of the master's crossfader (`MasterBus.xfade`); absent: none (it ignores the crossfader). */
   xfadeAssign?: XfadeAssign;
+  /**
+   * 1.743 (Live's take lane Audition): the take lane (1…MAX_TAKE) the track plays instead of its
+   * comp; absent: the comp. Song data, read only through `heardSong` (takeAudition.ts), so the
+   * transport and every offline render hear the same; a lane with no takes is ignored.
+   */
+  auditionTake?: number;
 }
 
 /** A track rendered to audio (1.7, Freeze): `hash` is the upload, `renderedKey` what it was rendered from. */
@@ -371,6 +377,11 @@ export function sanitiseXfade(v: unknown): number {
 /** 1.118: `{ xfadeAssign }` for 'a' or 'b', else nothing (old projects keep their shape). */
 function xfadeAssignOf(v: unknown): { xfadeAssign?: XfadeAssign } {
   return v === 'a' || v === 'b' ? { xfadeAssign: v } : {};
+}
+
+/** 1.743: `{ auditionTake }` when a whole take number (1…MAX_TAKE), else nothing (old songs keep their shape). */
+function auditionTakeOf(v: unknown): { auditionTake?: number } {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= MAX_TAKE ? { auditionTake: v } : {};
 }
 
 export const RETURN_IDS = ['ret-a', 'ret-b', 'ret-c', 'ret-d', 'ret-e', 'ret-f', 'ret-g', 'ret-h'] as const satisfies readonly ReturnId[];
@@ -1477,6 +1488,7 @@ function sanitiseTrackKnown(raw: unknown): Track | null {
     ...heightOf(raw.height),
     ...delayOf(raw.delayMs),
     ...xfadeAssignOf(raw.xfadeAssign),
+    ...auditionTakeOf(raw.auditionTake),
   };
   const frozen = sanitiseFrozen(raw.frozen);
   // 1.118: a group's Session fold (only `true` is kept).
@@ -2172,6 +2184,13 @@ export interface Scene {
   id: string; name: string; tempo?: number; sig?: TimeSig;
   /** 1.118: the scene's own colour (an HSL triple, the track palette's); absent: none. Its clips keep theirs. */
   color?: string;
+  /**
+   * 1.745: the scene's own Follow Action (Live 12's Scene Follow Actions): after its time from the
+   * scene's launch (Linked: its longest clip's loop), action A (with its chance) or B launches
+   * another scene of the grid (`jumpA`/`jumpB`: a scene id). Absent: none. Played only by
+   * `planWindow` through `sceneFollow.ts`.
+   */
+  follow?: ClipFollow;
 }
 /** 1.28: a scene's time signature: `num` beats of 1/`den` notes. */
 export interface TimeSig { num: number; den: number }
@@ -2518,7 +2537,9 @@ export function sanitiseSession(raw: unknown, tracks: readonly Track[], takenIds
     const sig = sanitiseSig(r.sig);
     // 1.118: a scene's colour.
     const sceneColor = typeof r.color === 'string' && COLOR_RE.test(r.color) ? r.color : undefined;
-    scenes.push(keepExtras(r, { id: sid, name: typeof r.name === 'string' ? r.name.slice(0, 40) : '', ...(tempo !== undefined ? { tempo } : {}), ...(sig ? { sig } : {}), ...(sceneColor ? { color: sceneColor } : {}) }, SCENE_FIELDS));
+    // 1.745: the scene's own follow action (absent: none, so an older song loads unchanged).
+    const sceneFollow = isObj(r.follow) ? sanitiseFollow(r.follow) : undefined;
+    scenes.push(keepExtras(r, { id: sid, name: typeof r.name === 'string' ? r.name.slice(0, 40) : '', ...(tempo !== undefined ? { tempo } : {}), ...(sig ? { sig } : {}), ...(sceneColor ? { color: sceneColor } : {}), ...(sceneFollow ? { follow: sceneFollow } : {}) }, SCENE_FIELDS));
   }
   if (!scenes.length) return keepExtras(raw, { ...d, quantize: quantizeOf(raw.quantize), ...overdubModeOf(raw.overdubMode) }, SESSION_FIELDS);
   const slots = new Set<string>();

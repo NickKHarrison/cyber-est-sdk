@@ -1,6 +1,6 @@
 # Porting a JUCE plugin
 
-Keep your JUCE desktop build. Share the DSP between it and an EST module, built from one source tree. The kit's example is `sdk/kits/juce-shared-dsp/` in the Cyber clone: a gain whose DSP is one header that a JUCE `AudioProcessor` and an EST module both compile, a CMake file that builds both, and a small native renderer to compare them with `est compare`.
+Keep your JUCE desktop build. Share the DSP between it and an EST module, built from one source tree. The kit's example is in the kit's public repository, https://github.com/NickKHarrison/cyber-est-sdk, at `sdk/kits/juce-shared-dsp/` (it is not inside the npm packages: copy it from there): a gain whose DSP is one header that a JUCE `AudioProcessor` and an EST module both compile, a CMake file that builds both, and a small native renderer to compare them with `est compare`.
 
 JUCE itself does not run in EST: its `AudioProcessor`, its message thread, its editor and its file and network classes have nothing to run on in a WebAssembly sandbox (one thread, no window, no files, no libc; [porting-cpp.md](porting-cpp.md) has the list). What carries over is your DSP, if it is written to be portable.
 
@@ -20,12 +20,12 @@ juce-shared-dsp/
 ## Building
 
 ```
-cmake -S . -B build -DJUCE_DIR=/path/to/your/JUCE -DEST_CLI=/path/to/cyber/sdk/packages/cli/bin/est.mjs
+cmake -S . -B build -DJUCE_DIR=/path/to/your/JUCE -DEST_CLI=$PWD/node_modules/@cyber-est/cli/bin/est.mjs
 cmake --build build                 # the JUCE plugin (VST3, AU, Standalone) and the reference renderer
 cmake --build build --target est    # est pack est/: est/dist/org.example.shared-gain-1.0.0.est
 ```
 
-`JUCE_DIR` is your own checkout of [JUCE](https://github.com/juce-framework/JUCE): no JUCE source is in Cyber's repository. **JUCE's terms are yours:** the desktop build links JUCE, so it is under JUCE's licence, the AGPLv3 (JUCE 8; JUCE 7 was the GPLv3) unless you hold a commercial JUCE licence. The EST bundle links no JUCE code: `est/` compiles only `dsp/SharedGain.h`, its own `src/plugin.cpp` and the EST kit's MIT headers, so the shared DSP's own licence is what governs it; keep JUCE out of `dsp/` and that stays true. Without `JUCE_DIR` the desktop plugin is skipped and the rest still builds, which is how Cyber's suite builds the kit: the JUCE half is never compiled there. The EST module is not built by CMake's compiler: the `est` target runs `est pack`, which builds with its own clang for wasm32 ([porting-cpp.md](porting-cpp.md), "The toolchain").
+`EST_CLI` is `@cyber-est/cli`'s launcher after `npm install --save-dev --save-exact @cyber-est/cli` in the kit's folder (leave it out to use an `est` on your PATH). `JUCE_DIR` is your own checkout of [JUCE](https://github.com/juce-framework/JUCE): no JUCE source is in Cyber's repository. **JUCE's terms are yours:** the desktop build links JUCE, so it is under JUCE's licence, the AGPLv3 (JUCE 8; JUCE 7 was the GPLv3) unless you hold a commercial JUCE licence. The EST bundle links no JUCE code: `est/` compiles only `dsp/SharedGain.h`, its own `src/plugin.cpp` and the EST kit's MIT headers, so the shared DSP's own licence is what governs it; keep JUCE out of `dsp/` and that stays true. Without `JUCE_DIR` the desktop plugin is skipped and the rest still builds, which is how Cyber's suite builds the kit: the JUCE half is never compiled there. The EST module is not built by CMake's compiler: the `est` target runs `est pack`, which builds with its own clang for wasm32 ([porting-cpp.md](porting-cpp.md), "The toolchain").
 
 ## Making your DSP shareable
 

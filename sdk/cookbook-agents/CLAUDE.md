@@ -1,0 +1,1 @@
+Read [AGENTS.md](AGENTS.md): what to build, this plugin's files, the rules and the build, validate, fix loop.

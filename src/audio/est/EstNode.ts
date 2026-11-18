@@ -15,6 +15,7 @@
 
 import { importWithRetry } from '@/lib/lazyWithRetry';
 import { forgetEstHealth, noteEstStats } from './health';
+import { cleanEstLabels } from './paramInfo';
 import type { RawCapture } from './crashCapture';
 import { disposeWorkletNode } from '../workletDispose';
 import { compactAbi } from './abi/layout';
@@ -25,7 +26,11 @@ import { buildEstShim } from './runtime/shim';
  * marks it `"scale": "log"` and its range is above 0 (knobs, `@cyber-est/ui` and lanes then move
  * geometrically); absent, linear.
  */
-export interface EstParam { id: number; name: string; module: string; min: number; max: number; def: number; flags: number; value: number; scale?: 'linear' | 'log' }
+export interface EstParam {
+  id: number; name: string; module: string; min: number; max: number; def: number; flags: number; value: number; scale?: 'linear' | 'log';
+  /** 1.804: a stepped parameter's value text by step (paramInfo.ts' `cleanEstLabels`); runtime only, a live instance's. */
+  labels?: readonly string[];
+}
 
 export type EstEvent =
   | { type: 'noteOn' | 'noteOff' | 'choke'; time?: number; key: number; channel?: number; port?: number; noteId?: number; velocity?: number }
@@ -345,7 +350,11 @@ export function wrapEstNode(node: AudioWorkletNode, port: PortLike, started: num
   });
 
   const make = (r: EstReady): EstNode => {
-    const params = r.params.map(p => ({ ...p }));
+    // 1.804: the plugin's value text is untrusted: cleaned here, once, before anything reads it.
+    const params = r.params.map(({ labels: raw, ...p }) => {
+      const labels = cleanEstLabels(p, raw);
+      return labels ? { ...p, labels } : p;
+    });
     const est: EstNode = {
       node, params, ready: r,
       instantiateMs: (typeof performance !== 'undefined' ? performance.now() : Date.now()) - started,
@@ -439,6 +448,8 @@ export async function createEstNode(ctx: BaseAudioContext, compiled: EstCompiled
       events: opts.initialEvents,
       queueSize: opts.queueSize,
       logParams: opts.logParams?.length ? opts.logParams.slice() : undefined,
+      // 1.804: a live instance asks the plugin for its stepped parameters' value text, once, at boot; a render never does.
+      ...(opts.renderMode === 'offline' ? {} : { valueText: true }),
       maxChannels: opts.maxChannels,
       sidechain: opts.sidechain,
       notesOut: opts.notesOut,

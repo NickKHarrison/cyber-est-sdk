@@ -48,8 +48,15 @@ describe('est new --app', () => {
         if (f === 'index.html') expect(text, t).toContain(`<title>${name}</title>`);
         else expect(text, `${t}/${f}`).toBe(readFileSync(join(base, f), 'utf8'));
       }
-      expect(readFileSync(repo(`sdk/templates/${t}/AGENTS.md`), 'utf8'), t).toContain('## The window as an app');
+      // 1.800: the template's AGENTS.md keeps the window to a pointer (a folder made without --app has no ui-app/);
+      // the app's rules are the section est new --app puts in its place (sdk/tests/agents.test.ts drives that).
+      expect(readFileSync(repo(`sdk/templates/${t}/AGENTS.md`), 'utf8'), t).toContain('or `--app` (a small web app)');
     }
+  });
+
+  it('the section est new --app puts in AGENTS.md names the app\'s files and its rules', () => {
+    const section = readFileSync(repo('sdk/agents/sections/window-app.md'), 'utf8');
+    for (const must of ['ui-app/bridge.ts', 'ui-app/vite.config.ts', 'npm run build:ui', 'EST-U005', 'EST-U002', 'registerFonts']) expect(section, must).toContain(must);
   });
 
   it('adds ui-app/, a root package.json with build:ui, node_modules/ in .gitignore and est.json\'s ui entry; without --app none of it', () => {

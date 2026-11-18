@@ -14,12 +14,22 @@ declare module 'react' {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace JSX {
     interface IntrinsicElements {
-      'est-knob': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & { param?: string; unit?: string; scale?: string; label?: string };
+      'est-knob': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement> & { param?: string; unit?: string; scale?: string; label?: string; labels?: string };
     }
   }
 }
 
 export const shown = (params: readonly EstParam[]) => params.filter(p => !(p.flags & FLAGS.HIDDEN) && !(p.flags & FLAGS.BYPASS));
+
+/**
+ * 1.804: a parameter's labels (the plugin's value text, asked once as the instance boots) as the
+ * `<est-knob labels>` attribute, or undefined: no labels, or one holds a comma (the attribute's
+ * separator), where the number shows as before.
+ */
+export function knobLabels(p: Pick<EstParam, 'labels'>): string | undefined {
+  if (!p.labels?.some(l => l) || p.labels.some(l => l.includes(','))) return undefined;
+  return p.labels.join(',');
+}
 
 function groups(params: readonly EstParam[]) {
   const out: { module: string; params: EstParam[] }[] = [];
@@ -40,7 +50,9 @@ function Knob({ model, p, unit }: { model: ParamModel; p: EstParam; unit: string
     return () => { el.source = null; };
   }, [model]);
   // EST tidy (1.286, D-44): the knob follows the parameter's own scale (est.json's hint), as Cyber's generated knobs do.
-  return <est-knob ref={ref as unknown as React.Ref<HTMLElement>} param={String(p.id)} unit={unit} data-testid={`knob-${p.id}`} />;
+  // 1.804: a stepped parameter's value text, as Cyber's generated knobs show it (the knob's `labels` attribute is comma-separated).
+  const labels = knobLabels(p);
+  return <est-knob ref={ref as unknown as React.Ref<HTMLElement>} param={String(p.id)} unit={unit} {...(labels ? { labels } : {})} data-testid={`knob-${p.id}`} />;
 }
 
 export function Generated({ model, params, units }: { model: ParamModel; params: readonly EstParam[]; units: Record<number, string> }) {

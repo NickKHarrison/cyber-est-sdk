@@ -43,6 +43,11 @@ export const EST_INSTANCE_STATES = [
   'loading',
   /** Follow's rebuild (DEV-E): loading while the instance it replaces still plays, then a crossfade. */
   'handing-over',
+  /**
+   * 1.794 (D-64, shared plugins): the device does not hold the version but the open project (or live
+   * room) offers it: its bundle is being fetched and run through the install pipeline ("Loading <name>…").
+   */
+  'loading-shared',
   /** Running (after the processor's `ready`). */
   'running',
   /** Not installed on this device (`not-installed`). */
@@ -51,6 +56,10 @@ export const EST_INSTANCE_STATES = [
   'other-version',
   /** The registry's blocklist names the version, or this account may not run plugins. */
   'blocked',
+  /** 1.794: the project offers the plugin but nobody is signed in: "Sign in or try Cyber to hear this plugin". */
+  'needs-sign-in',
+  /** 1.794: the project offered the plugin and fetching or checking it failed (the pipeline's or the route's reason, in words). */
+  'shared-refused',
   /** It failed the safety check (an instrument where an effect was asked for; the validator). */
   'refused',
   /** The tab's live pool was full (`claimEst`). */
@@ -74,6 +83,8 @@ export type EstInstanceState = typeof EST_INSTANCE_STATES[number];
 export const EST_INSTANCE_CAUSES = [
   'resolved', 'ready', 'skip', 'not-installed', 'other-version', 'block', 'refuse', 'budget',
   'stopped-mark', 'stall', 'overrun', 'slow', 'fault', 'start', 'handover-lost', 'dispose',
+  /** 1.794: shared plugins. */
+  'fetch-shared', 'sign-in', 'shared-refuse',
 ] as const;
 export type EstInstanceCause = typeof EST_INSTANCE_CAUSES[number];
 
@@ -95,10 +106,13 @@ export const EST_CAUSE_WORDS: Readonly<Record<EstInstanceCause, string>> = {
   start: 'Start was pressed (or the slot tried again)',
   'handover-lost': 'the instance it was replacing stopped first',
   dispose: 'the slot let it go',
+  'fetch-shared': 'the project offers the plugin, so its bundle is being fetched and checked',
+  'sign-in': 'the project offers the plugin, but nobody is signed in',
+  'shared-refuse': 'the bundle the project offered could not be fetched or failed its check',
 };
 
 /** States where no instance runs and the slot is a placeholder (the card's words say why). */
-export const EST_STOPPED_STATES: readonly EstInstanceState[] = ['missing', 'other-version', 'blocked', 'refused', 'over-budget', 'stopped-after-problem', 'stalled', 'slow-stopped', 'crashed', 'bypassed'];
+export const EST_STOPPED_STATES: readonly EstInstanceState[] = ['missing', 'other-version', 'blocked', 'needs-sign-in', 'shared-refused', 'refused', 'over-budget', 'stopped-after-problem', 'stalled', 'slow-stopped', 'crashed', 'bypassed'];
 const STOPPED = new Set<EstInstanceState>(EST_STOPPED_STATES);
 /** Whether the state is a placeholder's (nothing runs). */
 export const isEstStoppedState = (s: EstInstanceState): boolean => STOPPED.has(s);
@@ -107,6 +121,7 @@ export const isEstStoppedState = (s: EstInstanceState): boolean => STOPPED.has(s
 const REFUSALS: Readonly<Partial<Record<EstInstanceCause, EstInstanceState>>> = {
   'not-installed': 'missing', 'other-version': 'other-version', block: 'blocked', refuse: 'refused',
   budget: 'over-budget', 'stopped-mark': 'stopped-after-problem', fault: 'crashed',
+  'sign-in': 'needs-sign-in', 'shared-refuse': 'shared-refused',
 };
 
 /**
@@ -122,7 +137,9 @@ export const EST_TRANSITIONS: Readonly<Record<EstInstanceState, Readonly<Partial
     dispose: 'disposed',
   };
   const t: Record<EstInstanceState, Partial<Record<EstInstanceCause, EstInstanceState>>> = {
-    resolving: { ...REFUSALS, resolved: 'loading', skip: 'bypassed', dispose: 'disposed' },
+    resolving: { ...REFUSALS, resolved: 'loading', skip: 'bypassed', 'fetch-shared': 'loading-shared', dispose: 'disposed' },
+    // 1.794: fetched and checked, then resolved as any installed version (the claim, the module).
+    'loading-shared': { ...REFUSALS, resolved: 'loading', dispose: 'disposed' },
     loading: { ...REFUSALS, ready: 'running', skip: 'bypassed', dispose: 'disposed' },
     // Follow's rebuild resolves and loads in this state; a stall of the new instance before ready is its own.
     'handing-over': { ...REFUSALS, resolved: 'handing-over', ready: 'running', stall: 'stalled', 'handover-lost': 'loading', dispose: 'disposed' },
@@ -130,6 +147,8 @@ export const EST_TRANSITIONS: Readonly<Record<EstInstanceState, Readonly<Partial
     missing: { ...fromStopped },
     'other-version': { ...fromStopped },
     blocked: { start: 'resolving', dispose: 'disposed' },
+    'needs-sign-in': { ...fromStopped },
+    'shared-refused': { ...fromStopped },
     refused: { ...fromStopped },
     'over-budget': { ...fromStopped },
     'stopped-after-problem': { ...fromStopped },
@@ -174,6 +193,7 @@ export type EstReason = EstUnavailable;
 /** The placeholder reason each stopped state is (the status's `reason`), undefined where none. */
 export const EST_STATE_REASON: Readonly<Partial<Record<EstInstanceState, EstReason>>> = {
   missing: 'not-installed', 'other-version': 'other-version', blocked: 'blocked', refused: 'refused',
+  'needs-sign-in': 'sign-in', 'shared-refused': 'shared-refused',
   'over-budget': 'budget', 'stopped-after-problem': 'stopped', stalled: 'stalled', 'slow-stopped': 'slow', crashed: 'crashed',
 };
 export const reasonOfState = (s: EstInstanceState): EstReason | undefined => EST_STATE_REASON[s];
@@ -189,6 +209,8 @@ export function stateOfReason(r: EstReason | undefined): EstInstanceState {
     case 'stopped': return 'stopped-after-problem';
     case 'stalled': return 'stalled';
     case 'slow': return 'slow-stopped';
+    case 'sign-in': return 'needs-sign-in';
+    case 'shared-refused': return 'shared-refused';
     default: return 'missing';
   }
 }
@@ -204,6 +226,8 @@ export function causeOfReason(r: EstReason): EstInstanceCause {
     case 'stopped': return 'stopped-mark';
     case 'stalled': return 'stall';
     case 'slow': return 'slow';
+    case 'sign-in': return 'sign-in';
+    case 'shared-refused': return 'shared-refuse';
     default: return 'fault';
   }
 }
@@ -211,7 +235,7 @@ export function causeOfReason(r: EstReason): EstInstanceCause {
 /** The status's coarse state (status.ts' `EstInsertState`) for an instance state. */
 export function statusOfState(s: EstInstanceState): 'loading' | 'ready' | 'placeholder' {
   if (s === 'running') return 'ready';
-  if (s === 'resolving' || s === 'loading' || s === 'handing-over') return 'loading';
+  if (s === 'resolving' || s === 'loading' || s === 'handing-over' || s === 'loading-shared') return 'loading';
   return 'placeholder';
 }
 
@@ -225,30 +249,37 @@ export const estReasonHasStopWhy = (r: EstReason | undefined): boolean => r === 
 // ---------------------------------------------------------------- words
 
 /** The status chip each state shows (a word always beside its colour). */
-export type EstChipKey = 'ready' | 'loading' | 'missing' | 'budget' | 'crashed' | 'blocked' | 'stopped' | 'stalled' | 'slow';
+export type EstChipKey = 'ready' | 'loading' | 'missing' | 'budget' | 'crashed' | 'blocked' | 'stopped' | 'stalled' | 'slow' | 'sign-in';
 export const EST_CHIP_WORDS: Readonly<Record<EstChipKey, string>> = {
   ready: 'Ready', loading: 'Loading', missing: 'Missing', budget: 'Over budget', crashed: 'Crashed', blocked: 'Blocked',
-  stopped: 'Stopped', stalled: 'Stalled', slow: 'Too slow',
+  stopped: 'Stopped', stalled: 'Stalled', slow: 'Too slow', 'sign-in': 'Sign in',
 };
 export const EST_CHIP_TONE: Readonly<Record<EstChipKey, 'ok' | 'warn' | 'alert' | 'none'>> = {
   ready: 'ok', loading: 'none', missing: 'warn', budget: 'warn', crashed: 'alert', blocked: 'alert',
-  stopped: 'warn', stalled: 'alert', slow: 'alert',
+  stopped: 'warn', stalled: 'alert', slow: 'alert', 'sign-in': 'warn',
 };
 export const EST_STATE_CHIP: Readonly<Record<EstInstanceState, EstChipKey>> = {
-  resolving: 'loading', loading: 'loading', 'handing-over': 'loading', running: 'ready',
-  missing: 'missing', 'other-version': 'missing', blocked: 'blocked', refused: 'blocked', 'over-budget': 'budget',
+  resolving: 'loading', loading: 'loading', 'handing-over': 'loading', 'loading-shared': 'loading', running: 'ready',
+  missing: 'missing', 'other-version': 'missing', blocked: 'blocked', 'needs-sign-in': 'sign-in', 'shared-refused': 'blocked', refused: 'blocked', 'over-budget': 'budget',
   'stopped-after-problem': 'stopped', stalled: 'stalled', 'slow-stopped': 'slow', crashed: 'crashed',
   bypassed: 'missing', disposed: 'missing',
 };
 
+/** 1.794: what a signed-out visitor is told of a plugin the project offers (with Sign in and Try Cyber beside it). */
+export const EST_SIGN_IN_TO_HEAR = 'Sign in or try Cyber to hear this plugin.';
+
 /**
  * The one sentence each state has, naming the plugin (`it`: "EST Gain 1.0.0"); the host adds its
  * tail (an effect's "The sound passes through.", an instrument's "The track is silent; its notes are
- * kept.", a SLIDES block's "This instrument is silent."): `EST_TAILS`.
+ * kept.", a SLIDES block's "This instrument is silent."): `EST_TAILS`. `because`: a block's reason
+ * (`blocked`) or, 1.794, why a shared plugin was refused (`shared-refused`: the pipeline's or the route's words).
  */
 export function estStateSentence(s: EstInstanceState, it: string, blockedBecause?: string | null): string {
   switch (s) {
     case 'resolving': case 'loading': case 'handing-over': return `${it} is loading.`;
+    case 'loading-shared': return `${it} is loading from the project.`;
+    case 'needs-sign-in': return `${it} plays once you sign in. ${EST_SIGN_IN_TO_HEAR}`;
+    case 'shared-refused': return blockedBecause ? `${it} could not be loaded from the project: ${blockedBecause.replace(/\.$/, '')}.` : `${it} could not be loaded from the project.`;
     case 'running': return `${it} is running.`;
     case 'missing': return `${it} isn't installed on this device.`;
     case 'other-version': return `${it} isn't installed here (another version is).`;
@@ -281,6 +312,8 @@ export function estStateLine(s: EstInstanceState, blockedBecause?: string | null
     case 'slow-stopped': return 'It was too slow for the audio and was stopped: open it to start it again.';
     case 'crashed': return 'It stopped after a problem.';
     case 'over-budget': return 'Too many plugins are running in this tab.';
+    case 'needs-sign-in': return EST_SIGN_IN_TO_HEAR;
+    case 'shared-refused': return blockedBecause ? `It could not be loaded from the project: ${blockedBecause.replace(/\.$/, '')}.` : 'It could not be loaded from the project.';
     case 'missing': case 'other-version': return 'Not installed on this device.';
     default: return null;
   }
@@ -308,7 +341,8 @@ export interface EstInstanceRecord {
   state: EstInstanceState;
   /** The cause of the last move (absent at the start). */
   cause?: EstInstanceCause;
-  source: 'installed' | 'trial';
+  /** 1.794: `'shared'`, a bundle the open project offered (shared.ts), held as a trial is (never in the library). */
+  source: 'installed' | 'trial' | 'shared';
   frame: 'own' | 'fallback';
   /** `Date.now()` of the last move. */
   at: number;
@@ -366,12 +400,12 @@ export function fireEstInstance(id: number | null, cause: EstInstanceCause): Est
 }
 
 /** The hash a live instance runs changed (a version switch keeps the instance's record only through a rebuild; this is for a resolved trial). */
-export function noteEstInstanceSource(id: number | null, source: 'installed' | 'trial'): void {
+export function noteEstInstanceSource(id: number | null, source: 'installed' | 'trial' | 'shared'): void {
   const r = id === null ? undefined : byId.get(id);
   if (!r || r.source === source) return;
   // A trial becomes installed; an installed version never turns back into a trial while it runs.
-  if (r.source === 'installed' && source === 'trial' && r.state !== 'resolving' && r.state !== 'loading' && r.state !== 'handing-over') {
-    illegalLog?.(r.state, 'resolved', `${r.stripId}/${r.slotId} (installed → trial)`);
+  if (r.source === 'installed' && source !== 'installed' && r.state !== 'resolving' && r.state !== 'loading' && r.state !== 'handing-over' && r.state !== 'loading-shared') {
+    illegalLog?.(r.state, 'resolved', `${r.stripId}/${r.slotId} (installed → ${source})`);
     return;
   }
   r.source = source;
@@ -381,7 +415,7 @@ export function noteEstInstanceSource(id: number | null, source: 'installed' | '
 /** The library now holds `hash`: every live instance running it as a trial is installed (the state unchanged). Returns how many moved. */
 export function noteEstTrialInstalled(hash: string): number {
   let n = 0;
-  for (const r of byId.values()) if (r.hash === hash && r.source === 'trial') { r.source = 'installed'; n++; tell(r); }
+  for (const r of byId.values()) if (r.hash === hash && (r.source === 'trial' || r.source === 'shared')) { r.source = 'installed'; n++; tell(r); }
   return n;
 }
 

@@ -1,170 +1,117 @@
-# An EST plugin with a visual UI in Rust
+# An EST plugin with a window that draws, in Rust
 
-This folder is an EST plugin: a WebAssembly audio effect with its own page that Cyber (and any EST host) installs from a `.est`
-bundle. It starts as a pass-through with a smoothed trim, and a page (`ui/`) that draws the level after it on a canvas: each channel's peak over the last seconds, its average and its hold. You change the template into your plugin, then build, validate and pack it with the `est` command. This file is for you and for any coding agent working on the plugin; `CLAUDE.md` points here.
+This folder is an EST plugin: a WebAssembly audio effect with its own page that Cyber installs from a `.est` bundle. It starts as a pass-through with a smoothed trim, and a page (`ui/`) that draws the level after it on a canvas; you change it into the plugin described under **What to build**.
 
-## This template: a UI that reacts to sound
+## What to build
 
-The page never sees samples. In UI protocol 2 the host sends `est:meter { in, out }` at most 30
-times a second while the window is open: the strip's levels, linear peaks `[left, right]` (after
-the plugin; `in` may be null). `ui.js` keeps their history and draws it in one
-`requestAnimationFrame` loop. `est.meters` is false on a host that sends none (protocol 1): the
-page says so. History is a parameter only so that it saves with the project (the DSP ignores it).
+<!-- est:idea -->
+Nobody has said yet what this plugin should do. Ask the person for one sentence, write it here, then build it.
+<!-- /est:idea -->
 
-What a page may load: scripts, CSS, images and fonts that are files of the bundle; no inline
-script, nothing from another host, no `fetch` (`EST-U` rules). `est dev` shows the page beside the
-generated knobs with live meters.
+## This template: a window that reacts to sound
 
-**What it cannot draw yet:** a spectrum or anything else computed from the samples. The plugin's
-DSP has no channel to send its own analysis to the page in EST 1.0 (the meters are the host's), so
-a spectrum waits for the UI protocol's audio tap (EST 1.1, planned: magnitudes and RMS from the
-host's analyser, never raw samples).
+The page never sees samples. The host sends `est:meter { in, out }` at most 30 times a second while the window is open: the strip's levels, linear peaks `[left, right]`. `ui/ui.js` keeps their history and draws it in one `requestAnimationFrame` loop; `est.meters` is false on a host that sends none, and the page says so. History is a parameter only so that it saves with the project.
+
+- `ui/index.html` loads `est-ui.js` (copied in by `npx est pack`: do not add it) and then `ui.js`, both as files; `est.json`'s `"ui"` names the page and its fixed size.
+- A page may load scripts, CSS, images and fonts that are files of the bundle: no inline script, nothing from another host, no `fetch` (the `EST-U` rules).
+- `npx est dev` shows the page beside the generated knobs, with live meters.
+- **It cannot draw a spectrum from the plugin's own analysis**: the DSP has no channel to the page. Only what the host sends reaches it.
 
 ## The files
 
 | File | What |
 |---|---|
-| `ui/index.html`, `ui/ui.js`, `ui/style.css` | The page: a canvas, a readout and two knobs; `ui.js` draws from `est.onMeter`. |
-| `est.json` | The manifest: id, name, version, kind, ports, limits and the parameter list. `$schema` gives your editor completions. |
+| `est.json` | The manifest: id, name, version, kind, ports, limits and the parameter list. |
 | `src/lib.rs` | The plugin: one `impl Effect` and one `est::export_effect!`. |
-| `Cargo.toml` | The crate. `[package.metadata.est]` tells `est` how to build it and where the module lands. |
-| `.cargo/config.toml` | The target (`wasm32-unknown-unknown`) and the link flags EST needs. Leave them. |
+| `ui/index.html`, `ui/ui.js`, `ui/style.css` | The page: a canvas, a readout and two knobs; the script draws from `est.onMeter`. |
+| `Cargo.toml` | The crate; `[package.metadata.est]` tells `est` how to build it. |
+| `.cargo/config.toml` | The target (`wasm32-unknown-unknown`) and the link flags. Change only `--max-memory`, with `est.json`'s limit. |
 | `test/golden.json`, `test/golden.f32` | The golden render: an input and events, and what the plugin must output. |
-| `est/` | The SDK's library (copied in by `est new`): read it for the exact signatures, do not edit it. |
-| `est-manifest-1.schema.json` | The manifest's schema (copied in by `est new`). |
-| `llms.txt` | Where everything is, for a coding agent. |
-| `est-validator-rules.json` | Every validator rule: id, title, explanation, fix (copied in by `est new`). |
-| `est-abi-1.0.json` | The ABI: every CLAP struct's layout on wasm32 (only for code written without the SDK's runtime). |
-| `est-ui.d.ts` | The UI library's types, for a custom UI in TypeScript. |
-
-The SDK crate `est` is a path dependency: `est/` in this folder, the copy `est new` made (`est = { path = "est" }`; in the SDK's own template the path leads to the crate in the SDK). Its blocks are in `est::dsp`; `use est::prelude::*;` brings everything.
-
-## The commands
-
-```sh
-est doctor      # Rust, the wasm32-unknown-unknown target, Node: what is missing and the command to fix it
-est pack        # cargo build --release, then dist/<id>-<version>.est
-est validate    # every check Cyber's install runs; a readable report, and validation.json next to the bundle
-est test        # the golden render in test/ and the conformance run
-est inspect dist/<id>-<version>.est
-est dev         # the dev host: play the plugin while you build it
-```
-
-`est` is the kit's command, run from a clone of Cyber's repository (it is not on npm yet): `node <cyber>/sdk/packages/cli/bin/est.mjs <command>`, or `npm run est -- <command>` at the clone's root. Give it a short name once, at the clone's root (`npm ci` first): `alias est="node $PWD/sdk/packages/cli/bin/est.mjs"`. `est help <command>` shows a command's options.
+| `est/` | The kit's crate `est`, copied in (a path dependency): read it for exact signatures, do not edit it. |
+| `package.json` | The kit, pinned, and `npm run validate`, `test`, `dev` and `pack`. |
+| `est-validator-rules.json`, `est-manifest-1.schema.json`, `est-abi-1.*.json`, `est-ui.d.ts` | The rules, the schema, the ABI and the window library's types. |
 
 ## The loop
 
-1. Change `src/lib.rs` (and `est.json` when the parameters or the identity change).
-2. `est validate`: it builds, packs (`dist/<id>-<version>.est`) and runs every check Cyber's install
-   runs. Read `dist/validation.json`: every failed check has a `rule`, a `message`, a `fix` and a
-   `where` (`--json` prints the same report).
-3. Fix what it names and go back to 2. When it is green, `est test` (the golden render; after
-   changing the sound on purpose, `est test --update`).
-4. Listen: `est dev` (a page on http://localhost:4430), or without a screen
-   `est dev --json --seconds 3 < /dev/null`: JSON lines of meters and events. Pipe commands in, one
-   JSON object a line (`{"cmd":"param","id":0,"value":-6}`, `{"cmd":"wait","ms":500}`,
-   `{"cmd":"state"}`, `{"cmd":"note","key":60,"ms":300}` …): they run in order, each after the one
-   before has finished, and without `--seconds` the run ends a second after the last. A port in
-   use stops it: add `--port 0 --files-port 0`. (`sdk/docs/dev-host.md` in the kit has it all.)
-5. Install: in Cyber (an admin account), **Settings → Plugins**, turn on **Developer mode**, then
-   **Load a bundle file…** and pick `dist/<id>-<version>.est`. Cyber runs the same checks; a refusal
-   names the same rule id.
+Run `est` as `npx est <command>` in this folder: `package.json` pins the kit (if `node_modules` is missing, `npm install` first). Never a bare `npx est` in a folder without the kit: npm would fetch another package of that name.
 
-The rule ids are stable. Their prefix says where to look:
+1. Read **What to build**. Change the source and, when the parameters or the identity change, `est.json`.
+2. `npx est validate` builds, packs `dist/<id>-<version>.est` and runs every check Cyber runs when a plugin is added. Read `dist/validation.json`: each failed check has `rule`, `message`, `fix` and `where`. Fix and repeat until `"ok": true`.
+3. `npx est test`: the golden render in `test/` and the conformance run. After changing the sound on purpose: `npx est test --update`.
+4. Hear it (below), then tell the person what you built and the choices you made for them.
 
-| Prefix | What it checks |
-|---|---|
-| `EST-M` | the manifest (`est.json`) |
-| `EST-B` | the bundle and its archive |
-| `EST-W` | the WebAssembly module: imports, exports, memory, features, no start function |
-| `EST-C` | conformance: lifecycle, ports, parameters, state round trip, process, determinism, level |
-| `EST-U` | the custom UI, when there is one |
-| `EST-P` | performance (a warning only) |
+**Follow the `Next:` line** that ends every `est validate`, `est test`, `est doctor` and `est dev` build: the first error or failed check with its fix, or the next step.
 
-The full list, with each rule's explanation and fix, is `est-validator-rules.json` in this folder
-(as a page: `sdk/docs/validator-rules.md` in the kit).
+Also: `npx est doctor` (what is wrong with this folder or machine, and the fix), `npx est pack` (build and pack only), `npx est profile --json` (which function costs most).
 
-## How the plugin is written
+Rule ids are stable; the prefix says where to look: `EST-M` the manifest, `EST-B` the bundle, `EST-W` the WebAssembly module, `EST-C` conformance and behaviour, `EST-U` the window, `EST-P` speed (a warning). `est-validator-rules.json` lists every rule: `id`, `title`, `explain`, `fix`, `severity`.
 
-- **Parameters are declared once**, in `PARAMS`, with the builder:
-  `Param::new(ID, "Name").range(min, max).default(v).unit("dB").decimals(1)`,
-  `.hertz()` for a frequency, `.labels(&["A", "B"])` for a switch, `.module("Group")` to group
-  them. List each id in `est.json`'s `parameters` too. Ids are stable for the plugin's life: never
-  reuse or renumber one.
-- The glue stores every value and calls `param_changed(id, value)` with each new one (already
-  clamped and stepped), at its own sample. Every default arrives here first, before `activate`
-  (so call your blocks' `reset()` in `activate`, after their sample rate, as the template does).
-- `activate(sample_rate, max_frames)` is the only place to allocate: size delay lines there
-  (`DelayLine::allocate`), set every block's sample rate.
-- `render(io, from, to)` writes frames `from..to`: `io.input(c, n)`, `io.output(c, n, v)`,
-  `io.channels`. The default `process` calls it between events, so automation is sample accurate.
-  `io.transport` has the tempo, the position in beats and the time signature.
-- The state is every parameter plus `save_state`/`load_state`'s bytes. Raise `STATE_VERSION`
-  when those bytes change and keep loading the old ones.
-- `tail()` is how long the output may go on after the input stops; `latency()` is 0 unless the
-  effect really delays (and `est.json`'s `limits` must cover both).
-- **Identity**: `est::export_effect!`'s `id` must be `est.json`'s `id` exactly (else the plugin
-  does not start: `EST-C001`); the kind comes from the macro (`export_effect!` or
-  `export_instrument!`) and must match `est.json`'s `kind` and ports (`EST-C003`, `EST-C004`); the
-  parameter ids must be `est.json`'s (`EST-C008`). The name, vendor, version, description and
-  features are not compared (Cyber shows `est.json`'s): keep them the same anyway.
-- **The state magic** (`STATE_MAGIC`, four bytes: `u32::from_le_bytes(*b"TMPE")`) starts every
-  saved state; a state with another magic is refused on load. Any four bytes will do; choose yours
-  before you ship and **never change it afterwards**, or every saved state and preset of the
-  earlier versions stops loading. Raise `STATE_VERSION` instead when your own bytes change.
+## The rules
 
-### The rules the validator holds you to
+- **Allocate nothing while playing**: not in `render`, `process`, the parameter hook or a note handler.
+  - Heap memory (`DelayLine::allocate`) only in `activate`; no `Vec`, no `Box`. It is `no_std`: use `est::math`, and add no dependency that needs `std`.
+- **Be deterministic, import nothing**: the same input and events give the same output, bit for bit. No clock, no file, no host function. For noise, step your own seed, a 32-bit xorshift (`x ^= x << 13; x ^= x >> 17; x ^= x << 5`), set from a constant in `reset`.
+- **Size every buffer and time from the sample rate `activate` gives.** The validator runs at 48 kHz; Cyber runs at the device's rate.
+- **The ids agree**: the descriptor's id is `est.json`'s `id` (`EST-C001`); the kind and ports match (`EST-C003`, `EST-C004`); each parameter has one numeric id in the code, in `est.json`'s `parameters`, in `test/golden.json`'s events and in the window (`EST-C008`), and it never changes.
+- **The state magic** (four characters, where the plugin is described) never changes once anyone has a version.
+- **Stay in range**: no output above +18 dBFS, no NaN, memory within `limits.memoryPagesMax` (64 KiB pages).
+- **Flush tiny numbers** (`EST-C027`): set a state that feeds itself (a feedback path, a filter's memory, an envelope falling to 0) to 0 once it is below `1e-20`. The kit's `Filter` already does.
+- **Every version is new**: bump `version` in `est.json` for each build you hand to anyone.
 
-- **Allocate nothing in `render`, `process`, `param_changed` or the note handlers**: no `Vec`,
-  no `Box`, no growing anything. Heap memory (`DelayLine::allocate`) only in `activate`, sized
-  from its maximum; `new` builds the plugin by value (its filters, smoothers and voices are plain
-  values inside it) and allocates nothing.
-- **Be deterministic**: the same input and events give the same output, bit for bit, every run.
-  Use `est::math` (not a library that calls the host), and no randomness in `process`.
-- **Import nothing**: the module exports `clap_entry`, `malloc`, `free`, its table and memory, and
-  imports nothing. The crate does this for you; do not add dependencies that need `std` or WASI.
-- **Stay within the manifest**: the memory maximum in `.cargo/config.toml` (bytes) must not pass
-  `limits.memoryPagesMax` (64 KiB pages); no output above +18 dBFS; no NaN.
-- `no_std`: `core` has no float maths, so use `est::math` (`exp`, `ln`, `sin_turns`, `db_to_gain`…).
+## How it is written (Rust)
 
-## The DSP library (`est::dsp`)
+- **The plugin** is one `impl Effect` or `impl Instrument` in `src/lib.rs` and one `est::export_effect!`, `est::export_instrument!` or `est::export_note_effect!` at the bottom: the macro's `id` is the identity, and the macro decides the kind. `use est::prelude::*;` brings the library.
+- **Parameters** are declared once, in `PARAMS`, and listed in `est.json`. Values are plain units (dB, Hz, ms), never 0 to 1.
+- `param_changed(id, value)` gets each new value at its own sample. Every default arrives there first, before `activate`, so `activate` sets each block's sample rate and then resets it, as the template does.
+- `new()` builds the plugin by value and allocates nothing; `activate(sample_rate, max_frames)` is the only place to allocate.
+- `render(io, from, to)` writes frames `from..to`: `io.input(c, n)` in, `io.output(c, n, v)` out.
+- `tail()` is how many frames still sound after the input stops; 0 unless something rings.
+- `STATE_MAGIC` is four bytes (`u32::from_le_bytes(*b"ABCD")`); `save_state` and `load_state` add your own bytes after the parameters, which are saved for you.
 
-`Smoother`, `Oscillator` (sine and band-limited saw, square, triangle), `Filter` (state-variable:
-low, band, high, notch), `Envelope` (ADSR, with `tail_frames`), `Lfo` (free or synced to the
-tempo), `Voices` (polyphony), `DelayLine`, `Biquad` (the RBJ cookbook), `db_to_gain` and
-`gain_to_db`. Each takes `set_sample_rate` in `activate` and allocates nothing after it. The
-AssemblyScript library has the same blocks, sample for sample.
+## The library on one page (Rust)
 
-## A custom UI
+`use est::prelude::*;` brings all of it; its source is in `est/src/` (read it for anything more, do not edit it). Numbers are `f64` unless a type is shown. If a function is not listed here, it does not exist: write the few lines yourself.
 
-Made with `est new … --ui`, this folder has one in `ui/` (`ui/index.html`, `ui/ui.js` and
-`ui/style.css`: an `<est-knob>` per parameter, bound to the template's parameters, and `est.json`'s
-`"ui"` entry): change the page to match your parameters. Made without `--ui`, it has none and Cyber
-generates knobs from the parameters; add a UI by hand with these files:
+- **Traits**: `Effect` and `Instrument`. You must write `const PARAMS: &'static [Param]`, `const STATE_MAGIC: u32`, `fn new() -> Self` and `fn render(&mut self, io: &mut Io, from: usize, to: usize)`. Optional: `activate(&mut self, sample_rate: f64, max_frames: u32) -> bool`, `reset(&mut self)`, `param_changed(&mut self, id: u32, value: f64)`, `tail(&self) -> u32` and `latency(&self) -> u32` (frames), `event(&mut self, io: &mut Io, e: &Event)`, `save_state(&self, w: &mut StateWriter)`, `load_state(&mut self, r: &mut StateReader, version: u32) -> bool`, `const STATE_VERSION: u32`, an effect's `const SIDECHAIN_CHANNELS: u32`.
+- **`Io`**: `io.channels`, `io.frames`, `io.input(c: usize, n: usize) -> f32`, `io.output(c, n, v: f32)`, `io.add(c, n, v: f32)`, `io.param(id: u32) -> f64`, `io.transport`, `io.sidechain(c, n) -> f32`.
+- **`Transport`** fields: `tempo: f64`, `playing: bool`, `beat: f64`, `bar_start: f64`, `num: u16`, `den: u16`.
+- **`Event`** fields: `kind` (`EventKind::Param`, `NoteOn`, `NoteOff`, `Choke`, `Transport` …), `time`, `id: u32`, `value: f64`, `note`, `transport`.
+- **`Param`**: `Param::new(id: u32, "Name")`, then `.range(min, max)`, `.default(v)`, `.unit("dB")`, `.decimals(n)`, `.hertz()`, `.log()`, `.labels(&["A", "B"])` (a switch: values 0.0, 1.0 …), `.module("Group")`, `.bypass()`, `.hidden()`, `.read_only()`.
+- **Maths** (the prelude's): `db_to_gain(db)`, `gain_to_db(gain)`, `key_to_hz(key)`, `clamp(x, lo, hi)`, `exp(x)`, `ln(x)`, `exp2(x)`, `log2(x)`, `sin_turns(t)` and `cos_turns(t)` (`t` in turns: 1 is a whole cycle), `one_pole(seconds, sample_rate)` (a smoothing coefficient); and `est::math::floor`, `est::math::round`, `est::math::tan_half_turns`. `core` has no float maths: no `sin`, no `powf`, no `sqrt` on a float.
+- **`Smoother`**: `Smoother::new(seconds)`; `set_sample_rate(sr)`, `set_time(seconds)`, `set_target(v)`, `jump(v)`, `reset()` (jump to the target), `next() -> f64` once a sample, `settled() -> bool`.
+- **`Filter`** (state-variable, one per channel): `Filter::new()`; `set_sample_rate(sr)`, `set_mode(FilterMode::Low)` (or `Band`, `High`, `Notch`; `FilterMode::from_index(v)`), `set_cutoff(hz)`, `set_resonance(r)` (0 to 1), `set_smoothing(seconds)`, `reset()`, `process(x: f64) -> f64`.
+- **`Biquad`**: `Biquad::new()`; `set(BiquadKind::Peak, freq, q, gain_db, sample_rate)` (or `LowShelf`, `HighShelf`, `LowPass`, `HighPass`), `reset()`, `process(x: f64) -> f64`.
+- **`DelayLine`** (`f64` in and out): `DelayLine::new()`; `allocate(max_frames: usize) -> bool` in `activate`, `clear()`; each sample, `read(delay_frames: f64) -> f64` **before** `write(x: f64)`. The shortest delay is 1 frame; a fraction is interpolated.
+- **`Oscillator`**: `Oscillator::new()`; `set_sample_rate(sr)`, `set_frequency(hz)`, `set_wave(Wave::Sine)` (or `Saw`, `Square`, `Triangle`; `Wave::from_index(v)`), `reset(phase)`, `next() -> f64` (-1 to 1).
+- **`Lfo`**: `Lfo::new()`; `set_sample_rate(sr)`, `set_rate(hz)`, `set_sync(beats)` (0: free), `set_tempo(bpm)`, `set_wave(Wave::Sine)`, `reset(phase)`, `next() -> f64` (-1 to 1).
+- **`Envelope`** (ADSR): `Envelope::new()`; `set_sample_rate(sr)`, `set_adsr(attack, decay, sustain, release)` (seconds; sustain 0 to 1) or `set_attack`, `set_decay`, `set_sustain`, `set_release`; `start()`, `release()`, `reset()`, `next() -> f64`, `is_active() -> bool`, `tail_frames() -> u32`.
+- **State**: `w.u32(v)`, `w.f32(v)`, `w.f64(v)`; `r.u32()`, `r.f32()`, `r.f64()`.
 
-- `ui/index.html` loads `<script src="est-ui.js"></script>` and then your script, both files.
-  `est pack` copies `est-ui.js` (the UI library) into the bundle: do not add it yourself. It gives
-  `EstUI.connect()`, `EstUI.bind(el, id)` and the `<est-knob param="ID">` and `<est-slider>`
-  elements; `est-ui.d.ts` in this folder has its types.
-- `est.json`: `"ui": { "path": "ui/index.html", "size": { "w": 440, "h": 180 } }`. Cyber draws the
-  frame at exactly that size (CSS pixels) and never scales it.
-- What loads: scripts, CSS and `.png`, `.webp`, `.svg` images and `.woff2` fonts that are files of
-  the bundle (inline `<style>` and `style=""` too; no inline script, no `.jpg` or `.gif`, nothing
-  from another host, no `fetch`). `EST-U` rules check it.
-- `est dev --json` reports the page as `ui` lines: its load, `est:ready`, each message the host
-  refused and why, console errors, uncaught errors and files that did not load.
-  `{"cmd":"ui-param","id":0,"value":0.5}` on its stdin makes the page itself write a parameter
-  (through its `@est/ui` connection); the `param` line with `"origin":"frame"` after it proves the
-  UI reaches the host.
+## What costs time
 
-The guide, with a complete example and the plugin origin's exact policy, is `sdk/docs/ui.md` in the
-kit.
+`npx est validate` reports a block's mean cost and warns past 100 µs (`EST-P001`, a warning only). The warning is the best of three runs, so the cost is real (`npx est profile --json` names the function). The usual causes:
 
-## The golden render
+- **A sine a sample.** `sin_turns`, `cos_turns`, a sine `Oscillator` and a sine `Lfo` each sum a series with a division per term. One LFO is fine; one per voice adds up. Cheaper: a triangle or saw `Lfo`, your own phase with a parabola, or one value every 16 frames, smoothed.
+- **A gliding `Filter`** works out its coefficients again every sample while its cutoff or resonance moves. If you move the cutoff all the time (an envelope, an LFO), call `set_smoothing(0.0)` once and `set_cutoff` every 16 frames.
+- **`DelayLine`'s `read` with a fraction** interpolates: a chorus needs it, a plain echo can round its delay to whole frames.
+- **`exp`, `ln`, `db_to_gain`, `key_to_hz` a sample.** Work them out in `param_changed` or at the note's start, and smooth the result.
 
-`test/golden.json` says what to play (`input`, `events`, the length) and `test/golden.f32` is what came out.
-`est test` plays it again and compares, then runs the conformance checks; it exits 1 if anything
-fails. **The events name parameters by their id** (`{ "type": "param", "id": 1, "value": 800 }`,
-plain units), so when you add, remove, renumber or re-range a parameter, change the events to
-match. After changing the sound on purpose, render it again (`est test --update`), listen, and
-commit both files.
+## Easy to get wrong
+
+- **A frequency or time knob** wants a log scale: `.log()` on the parameter and `"scale": "log"` on its row in `est.json`'s `parameters`.
+- **A switch or chooser** (`.labels`) shows its labels on Cyber's knobs: at most 64 steps, 32 characters a label.
+- **Smooth every level and cutoff change** (`Smoother`), or a moving knob clicks.
+- **`test/golden.json`'s events name parameters by id** (`{ "type": "param", "time": 0.1, "id": 1, "value": 800 }`: plain units, seconds). Change them when a parameter changes, then `npx est test --update`.
+- **`test/golden.f32`** is every left frame, then every right frame (little-endian float32), not interleaved.
+- **validate's `peak`** is the stress run's worst case, not the level at the defaults.
+
+## Hear it
+
+- With a screen: `npx est dev` opens a page that plays the plugin (add `--port 0 --files-port 0` if a port is taken).
+- Without one: `npx est dev --json` needs a browser download (Playwright's Chromium; `npx est doctor` says how). Without it, **still check**: `npx est demo` writes `dist/demo.wav`, and `test/golden.f32` is the plugin's real output. Read one and check the level and the shape (silent? clipping? does a knob change it?). Tell the person what you checked, and that nobody has listened yet.
+
+## Put it in Cyber
+
+In Cyber, on Home: **EST PLUGINS → Add a plugin**, and drop `dist/<id>-<version>.est` there. Cyber runs the same checks; a refusal names the same rule id. It stays on the person's own account.
+
+Publishing on the EST Store is a later step and the person's choice: a published id starts with their own `dev.<10 hex>` name, which Cyber shows them, in `est.json` and in the source alike.

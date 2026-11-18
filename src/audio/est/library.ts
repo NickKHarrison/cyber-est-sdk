@@ -69,7 +69,8 @@ export interface EstInstalled {
   manifest: EstManifestInfo;
   /** 'developer': loaded from localhost in developer mode, never shareable (security §8 tier 0). */
   /** 1.320 (DEV-B §4): `'studio'`, built in the Plugin Studio by this account: this device only, never offered to another account. */
-  source: 'developer' | 'registry' | 'reference' | 'studio';
+  /** 1.794 (D-64): `'shared'`, a bundle this device holds because a project it opened names it (shared.ts): never in the library, never claimed. */
+  source: 'developer' | 'registry' | 'reference' | 'studio' | 'shared';
   installedAt: string;
   /** Whether the stored module is the metered build (D-30: always true once 2-D lands). */
   metered: boolean;
@@ -78,7 +79,8 @@ export interface EstInstalled {
 
 /** Why a slot cannot run its plugin; the placeholder card words each. 1.314 (EST-06): 'stopped', marked after a problem on this device until the card's Start (`running.ts`). */
 /** 1.663: each a stopped state of instanceState.ts' machine (its `EstReason`); 'stalled' and 'slow' no longer read as 'crashed'. Kept here, not imported, so the SDK's mirror carries no new file. */
-export type EstUnavailable = 'not-installed' | 'other-version' | 'blocked' | 'refused' | 'budget' | 'crashed' | 'stopped' | 'stalled' | 'slow';
+/** 1.794: `'sign-in'` (a project offers the plugin; nobody signed in) and `'shared-refused'` (its bundle could not be fetched or failed its check), shared plugins (D-64). */
+export type EstUnavailable = 'not-installed' | 'other-version' | 'blocked' | 'refused' | 'budget' | 'crashed' | 'stopped' | 'stalled' | 'slow' | 'sign-in' | 'shared-refused';
 
 export interface EstLibrary {
   /** Every installed plugin version, newest first. */
@@ -132,6 +134,8 @@ let unsubscribeCurrent: () => void = () => {};
 
 /** The library in use (the empty one until the install pipeline sets its own). */
 export const estLibrary = (): EstLibrary => current;
+/** A window event once a sync of the account's plugin list has settled (the server then holds what it took). */
+export const EST_ACCOUNT_SYNCED = 'cyber:est-account-synced';
 
 /** EST Phase 3: an installed version's bundle presets through the library in use (none when it gives none). */
 export function estPresets(ref: EstRef): Promise<readonly EstPreset[]> {

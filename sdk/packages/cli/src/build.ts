@@ -4,10 +4,10 @@
  * keeps standard output for the report.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { pack, readProject, type EstProject } from '../../tools/src/index';
+import { nextLine, pack, readProject, type EstProject } from '../../tools/src/index';
 import type { CommandContext } from './command';
 
 /** A path as the user would type it from `cwd`: relative when inside it, else absolute. */
@@ -20,17 +20,58 @@ export function isBundleFile(p: string): boolean {
   return p.endsWith('.est') && existsSync(p) && statSync(p).isFile();
 }
 
-/** Run the project's build; throws with what to do when the tool is missing or the build fails. */
+/** A failed build: what it printed (the compiler's output), kept so the caller can name the first error (`nextLine`). */
+export class BuildError extends Error {
+  /** The build's output, both streams, as it was printed. */
+  readonly log: string;
+  /** The tool that did not start, when that is why (it is not installed). */
+  readonly missing: string | null;
+  constructor(message: string, log: string, missing: string | null = null) {
+    super(message);
+    this.log = log;
+    this.missing = missing;
+  }
+}
+
+/**
+ * 1.803: the build's output is shown as it comes (a first Rust build takes a while) **and** kept,
+ * so a failure can end with the first compiler error in one line. A synchronous spawn cannot do
+ * both, so the build runs under this small Node child: it starts the tool, copies both streams to
+ * its own standard error (the person's terminal) and to the file named first, and exits with the
+ * tool's code (127 when the tool did not start).
+ */
+const TEE = [
+  "const { spawn } = require('node:child_process'); const fs = require('node:fs');",
+  'const [log, cmd, ...args] = process.argv.slice(1); const out = fs.openSync(log, \'w\');',
+  "const c = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' });",
+  'for (const s of [c.stdout, c.stderr]) s.on(\'data\', d => { process.stderr.write(d); fs.writeSync(out, d); });',
+  "c.on('error', e => { fs.writeSync(out, String(e.message)); process.exit(e.code === 'ENOENT' ? 127 : 1); });",
+  "c.on('close', code => process.exit(code === null ? 1 : code));",
+].join('\n');
+
+/** Run a build tool in `cwd`, its output shown and kept. */
+export function runShown(cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv): { status: number | null; log: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'est-build-'));
+  const logFile = join(dir, 'log.txt');
+  try {
+    const r = spawnSync(process.execPath, ['-e', TEE, logFile, cmd, ...args], { cwd, stdio: ['ignore', 2, 2], env: env ?? process.env });
+    let log = '';
+    try { log = readFileSync(logFile, 'utf8'); } catch { /* nothing was written */ }
+    return { status: r.error ? 1 : r.status, log };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Run the project's build; throws a `BuildError` with what to do when the tool is missing or the build fails. */
 export function build(project: EstProject, ctx: CommandContext): void {
   if (!project.build) return;
   const { cmd, args } = project.build;
   ctx.err(`est: building (${[cmd.split(/[\\/]/).pop(), ...args].join(' ')})`);
-  const r = spawnSync(cmd, args, { cwd: project.dir, stdio: ['ignore', 2, 2], shell: process.platform === 'win32' });
-  if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') {
-    throw new Error(`${cmd} is not installed (run \`est doctor\` for the command that installs it)`);
-  }
-  if (r.status !== 0) throw new Error(`the build failed (${cmd} exited with ${r.status ?? r.signal})`);
-  if (!existsSync(project.wasm)) throw new Error(`the build did not write ${project.wasm}`);
+  const r = runShown(cmd, args, project.dir);
+  if (r.status === 127) throw new BuildError(`${cmd} is not installed (run \`est doctor\` for the command that installs it)`, r.log, cmd.split(/[\\/]/).pop() ?? cmd);
+  if (r.status !== 0) throw new BuildError(`the build failed (${cmd.split(/[\\/]/).pop()} exited with ${r.status})`, r.log);
+  if (!existsSync(project.wasm)) throw new BuildError(`the build did not write ${project.wasm}`, r.log);
 }
 
 export interface Packed { file: string; hash: string; bytes: Uint8Array; id: string; version: string }
@@ -99,5 +140,23 @@ export function buildWithNames(dir: string, ctx: CommandContext, purpose: 'profi
     return pack(d, { module: plan.wasm }).bytes;
   } finally {
     rmSync(out, { recursive: true, force: true });
+  }
+}
+
+/**
+ * 1.803: build and pack for a command that ends with a `Next:` line. A failed build prints its
+ * reason and the line (the first compiler error with its file and line) and gives null; the command
+ * then exits 1. `quiet`: `--json`, where standard output is the report's alone, so both go to
+ * standard error.
+ */
+export function buildOrNext(dir: string, ctx: CommandContext, opts: { noBuild?: boolean; quiet?: boolean; name: string }): Packed | null {
+  try {
+    return buildAndPack(dir, ctx, opts);
+  } catch (err) {
+    if (!(err instanceof BuildError)) throw err;
+    ctx.err(`est ${opts.name}: ${err.message}`);
+    const line = nextLine(err.missing ? { kind: 'tool', tool: err.missing } : { kind: 'build', log: err.log, message: err.message });
+    (opts.quiet ? ctx.err : ctx.out)(line);
+    return null;
   }
 }

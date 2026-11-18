@@ -27,18 +27,20 @@ Two things make EST different from a desktop plugin, and both work in your favou
 
 ## 2. Set up once (five minutes)
 
-You need Node 20 or newer. From npm (Node 20 or newer; the kit's first release, 0.1.0, is built and checked but not yet published):
+You need Node 20 or newer. The kit is the npm package `@cyber-est/cli`:
 
 ```bash
 npx @cyber-est/cli new effect-as my-plugin --id com.example.my-plugin --name "My Plugin"
 cd my-plugin
-npm install --save-dev --save-exact @cyber-est/cli@0.1.0
+npm install --save-dev --save-exact @cyber-est/cli
 npx est doctor
 ```
 
 In that folder `npx est …` is the kit. Anywhere else write `npx @cyber-est/cli …`: a bare `npx est` where the kit isn't installed fetches an unrelated npm package of that name.
 
-Until the first release, or to work on the kit itself, run it from a clone of the kit's public repository (Cyber's own clone works the same):
+From here on the guide writes `est …`: in your plugin's folder that is `npx est …`.
+
+Only to work on the kit itself, run it from a clone of the kit's public repository:
 
 ```bash
 git clone https://github.com/NickKHarrison/cyber-est-sdk
@@ -47,7 +49,7 @@ npm ci
 alias est="node $PWD/sdk/packages/cli/bin/est.mjs"
 ```
 
-Put the alias in your shell profile to keep it. On Windows, `node <clone>\sdk\packages\cli\bin\est.mjs` is the same command.
+Put the alias in your shell profile to keep it. On Windows, `node <folder>\sdk\packages\cli\bin\est.mjs` is the same command.
 
 Then pick a language:
 
@@ -81,7 +83,7 @@ Templates: `effect-as`, `instrument-as`, `effect-rust`, `instrument-rust`. Add `
 
 The folder you get is already a working plugin (a smoothed gain into a filter, or a polyphonic synth). You change it rather than start from nothing.
 
-**Loading it into Cyber.** While adding your own plugins is open on Cyber: on Home, **EST PLUGINS → Add a plugin** and drop the `.est` on it (no key needed); a developer with a registered signing key can also use **Settings → Plugins → Developer tools → Load a bundle file…**. Cyber runs the same checks and tells you the same rule id if something fails. What you load is yours alone, on your own account. Cyber's own catalogue is open to every signed-in account; publishing to its Community tier comes later (see §9).
+**Loading it into Cyber.** On Home, **EST PLUGINS → Add a plugin** and drop the `.est` on it (no key needed); a developer with a registered signing key can also use **Settings → Plugins → Developer tools → Load a bundle file…**. Cyber runs the same checks and tells you the same rule id if something fails. What you load is yours alone, on your own account. Cyber's own catalogue is open to every signed-in account; publishing to its Community tier comes later (see §9).
 
 ---
 
@@ -242,7 +244,7 @@ If you have a VST, AU or CLAP plugin, the DSP is what you keep. The rest is repl
 
 **From CLAP** (the easiest): EST is CLAP 1.2 compiled for `wasm32-unknown-unknown`. The factory, descriptor, `activate`, `process`, events and the parameter and state extensions carry over. What changes: the GUI becomes a web page, there is one thread (no `thread-pool`), no file or network access, memory has a declared maximum, and `process` must be deterministic. `docs/porting-clap.md` has the list.
 
-**From C++ (CLAP, or the DSP of a VST3 or AU)**: `est new cpp-clap …` is a CLAP plugin in C++ built with clang to wasm32, shaped like the CLAP SDK's own plugin template; put your DSP class where its `gain.hpp` is. The toolchain, the flags and what breaks (libc, exceptions, threads, files) are in `docs/porting-cpp.md`. Or, for a small plugin, move your `process` body into the Rust template's `render`. Your SIMD code is fine (fixed-width SIMD is supported). Your lookup tables are fine (build them in `activate`). Your sample libraries ship inside the bundle (`assets` in the manifest), not fetched at run time.
+**From C++ (CLAP, or the DSP of a VST3 or AU)**: `est port <your source folder>` reads your source and writes a plugin folder with your parameters declared and a `PORT_PLAN.md` to follow ([Port your plugin](PORT_YOUR_VST.md)). By hand: `est new cpp-clap …` is a CLAP plugin in C++ built with clang to wasm32, shaped like the CLAP SDK's own plugin template; put your DSP class where its `gain.hpp` is. The toolchain, the flags and what breaks (libc, exceptions, threads, files) are in `docs/porting-cpp.md`. Or, for a small plugin, move your `process` body into the Rust template's `render`. Your SIMD code is fine (fixed-width SIMD is supported). Your lookup tables are fine (build them in `activate`). Your sample libraries ship inside the bundle (`assets` in the manifest), not fetched at run time.
 
 **From JUCE**: keep JUCE for your desktop build and share the DSP source between the two: `docs/porting-juce.md`, and the example in `sdk/kits/juce-shared-dsp/` (one header both builds compile, a CMake file for both, a native renderer to compare them). JUCE's `prepareToPlay` maps to `activate`, `processBlock` to `process` between events, `AudioProcessorValueTreeState` to the parameter list plus the state.
 
@@ -280,7 +282,7 @@ Until then, the best thing you can do is build and validate. A bundle that passe
 
 ## 10. Where to look things up
 
-All in `sdk/docs/` of the Cyber clone, and most copied into your plugin's folder by `est new`:
+All in `sdk/docs/` of the kit's public repository, https://github.com/NickKHarrison/cyber-est-sdk, and most copied into your plugin's folder by `est new`:
 
 | Question | Read |
 |---|---|

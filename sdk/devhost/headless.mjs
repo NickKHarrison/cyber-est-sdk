@@ -8,6 +8,8 @@
  *   {"type":"ready","params":3,…}       the instance is running
  *   {"type":"meter","peak":[-6.1,-6.1],"rms":[-9.2,-9.2]}   four times a second (dBFS; null is silence)
  *   {"type":"ui","event":"load"|"ready"|"init"|"rejected"|"console"|"error"|"http",…}   the custom UI
+ *   {"type":"reload","ok":true,"ms":41,"kept":{"notes":1,"params":4,"state":true}}   a rebuild handed over
+ *                                       (1.803; "ok":false with "message" and "next": the old build still plays)
  *   {"type":"command"|"done",…}         a command started, and finished
  *   {"type":"param"|"note-on"|"state"|"stats"|"error"|…}     everything the page logs
  *
@@ -18,6 +20,7 @@
  *   {"cmd":"param","id":0,"value":-6}  {"cmd":"play"}  {"cmd":"stop"}  {"cmd":"tempo","bpm":128}
  *   {"cmd":"signal","kind":"sine"|"noise"|"pulse"|"off"}  {"cmd":"state"}  {"cmd":"preset","id":"presets/x.bin"}
  *   {"cmd":"params"}  {"cmd":"wait","ms":500}  {"cmd":"quit"}
+ *   {"cmd":"key","kind":"off"|"kick"|"sine"}   what feeds an effect's sidechain (1.803; --key at the start)
  *   {"cmd":"ui-param","id":0,"value":-6}   the custom UI's page writes the parameter itself (uiParam below)
  *
  * How long it runs (one rule): `--seconds N` stops it N seconds after the instance started, whatever
@@ -146,6 +149,17 @@ export async function uiParam(page, filesOrigin, c, line) {
 }
 
 /**
+ * 1.803: a Chromium that is already on the machine, named by `EST_CHROMIUM` (the path of its
+ * program), instead of the one `npx playwright install chromium` downloads. An agent's sandbox
+ * often has a browser and no way to download another. Undefined: Playwright's own.
+ * @param {NodeJS.ProcessEnv} [env]
+ */
+export function chromiumPath(env = process.env) {
+  const p = String(env.EST_CHROMIUM ?? '').trim();
+  return p || undefined;
+}
+
+/**
  * Playwright's `chromium`, an optional peer: from beside the dev host (the clone, or where
  * @cyber-est/cli is installed), else from the plugin's own folder. Null when neither has it.
  * @param {string} target
@@ -165,7 +179,7 @@ async function loadChromium(target) {
 }
 
 /**
- * @param {{ target: string, port: number, filesPort: number, watch: boolean, seconds: number | null, play: number[], uiPreview: string | null, cyber?: string[] }} o
+ * @param {{ target: string, port: number, filesPort: number, watch: boolean, seconds: number | null, play: number[], uiPreview: string | null, cyber?: string[], key?: string }} o
  * @param {{ stdout: NodeJS.WritableStream, stderr: NodeJS.WritableStream, stdin: NodeJS.ReadableStream }} io
  */
 export async function runHeadless(o, io) {
@@ -242,7 +256,16 @@ export async function runHeadless(o, io) {
     return 1;
   }
   target = host;
-  const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+  let browser;
+  try {
+    const executablePath = chromiumPath();
+    browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'], ...(executablePath ? { executablePath } : {}) });
+  } catch (err) {
+    rl.close();
+    await host.close();
+    line({ type: 'error', phase: 'start', message: `the browser did not start (${String(err instanceof Error ? err.message : err).split('\n')[0]}): npx playwright install chromium, or set EST_CHROMIUM to the path of a Chromium already on this machine` });
+    return 1;
+  }
   let failed = false;
   try {
     const page = await browser.newPage();
@@ -269,7 +292,7 @@ export async function runHeadless(o, io) {
     const answered = new WeakSet();
     page.on('response', (r) => { answered.add(r.request()); if (inFiles(r.url()) && r.status() >= 400) line({ type: 'ui', event: 'http', status: r.status(), url: r.url() }); });
     page.on('requestfailed', (r) => { if (inFiles(r.url()) && !answered.has(r)) line({ type: 'ui', event: 'http', status: null, url: r.url(), failure: r.failure()?.errorText ?? null }); });
-    await page.goto(`${host.url}/?json=1&autostart=1`);
+    await page.goto(`${host.url}/?json=1&autostart=1${o.key && o.key !== 'off' ? `&key=${encodeURIComponent(o.key)}` : ''}`);
     line({ type: 'host', url: host.url, files: host.filesOrigin });
 
     // The page's phase: 'running' (an instance, or a UI preview) or 'failed'.

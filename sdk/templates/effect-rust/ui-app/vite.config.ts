@@ -15,9 +15,8 @@
 //   (React's error links, a CSS banner) are cut out, with a warning, so `EST-U002` passes. XML
 //   namespace names stay.
 //
-// Run from the plugin's folder: `npm run build:ui` (or `<cyber>/node_modules/.bin/vite build
-// --config ui-app/vite.config.ts` with the Vite of a Cyber clone). Only type imports from 'vite', so
-// any Vite 8 runs it.
+// Run from the plugin's folder: `npm run build:ui` (or `npx vite build --config ui-app/vite.config.ts`
+// with a Vite 8 installed there). Only type imports from 'vite', so any Vite 8 runs it.
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

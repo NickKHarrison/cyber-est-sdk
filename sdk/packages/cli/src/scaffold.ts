@@ -40,8 +40,43 @@ export interface ScaffoldOptions {
   ui?: boolean;
   /** Add the template's window as an app (`ui-app/`, its package.json at the root) and est.json's `ui` entry (1.335). */
   app?: boolean;
+  /**
+   * 1.800: a folder whose files are copied in where the new folder has none at that path (the
+   * recipes' shared assistant files, `sdk/cookbook-agents/`: a recipe folder carries only its README).
+   */
+  overlay?: string;
+  /** 1.800: the person's own sentence, written into AGENTS.md's "What to build" (`est new --idea`, or its first question). */
+  idea?: string;
+  /** 1.800: the texts `--ui` and `--app` put in AGENTS.md's window section (`sdk/agents/sections/window-*.md`). */
+  windowText?: { ui: string; app: string };
+  /** 1.800: the kit to pin in the new folder's `package.json` (its scripts run `est`); absent, none is written. */
+  kit?: { name: string; version: string };
 }
-export interface Scaffolded { dir: string; id: string; name: string; vendored: string[]; files: number; crate: string | null; type: string | null; ui: boolean; app: boolean }
+export interface Scaffolded { dir: string; id: string; name: string; vendored: string[]; files: number; crate: string | null; type: string | null; ui: boolean; app: boolean; idea: boolean; packageJson: boolean }
+
+/** 1.800: the marks in a generated AGENTS.md that `est new` fills (held equal to sdk/agents/generate.mjs by sdk/tests/agents.test.ts). */
+export const IDEA_MARKS = ['<!-- est:idea -->', '<!-- /est:idea -->'] as const;
+export const WINDOW_MARKS = ['<!-- est:window -->', '<!-- /est:window -->'] as const;
+
+/** A folder or plugin name in kebab-case (`Tape Echo!` → `tape-echo`); '' when nothing is left. */
+export function kebab(text: string): string {
+  return text.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/, '');
+}
+/** A name from a kebab or snake label (`tape-echo` → `Tape Echo`). */
+export function titleOf(label: string): string {
+  return label.replace(/[-_.]+/g, ' ').trim().replace(/\b\w/g, c => c.toUpperCase()).slice(0, 60);
+}
+/** The person's sentence as one plain line: no line breaks, no HTML comment marks, at most 500 characters. */
+export function ideaLine(text: string): string {
+  return text.replace(/<!--|-->/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
+}
+/** `text` with what lies between two marks replaced (the marks kept); null when the marks are not there. */
+export function betweenMarks(text: string, marks: readonly [string, string], inner: string): string | null {
+  const a = text.indexOf(marks[0]);
+  const b = text.indexOf(marks[1]);
+  if (a < 0 || b < a) return null;
+  return `${text.slice(0, a + marks[0].length)}\n${inner.trim()}\n${text.slice(b)}`;
+}
 
 /**
  * npm never packs a file named `.gitignore`, so a published `@cyber-est/cli` carries a template's
@@ -168,10 +203,13 @@ export function scaffold(opts: ScaffoldOptions): Scaffolded {
   const dest = resolve(opts.dest);
   if (existsSync(dest) && readdirSync(dest).length) throw new Error(`${dest} is not empty`);
   const tmpl = JSON.parse(readFileSync(join(src, 'est.json'), 'utf8')) as { id: string; name: string };
-  const slug = basename(dest).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'plugin';
-  const id = opts.id ?? `org.example.${slug}`;
+  // 1.800: the default id is com.example.<name in kebab-case> (the --name, else the folder): good for your own
+  // account and for a project you share; a published id is a rename at publish time.
+  const slug = kebab(opts.name ?? '') || kebab(basename(dest)) || 'plugin';
+  const id = opts.id ?? `com.example.${slug}`;
   if (!EST_ID_RE.test(id)) throw new Error(`--id ${id} is not a reverse-DNS id of [a-z0-9.-] (for example com.example.my-verb)`);
-  const name = opts.name ?? basename(dest).replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).slice(0, 60);
+  // 1.800: with --id and no --name the name comes from the id's last part (a folder called "plugin" named every plugin "Plugin").
+  const name = opts.name ?? (titleOf(opts.id ? opts.id.split('.').pop() ?? '' : basename(dest)) || titleOf(basename(dest)) || 'My Plugin');
   if (!name.trim() || name.length > 60 || /["\\`]/.test(name) || [...name].some(ch => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f)) throw new Error('--name is plain text of at most 60 characters, without quotes or backslashes');
 
   // The example UI only with `ui`, and then as `ui/`; the app only with `app`.
@@ -190,6 +228,15 @@ export function scaffold(opts: ScaffoldOptions): Scaffolded {
     const ignore = join(dest, '.gitignore');
     const had = existsSync(ignore) ? readFileSync(ignore, 'utf8') : '';
     if (!/^node_modules\/?$/m.test(had)) writeFileSync(ignore, `${had}${had && !had.endsWith('\n') ? '\n' : ''}# The app window's build tools (npm install for npm run build:ui).\nnode_modules/\n`);
+  }
+  // 1.800: the shared assistant files, where the template has none at that path.
+  if (opts.overlay && existsSync(opts.overlay)) {
+    for (const f of files(opts.overlay)) {
+      const to = join(dest, destName(f));
+      if (existsSync(to)) continue;
+      mkdirSync(dirname(to), { recursive: true });
+      cpSync(join(opts.overlay, f), to);
+    }
   }
   if (opts.ui) {
     for (const f of exampleUi) {
@@ -285,11 +332,45 @@ export function scaffold(opts: ScaffoldOptions): Scaffolded {
   }
   writeFileSync(join(dest, 'est.json'), `${JSON.stringify(m, null, 2)}\n`);
 
+  // 1.800: AGENTS.md's two filled sections: the window's rules for --ui or --app, and the person's sentence.
+  const agents = join(dest, 'AGENTS.md');
+  let ideaWritten = false;
+  if (existsSync(agents)) {
+    let text = readFileSync(agents, 'utf8');
+    const windowText = opts.app ? opts.windowText?.app : opts.ui ? opts.windowText?.ui : undefined;
+    if (windowText) text = betweenMarks(text, WINDOW_MARKS, windowText) ?? text;
+    const idea = ideaLine(opts.idea ?? '');
+    if (idea) {
+      const filled = betweenMarks(text, IDEA_MARKS, `> ${idea}\n\nThat sentence is the person's own. Where it leaves a choice open, choose, and tell them what you chose.`);
+      if (filled) { text = filled; ideaWritten = true; }
+    }
+    writeFileSync(agents, text);
+  }
+
+  // 1.800: package.json with the kit pinned exactly and the scripts, so `npx est` and `npm run validate` work
+  // in the folder (an --app folder already has one for its window's build: the kit and the scripts join it).
+  if (opts.kit) {
+    const file = join(dest, 'package.json');
+    const had = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown> : {};
+    const scripts = { validate: 'est validate', test: 'est test', dev: 'est dev', pack: 'est pack', ...(had.scripts as Record<string, string> | undefined) };
+    const dev = { ...(had.devDependencies as Record<string, string> | undefined), [opts.kit.name]: opts.kit.version };
+    const { name: _n, version: _v, private: _p, description, scripts: _s, devDependencies: _d, ...rest } = had;
+    const pkg = {
+      name: crateNameOf(id), version: '0.0.0', private: true,
+      description: typeof description === 'string' && opts.app ? description : `${name}: an EST plugin for Cyber (est.json holds its id and version).`,
+      ...rest, scripts, devDependencies: Object.fromEntries(Object.entries(dev).sort(([a], [b]) => a.localeCompare(b))),
+    };
+    writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`);
+    const ignore = join(dest, '.gitignore');
+    const was = existsSync(ignore) ? readFileSync(ignore, 'utf8') : '';
+    if (!/^node_modules\/?$/m.test(was)) writeFileSync(ignore, `${was}${was && !was.endsWith('\n') ? '\n' : ''}# The kit (npm install).\nnode_modules/\n`);
+  }
+
   // Nothing may lead back out: every reference resolves inside the new folder.
   const escaping: string[] = [];
   for (const f of all) for (const r of refsOf(dest, f)) if (!inside(dest, resolve(dirname(join(dest, f)), r.spec))) escaping.push(`${f}: ${r.spec}`);
   if (escaping.length) throw new Error(`the new folder still refers outside itself: ${escaping.join('; ')}`);
-  return { dir: dest, id, name, vendored: [...vendored.values()].map(v => relative(dest, v)), files: files(dest).length, crate: crateRenamed, type: typeRenamed, ui: !!opts.ui, app: !!opts.app };
+  return { dir: dest, id, name, vendored: [...vendored.values()].map(v => relative(dest, v)), files: files(dest).length, crate: crateRenamed, type: typeRenamed, ui: !!opts.ui, app: !!opts.app, idea: ideaWritten, packageJson: !!opts.kit };
 }
 
 /** The example UI's frame size, from its page's `<meta name="est-ui-size" content="W×H">` (else 420 × 240). */

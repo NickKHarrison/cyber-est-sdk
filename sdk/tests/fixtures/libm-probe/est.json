@@ -1,0 +1,11 @@
+{
+  "$comment": "Not a plugin: the maths probe sdk/tests/cppKit.test.ts measures (est/runtime.hpp's fast_exp, tanh and atan, and the freestanding <cmath> and <math.h>). build.mjs reads only the memory maximum from here.",
+  "id": "org.example.est-libm-probe",
+  "name": "EST libm probe",
+  "vendor": "Example",
+  "version": "1.0.0",
+  "description": "The C and C++ kit's maths, exported for the tests.",
+  "kind": "effect",
+  "features": [],
+  "limits": { "memoryPagesMax": 4 }
+}

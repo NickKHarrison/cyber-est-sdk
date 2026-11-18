@@ -94,6 +94,45 @@ export interface ConformanceInput {
   allowUnmetered?: boolean;
   /** The runtime's fuel (tests; the default is the runtime's own). */
   fuel?: { block?: number; call?: number };
+  /** Tests of the block-cost measure only: the clock a run times its blocks with (ms). */
+  clock?: () => number;
+}
+
+/**
+ * 1.803: **how many times the block cost is sampled before `EST-P001` may warn: the best of up to
+ * three runs.** The cost is the mean wall time of a block over one run of the signal, so anything
+ * else the machine does in that run is in the figure: on a loaded 4-core machine the same build
+ * measured 30 to 140 µs between runs, and six of fourteen first validates carried a warning the
+ * next run did not show (docs/est/easiest-workflow-design.md §1(a) item 6). Other work only ever
+ * adds time, so the smallest of several runs is the nearest to what the plugin itself costs.
+ *
+ * What it costs, and where:
+ * - **At install, nothing.** The conformance run already plays the signal twice (the second proves
+ *   the output is the same bits, EST-C018), and both runs are timed; the figure is now the faster
+ *   of the two instead of the first. No block is added: an install takes exactly as long as before.
+ * - **A third run only in the kit** (`est validate`, `est test`: @cyber-est/tools' `validate`), and
+ *   only when both of those were over the budget. A run is 3750 blocks (10 s at 48 kHz); a plugin
+ *   over the 100 µs budget spends at least 3750 × 100 µs = 0.375 s in it, so the common case (under
+ *   budget) pays nothing and the rare one pays one more run, about a third more of the run's time.
+ *
+ * The rule, its id and its budget (`EST_BLOCK_BUDGET_US`, 100 µs) do not change: a plugin that is
+ * over budget on every run still warns, with the smallest figure measured.
+ */
+export const BLOCK_COST_RUNS = 3;
+
+/**
+ * The block cost after up to `runs` samples: `measured` is the best of the `done` runs already
+ * made (the conformance run's two); while it is over `budget` and runs remain, `again` makes one
+ * more (null: it could not run, so stop). Never larger than `measured`.
+ */
+export function bestBlockCost(measured: number, budget: number, again: () => number | null, runs = BLOCK_COST_RUNS, done = 2): number {
+  let best = measured;
+  for (let n = done; n < runs && best > budget; n++) {
+    const next = again();
+    if (next === null) break;
+    if (next < best) best = next;
+  }
+  return best;
 }
 
 export interface ConformanceReport {
@@ -132,7 +171,7 @@ export interface ConformanceReport {
  * it posted), `ask` (a request and its reply) and `block` (one block of audio at a frame). Also
  * what the tests drive a plugin with.
  */
-export function standInInstance(input: Pick<ConformanceInput, 'module' | 'shim' | 'manifest' | 'fuel'>, sr = 48000, opts: { queueSize?: number } = {}) {
+export function standInInstance(input: Pick<ConformanceInput, 'module' | 'shim' | 'manifest' | 'fuel'>, sr = 48000, opts: { queueSize?: number; /** 1.804: ask for value text as a live instance does (absent: none, as every check and render). */ valueText?: boolean } = {}) {
   const C = processorClass();
   outbox = [];
   scope.sampleRate = sr;
@@ -145,7 +184,7 @@ export function standInInstance(input: Pick<ConformanceInput, 'module' | 'shim' 
     ...(m.sidechain ? { sidechain: m.sidechain } : {}),
     ...(m.notes?.outputs ? { notesOut: true } : {}),
   } : {};
-  const proc = new C({ processorOptions: { module: input.module, shim: input.shim, pluginId: input.manifest.id, maxMemoryPages: input.manifest.limits.memoryPagesMax, statsIntervalMs: 1e12, fuel: input.fuel, ...(logParams.length ? { logParams } : {}), ...(opts.queueSize ? { queueSize: opts.queueSize } : {}), ...v11 } });
+  const proc = new C({ processorOptions: { module: input.module, shim: input.shim, pluginId: input.manifest.id, maxMemoryPages: input.manifest.limits.memoryPagesMax, statsIntervalMs: 1e12, fuel: input.fuel, ...(logParams.length ? { logParams } : {}), ...(opts.queueSize ? { queueSize: opts.queueSize } : {}), ...(opts.valueText ? { valueText: true } : {}), ...v11 } });
   const boot = outbox.splice(0);
   let req = 1;
   const send = (m: Record<string, unknown>): Msg[] => {
@@ -284,7 +323,7 @@ function render(input: ConformanceInput, sr: number, blocks: number, params: Est
   let trap: string | null = null;
   const bits = new Uint32Array(outL.buffer);
   const bitsR = new Uint32Array(outR.buffer);
-  const clock = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const clock = input.clock ?? (() => (typeof performance !== 'undefined' ? performance.now() : Date.now()));
   let ms = 0;
   for (let b = 0; b < blocks; b++) {
     scope.currentFrame = b * FRAMES;
@@ -318,6 +357,28 @@ function render(input: ConformanceInput, sr: number, blocks: number, params: Est
   }
   const ended = afterFrom >= 0 && afterFrom + FRAMES < blocks * FRAMES;
   return { inst, ready, error: null as string | null, hash, peak, ms, trap, trapRule: finite ? 'EST-C013' : 'EST-C014', finite, held, after, afterFrom: ended ? afterFrom : -1, notes: plan?.notes ?? 0, tail };
+}
+
+/**
+ * 1.803 (`BLOCK_COST_RUNS`): one more timed run of the conformance signal, for the kit's validator
+ * when both of the install check's runs were over the budget: the mean time of a block, µs, or null
+ * when the run did not complete. Never called at install.
+ */
+export function blockCostAgain(input: ConformanceInput): number | null {
+  const sr = input.sampleRate ?? 48000;
+  const blocks = Math.max(1, Math.ceil(((input.seconds ?? 10) * sr) / FRAMES));
+  let proc: Proc | null = null;
+  try {
+    const run = render(input, sr, blocks, null);
+    proc = run.inst.proc;
+    if (run.error || run.trap) return null;
+    return (run.ms * 1000) / blocks;
+  } catch {
+    return null;
+  } finally {
+    try { proc?.port.onmessage?.({ data: { type: 'dispose' } }); } catch { /* gone */ }
+    outbox = [];
+  }
 }
 
 /**
@@ -458,6 +519,8 @@ export function runConformance(input: ConformanceInput): ConformanceReport {
     const two = render(input, sr, blocks, report.params);
     disposeAll.push(two.inst.proc);
     report.deterministic = !two.error && !two.trap && two.hash === one.hash;
+    // 1.803 (`BLOCK_COST_RUNS`): the second run was timed too; the faster of the two is the figure.
+    if (!two.error && !two.trap) report.blockUs = Math.min(report.blockUs, (two.ms * 1000) / blocks);
     two.inst.send({ type: 'dispose' });
     report.ok = true;
     return report;

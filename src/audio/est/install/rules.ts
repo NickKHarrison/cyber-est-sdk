@@ -151,7 +151,7 @@ export const EST_RULES: readonly EstRule[] = [
     '`presets` names the bundle\'s preset index, a `.json` path in the bundle, listed in est.json like every file.',
     'Set `"presets": "presets/index.json"` and keep the index in the plugin\'s `presets/` folder, or remove `presets`.'),
   r('EST-M018', 'manifest', 'A zero-width or direction character in a text field',
-    'A text field (the name, vendor, description, a parameter or preset name, a tag) holds a zero-width (U+200B–U+200F) or bidirectional control character (U+202A–U+202E, U+2066–U+2069), which can make one name look like another (1.314, EST-14).',
+    'A text field (the name, vendor, description, a parameter or preset name, a tag) holds an invisible or direction character: a zero-width character or direction mark (U+200B–U+200F), a line or paragraph separator or bidirectional control (U+2028–U+202E, U+2066–U+206F), the soft hyphen (U+00AD), the Arabic letter mark (U+061C), U+180E, the word joiner and invisible operators (U+2060–U+2064), the BOM (U+FEFF) or a Tags-block character (U+E0000–U+E007F). They can make one name look like another or carry hidden text (1.314, EST-14; widened in 1.758).',
     'Remove the character; write the name as it reads.'),
   // EST 1.1 (1.327, DEV-H, D-56).
   r('EST-M019', 'manifest', 'An EST edition this host does not run',

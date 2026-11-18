@@ -275,9 +275,31 @@ export function estProcessorMain() {
   const HOST_BYTE = 8;
   const HOST_RANDOM_BYTE = 64;
   const EFAULT = 21;
+  /**
+   * 1.804 (value text): the labels of a stepped parameter's steps, asked of the plugin once, at boot
+   * (`readLabels`), never in `process()`. The caps, and their arithmetic:
+   * - `LABEL_STEPS` 64 steps a parameter: a chooser a person reads (a wave, a mode, a note division);
+   *   a stepped parameter with more (a 0…127 program) keeps its number.
+   * - `LABEL_TOTAL` 1024 labels an instance: 16 full choosers, or 512 switches (the SDK's 512
+   *   parameters, all on/off, is 1024 exactly).
+   * - `LABEL_BYTES` 96: the buffer the plugin is given, its NUL included; `LABEL_CHARS` 32 code points
+   *   kept (a longer text is no label: a knob's readout is a few words). 32 code points are at most
+   *   128 bytes of UTF-8, so a label of 4-byte letters past 23 is cut by the buffer and dropped; the
+   *   ready message carries at most 1024 × 32 = 32 768 characters (64 KiB as UTF-16), once.
+   * - `LABEL_FUEL` one block's fuel for the whole table (a metered module): the SDKs' `value_to_text`
+   *   of a label is a copy loop of at most 95 bytes, under 2 000 points, so 1024 of them are about
+   *   2 M of 41.9 M; a plugin that spends more gets the labels it reached. `LABEL_MS` 20 ms of wall
+   *   time bounds an unmetered module (developer mode) the same way.
+   */
+  const LABEL_STEPS = 64;
+  const LABEL_TOTAL = 1024;
+  const LABEL_BYTES = 96;
+  const LABEL_CHARS = 32;
+  const LABEL_FUEL = BLOCK_FUEL;
+  const LABEL_MS = 20;
 
   type Fn = (...args: number[]) => number;
-  interface ParamInfo { id: number; name: string; module: string; min: number; max: number; def: number; flags: number; value: number; scale?: string }
+  interface ParamInfo { id: number; name: string; module: string; min: number; max: number; def: number; flags: number; value: number; scale?: string; labels?: string[] }
   interface Options {
     module?: WebAssembly.Module;
     bytes?: ArrayBuffer;
@@ -299,6 +321,8 @@ export function estProcessorMain() {
     queueSize?: number;
     /** EST tidy (1.286): the ids est.json marks `"scale": "log"` (a range above 0 maps a lane geometrically). */
     logParams?: number[];
+    /** 1.804: ask the plugin for its stepped parameters' value text at boot (`readLabels`); a live instance only, never an offline render's. */
+    valueText?: boolean;
     /** EST 1.1: the main ports' channels read at most (default 2, at most MAX_CH). */
     maxChannels?: number;
     /** EST 1.1: the sidechain input's channels (the plugin's input port 1), fed from the node's input 1; 0 or absent: none. */
@@ -662,6 +686,8 @@ export function estProcessorMain() {
       this.fnMainThread = this.fnAt(this.plugin + A.clap_plugin.on_main_thread);
       this.phase = 'params';
       this.readParams();
+      // 1.804: the stepped parameters' labels, only where asked for (a live instance) and never for a render.
+      if (o.valueText === true && !this.offline) this.readLabels();
       this.refreshViews();
       this.phase = 'process';
     }
@@ -932,6 +958,85 @@ export function estProcessorMain() {
         this.params.push(p);
       }
       for (const p of this.params) p.value = this.paramValue(p.id);
+    }
+
+    /**
+     * 1.804 (value text): `clap_plugin_params.value_to_text` for every step of each stepped parameter
+     * with whole ends and at most `LABEL_STEPS` steps, into `p.labels` (index: the step less `min`;
+     * '' where the plugin gave none). Once, at boot, outside `process()`. Each call is fuelled out of
+     * one budget for the table (`LABEL_FUEL`), writes into the host's scratch (already allocated: no
+     * new allocation in the plugin), and its text is untrusted: read only inside the buffer, strict
+     * UTF-8, no control character, at most `LABEL_CHARS` code points (`readLabel`); the page cleans it
+     * again (paramInfo.ts' `cleanEstLabels`, the hidden-text rule). A trap, a NULL pointer or a spent
+     * budget ends the table there: the parameters reached keep their labels, the rest their numbers,
+     * and the instance boots as it would have.
+     */
+    readLabels() {
+      const pe = this.ext[STR.CLAP_EXT_PARAMS] ?? 0;
+      if (!pe) return;
+      const buf = this.scratch, cap = Math.min(LABEL_BYTES, A.clap_param_info.$size);
+      const t0 = Date.now();
+      let left = LABEL_FUEL, total = 0;
+      try {
+        const f = this.fnAt(pe + A.clap_plugin_params.value_to_text);
+        for (let k = 0; k < this.params.length; k++) {
+          const p = this.params[k]!;
+          if (!(p.flags & C.CLAP_PARAM_IS_STEPPED)) continue;
+          const steps = p.max - p.min + 1;
+          if (!Number.isInteger(p.min) || !Number.isInteger(p.max) || steps < 2 || steps > LABEL_STEPS) continue;
+          if (total + steps > LABEL_TOTAL) break;
+          const labels: string[] = [];
+          let any = false;
+          for (let i = 0; i < steps; i++) {
+            if (left <= 0 || Date.now() - t0 > LABEL_MS || !this.inMem(buf, cap)) return;
+            this.u8.fill(0, buf, buf + cap);
+            const give = Math.min(left, this.callFuel);
+            this.fuelUp(give);
+            const ok = f(this.plugin, p.id, p.min + i, buf, cap);
+            if (this.fuelLeft) left -= give - this.fuelLeft();
+            this.refreshIfGrown();
+            const s = ok ? this.readLabel(buf, cap) : '';
+            if (s) any = true;
+            labels.push(s);
+          }
+          total += steps;
+          if (any) p.labels = labels;
+        }
+      } catch {
+        // A trap in value_to_text (or no such function): no more labels. The numbers stay.
+        this.refreshIfGrown();
+      }
+    }
+
+    /** A NUL-terminated UTF-8 string of at most `cap` bytes at `ptr`, or '' (no NUL in the buffer, bad UTF-8, a control character, over `LABEL_CHARS`). */
+    readLabel(ptr: number, cap: number): string {
+      if (!this.inMem(ptr, cap)) return '';
+      const u8 = this.u8;
+      let end = -1;
+      for (let i = 0; i < cap; i++) if (!u8[ptr + i]) { end = i; break; }
+      if (end <= 0) return '';
+      let s = '', chars = 0;
+      for (let i = 0; i < end;) {
+        const b = u8[ptr + i]!;
+        let c: number, n: number, lo = 0;
+        if (b < 0x80) { c = b; n = 1; }
+        else if (b >= 0xc2 && b < 0xe0) { c = b & 0x1f; n = 2; lo = 0x80; }
+        else if (b >= 0xe0 && b < 0xf0) { c = b & 0x0f; n = 3; lo = 0x800; }
+        else if (b >= 0xf0 && b < 0xf5) { c = b & 0x07; n = 4; lo = 0x10000; }
+        else return '';
+        if (i + n > end) return '';
+        for (let j = 1; j < n; j++) {
+          const x = u8[ptr + i + j]!;
+          if ((x & 0xc0) !== 0x80) return '';
+          c = c * 64 + (x & 0x3f);
+        }
+        if (c < lo || c > 0x10ffff || (c >= 0xd800 && c < 0xe000)) return '';
+        if (c < 0x20 || (c >= 0x7f && c < 0xa0)) return '';
+        if (++chars > LABEL_CHARS) return '';
+        s += String.fromCodePoint(c);
+        i += n;
+      }
+      return s;
     }
 
     paramValue(id: number): number {

@@ -48,7 +48,7 @@ export function ParamList({ model, params, units, disabled }: { model: ParamMode
                   <td>{p.def}</td>
                   <td>{flagNames(p.flags)}</td>
                   <td><ValueField model={model} p={p} disabled={disabled} /></td>
-                  <td>{formatValue(p, p.value, units[p.id] ?? '')}</td>
+                  <td>{formatValue(p, p.value, units[p.id] ?? '', p.labels)}</td>
                 </tr>
               ))}
             </tbody>

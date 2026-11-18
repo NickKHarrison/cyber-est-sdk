@@ -21,7 +21,7 @@ Some Cyber accounts can already add their own `.est` to their own account throug
 
 Start from the template or recipe closest to your idea ([templates](templates.md), [cookbook](cookbook.md); the [prompt kit](PROMPT_KIT.md) has a prompt for each). Two decisions are hard to change later:
 
-- **The id.** Once published it never changes, and projects name it. Use your assigned namespace from step 3, `dev.<10 hex>.<name>` (you can rename the id before your first publish), or a reversed domain you prove.
+- **The id.** Once published it never changes, and projects name it. It must start with your assigned namespace from step 3, `dev.<10 hex>.<name>`, or a reversed domain you prove: `com.example.…` from the guide cannot be published. Become a developer first and pass the id to `est new` (`npx est new effect-as my-delay --id dev.a1b2c3d4e5.my-delay`). Renaming later means `est.json`'s `id` **and** the code's (Rust `export_effect!`/`export_instrument!`, AssemblyScript `new Descriptor(…)` in `index.ts`; C/C++ takes it from `est.json`), then building again.
 - **The parameters.** Projects save values by parameter id. Renaming or splitting one later needs a `migrate` entry (step 8).
 
 ## 2. Build it so it passes
@@ -46,20 +46,20 @@ In Cyber, signed in (a real account: a guest trial cannot), open **Settings → 
 
 **Your namespace.** Cyber assigns you `dev.` and your developer id's ten hex characters: the developer `dev-a1b2c3d4e5` publishes under `dev.a1b2c3d4e5` (`assignedNamespaceOf`, `shared/estCommunity.mjs`). No domain or proof is needed, nobody else can publish under it, and no DNS claim can take it. A reversed domain you own (`com.yourname`) can be claimed too, proved by a DNS TXT record, and is signed into the registry by Cyber's owner by hand ([publishing](publishing.md#3-your-namespace)). `org.cyber.*` and the vendor "Cyber" are Cyber's own.
 
-**Your keys.** Every version you publish carries your Ed25519 signature. Two ways to hold a key; you may have up to 5 live keys and 5 claimed namespaces (`DEVELOPER_LIMITS`, `server/estDevelopers.mjs`):
+**Your keys.** Publishing from the browser (step 4) needs no command line: **Publish a version** makes your key when you first need it. Every version you publish carries your Ed25519 signature. Two ways to hold a key; you may have up to 5 live keys and 5 claimed namespaces (`DEVELOPER_LIMITS`, `server/estDevelopers.mjs`):
 
 - **On your computer:** `npx est keygen --out ~/.est/developer-key.pem` writes the private key (keep it outside every repository; back it up offline) and prints the public key, which you paste under **Keys** in Settings → Plugins → Developer.
 - **In your browser:** STORE → My plugins → **Publish a version** → **Make a publishing key**. The private half is non-extractable, kept in this browser for this account only; only the public half is registered.
 
-Cyber never asks for a private key. A key you lose is **revoked** (nothing signed with it publishes again; what it signed before stays yours).
+Cyber never asks for a private key. A browser key lives only in that browser's own storage: a copied or restored browser profile does not carry it, and signing then says to press **Replace this key**. A key you lose is **revoked** (nothing signed with it publishes again; what it signed before stays yours).
 
-**A new developer waits 48 hours on each device.** Until Cyber's owner signs you into the registry's root, other people's Cyber offers your versions only once that device has seen you in a valid delegation for 48 hours (`DELEGATED_QUARANTINE_MS`, `src/audio/est/install/community.ts`).
+**A new developer waits 48 hours on each device.** Until Cyber's owner signs you into the registry's root, every device, your own included, offers your versions only once it has seen you in a valid delegation for 48 hours (`DELEGATED_QUARANTINE_MS`, `src/audio/est/install/community.ts`). Your plugin's store page says on that device when it can be played and installed there; nothing is wrong with the plugin meanwhile. Approved reviews end the wait for you everywhere once Cyber's owner signs them.
 
-Before your first publish, try the plugin on your own tracks: Developer tools' **Load a bundle file…** and **Follow `est dev`** ([Sharing](SHARING.md)).
+Before your first publish, try the plugin on your own tracks: Home's **EST PLUGINS → Add a plugin**, or Developer tools' **Follow `est dev`** ([Sharing](SHARING.md)).
 
 ## 4. Publish (needs developer accounts and Community open)
 
-A version is published once and never changes: to fix anything, publish a new version number. Three ways, one server path (`server/estPublish.mjs`' `receive`; the browser route `server/estPublishWeb.mjs` only wraps it):
+A version is published once and never changes: to fix anything, publish a new version number. The browser is the shortest way (no keygen, no login). Three ways, one server path (`server/estPublish.mjs`' `receive`; the browser route `server/estPublishWeb.mjs` only wraps it):
 
 **From the command line.**
 
@@ -77,7 +77,9 @@ npx est publish dist/dev.a1b2c3d4e5.delay-1.0.0.est --screenshots shots/main.png
 
 **What the server does.** It checks your account, key and signature; that the id is under one of your namespaces and the names are clean; that the id and version (and the bytes) were never published; your limits; then runs the conformance check on Cyber's separate check service and countersigns the version into the **Community** tier. The limits (`PUBLISH_LIMITS`, `server/estPublish.mjs`): 64 MiB a bundle, 50 versions a day, 2 GB of published bundles a developer (yanked ones count), 30 publishes an hour from one address and 60 from one account.
 
-**After it.** A version is **Early** for 14 days (`EARLY_DAYS`): people see it only with Show early plugins, behind "Early: new, not reviewed by Cyber". A new version of a plugin already out is **staged** for 72 hours (`STAGING_HOURS`) before it is `latest` for everyone. `npx est yank <id>@<version>` hides a version (projects that use it keep it; `--undo` lists it again). Cyber blocks malware, misleading names, licence or trademark misuse and abuse; a blocked version becomes a placeholder in projects.
+Publishing waits for Cyber's conformance service, usually seconds; under load it can take a minute. If the page shows nothing after it, open **My plugins** again before publishing again: a second publish of the same version is refused ("published already").
+
+**After it.** A version is **Early** for 14 days (`EARLY_DAYS`): people see it only with Show early plugins, behind "Early: new, not reviewed by Cyber", and the store's search and shelves leave it out for everyone else; its link (`/store/plugin/<id>`) always opens it. A new version of a plugin already out is **staged** for 72 hours (`STAGING_HOURS`) before it is `latest` for everyone. `npx est yank <id>@<version>` hides a version (projects that use it keep it; `--undo` lists it again). Cyber blocks malware, misleading names, licence or trademark misuse and abuse; a blocked version becomes a placeholder in projects.
 
 ## 5. Your listing
 
@@ -89,16 +91,20 @@ Everything here is edited in STORE → **My plugins** (`#store/dev`), on the plu
 | **Tags** | Store page | at most 8; lower case a–z, 0–9 and `-`, at most 32 characters each (`STORE_TAGS_MAX`, `cleanTag`, `shared/storeListing.mjs`) |
 | **Links** | Store page, or `est publish` | https only: homepage, source, support |
 | **Changelog** | Store page, or `est publish` | plain text, at most 4000 characters a version |
-| **Screenshots** | `est publish --screenshots` | at most 6 a version, PNG or WebP, 2 MB each (`shared/estPluginMeta.mjs`) |
-| **Demo clip** | Store page | WAV or MP3, at most 30 s and 3 MB, its length computed from its bytes; an upload in your own storage. It plays only when someone presses it, never by itself (`DEMO_LIMITS`) |
-| **Banner** | Page look | exactly 1600 × 500, PNG, JPEG or WebP, at most 2 MB (`PAGE_BANNER_*`, `shared/estPluginMeta.mjs`) |
+| **Screenshots** | Store page (**Add screenshots…**), or `est publish --screenshots` | at most 6 a version, PNG or WebP, 2 MB each (`shared/estPluginMeta.mjs`); shown on the public plugin page `/plugins/<id>`. The STORE's own page shows one picture: Page look's **Screenshot on the page** |
+| **Demo clip** | Store page | WAV or MP3, at most 30 s and 3 MB, its length computed from its bytes; an upload in your own storage. It plays only when someone presses it, never by itself (`DEMO_LIMITS`). `npx est demo` makes one |
+| **Banner** | Page look | exactly 1600 × 500, PNG, JPEG or WebP, at most 2 MB (`PAGE_BANNER_*`, `shared/estPluginMeta.mjs`); drawn full width under your plugin, Standard showing its middle 1600 × 400 and Compact its middle 1600 × 300, so keep words in the middle |
 | **Accent** | Page look | one of the store's twelve colours (`PAGE_ACCENTS`) |
 | **Layout** | Page look | Standard, Showcase or Compact (`PAGE_TEMPLATES`) |
 | **Trailer** | Page look | audio (WAV, MP3, M4A, WebM) or a short video (MP4, WebM), at most 60 s and 20 MB, its length read from the file; never autoplays (`server/storePageLook.mjs`) |
 
-**Card art.** Store cards for Cyber's own plugins show a picture of the plugin's window, made by Cyber at build time (`shared/storeArt.mjs`). A Community plugin's card shows its kind's panel; your screenshots, banner and trailer are on its page.
+**Card art.** Store cards for Cyber's own plugins show a picture of the plugin's window, made by Cyber at build time (`shared/storeArt.mjs`). A Community plugin's card shows its kind's panel; Page look's banner, screenshot and trailer are on its STORE page, and the version's screenshots on its public plugin page. Page look's **Summary on the page** and **Screenshot on the page**, when set, replace the Store page tab's on the STORE page only.
 
 **Text rules.** Summaries, tags, changelogs, bios and reviews are plain text, never HTML; control, zero-width and direction characters are refused.
+
+**What to fill.** On the plugin's **Store page** tab: the summary, tags, changelog, links, screenshots (shown on your public plugin page) and the **demo clip**: `npx est demo` renders one from your plugin (an effect on Cyber's test loop, an instrument playing the test phrase) as `dist/demo.wav`, a 16-bit WAV within the store's limits. On **Page look**: the banner, accent, layout, the one screenshot the store's own page shows, and a trailer.
+
+**Your own window waits for review.** A Community version's own window (its `ui/`) opens for other people only once the version is Reviewed or a Cyber admin allows that version's window; until then they get Cyber's generated knobs, and the listing says so. Make those knobs read well too: name a stepped parameter's choices with `.labels([...])` (each at most 32 characters, at most 64 steps), since the generated knobs show them.
 
 **Try it before install.** Visitors can play your plugin on the store before installing it (run through the install checks, stored nowhere), try it on a track of their own song, or on a loop of their own. That is why the sound checks below matter.
 

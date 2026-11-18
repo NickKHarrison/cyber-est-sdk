@@ -121,7 +121,7 @@ export async function startDevHost(o) {
   const state = {
     /** @type {null | { hash: string, bytes: Uint8Array | null, manifest: any, presets: any[] }} */
     bundle: null,
-    build: { n: 0, ok: false, at: '', via: '', message: '', log: '' },
+    build: { n: 0, ok: false, at: '', via: '', message: '', log: '', next: '' },
     /** @type {any} */
     validation: null,
     validationNote: '',
@@ -193,9 +193,25 @@ export async function startDevHost(o) {
     try { return JSON.parse(readFileSync(v, 'utf8')); } catch { return null; }
   };
 
+  /**
+   * 1.803: the `Next:` line for the build just made, from @cyber-est/tools' one function (`nextLine`,
+   * the same `est validate` and `est test` end with): the first compiler error with its file and
+   * line, the first failed check with its rule id and fix, or where to play it. Empty without the
+   * tools (a `.est` target, a UI preview).
+   */
+  function nextOf() {
+    if (!tools || typeof tools.nextLine !== 'function') return '';
+    if (!state.build.ok) {
+      const tool = /^(\S+) could not start/.exec(state.build.message)?.[1];
+      return tools.nextLine(tool ? { kind: 'tool', tool: basename(tool) } : { kind: 'build', log: state.build.log, message: state.build.message });
+    }
+    if (!state.validation || !Array.isArray(state.validation.checks)) return '';
+    return tools.nextLine({ kind: 'report', report: state.validation, bundle: 'dist/dev.est', from: 'dev', url: hostOrigin });
+  }
+
   async function load() {
     const n = state.build.n + 1;
-    state.build = { n, ok: false, at: new Date().toISOString(), via: '', message: 'building', log: '' };
+    state.build = { n, ok: false, at: new Date().toISOString(), via: '', message: 'building', log: '', next: '' };
     send('build', state.build);
     try {
       if (target.kind === 'preview') {
@@ -232,12 +248,15 @@ export async function startDevHost(o) {
       state.build.message = `${code ? `refused (${code}): ` : ''}${err instanceof Error ? err.message : String(err)}`;
       state.build.log = String(/** @type {any} */ (err)?.log ?? '').slice(-20_000);
     }
+    state.build.next = nextOf();
     log(`[est dev] ${state.build.ok ? '' : 'build failed: '}${state.build.message}`);
+    // 1.803: the one thing to do now (a compiler error with its file and line, a failed check, or play it).
+    if (state.build.next) log(state.build.next);
     send('build', state.build);
     if (state.build.ok) send('bundle', { hash: state.bundle?.hash });
     if (state.build.ok && state.bundle?.bytes) follow.publish({ hash: state.bundle.hash, id: state.bundle.manifest.id, version: state.bundle.manifest.version, builtAt: state.build.at, n, bytes: state.bundle.bytes });
     else if (!state.build.ok) follow.failed({ n, at: state.build.at, message: state.build.message });
-    o.onEvent?.({ type: 'build', n, ok: state.build.ok, via: state.build.via, message: state.build.message, hash: state.bundle?.hash ?? null });
+    o.onEvent?.({ type: 'build', n, ok: state.build.ok, via: state.build.via, message: state.build.message, hash: state.bundle?.hash ?? null, ...(state.build.next ? { next: state.build.next } : {}) });
   }
 
   const json = (res, status, body) => {
@@ -252,6 +271,8 @@ export async function startDevHost(o) {
     validationNote: state.validationNote,
     target: { kind: target.kind, name: basename(target.kind === 'unpacked' ? dirname(target.path) : target.path) },
     uiPreview: previewParams,
+    // 1.803: a ui/ page the manifest does not name is not packed: the page says so, with the entry to add.
+    uiFolder: target.kind === 'folder' && !state.bundle?.manifest?.ui && existsSync(join(target.path, 'ui', 'index.html')),
     plugin: state.bundle
       ? {
           hash: state.bundle.hash, id: state.bundle.manifest.id, version: state.bundle.manifest.version, name: state.bundle.manifest.name,

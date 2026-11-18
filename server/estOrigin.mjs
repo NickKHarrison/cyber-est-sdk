@@ -58,7 +58,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createDevUiStore, devUiKeysOf, readUpload } from './estDevUi.mjs';
+import { createDevUiStore, createUiCacheBudget, devUiKeysOf, readUpload, uiCacheMaxBytesOf } from './estDevUi.mjs';
 import { FRAME_GUARD_JS, FRAME_GUARD_PATH, guardScript, injectFrameGuard } from './estFrameGuard.mjs';
 import { FRAME_WRAP_HTML, FRAME_WRAP_RE, WRAP_HOST_RE, WRAP_REL_RE, wrapCsp } from './estFrameWrap.mjs';
 
@@ -227,11 +227,24 @@ export function svgAllowed(req) {
   return !(typeof dest === 'string' && ['document', 'iframe', 'frame', 'embed', 'object'].includes(dest));
 }
 
-/** The manifest's `ui.path`, or null (no manifest, or no UI). @param {unknown} manifest */
+/**
+ * The manifest's `ui.path`, or null (no manifest, or no UI).
+ *
+ * The 2026-11-18 EST sandbox attack (stream C), closing the frame-wrapper parser mismatch
+ * (EST_PUBLIC_GATES.md row 10, place 10; docs/security/pre-launch-review-4 finding 13): the page is
+ * served **only** when the frame wrapper (server/estFrameWrap.mjs `WRAP_REL_RE`) would frame it, so
+ * the serving authority and the wrapper agree on exactly one set of paths. Before, `uiPageOf` accepted
+ * a `ui.path` the wrapper refuses — a dot-leading segment (`ui/.panel.html`) or a space — so the plugin
+ * origin served the page (200, guarded) while its wrapper answered 404; the page was unreachable as a
+ * frame (the app frames only the wrapper), so it was never exploitable, but it left a guarded page
+ * served that nothing could open. `WRAP_REL_RE` already requires a `.html` ending, plain path segments,
+ * no leading slash and no `..`/dot-leading segment, so this is strictly fail-closed.
+ * @param {unknown} manifest
+ */
 export function uiPageOf(manifest) {
   const ui = manifest && typeof manifest === 'object' ? /** @type {{ ui?: { path?: unknown } }} */ (manifest).ui : null;
   const page = ui && typeof ui === 'object' && typeof ui.path === 'string' ? ui.path : null;
-  return page && page.endsWith('.html') && !page.includes('..') && !page.startsWith('/') ? page : null;
+  return page && WRAP_REL_RE.test(page) ? page : null;
 }
 /** 5-B: a developer bundle's upload (`/est/dev/<sha256>`) and its UI files (`/est/dev/<sha256>/<path>`). */
 const DEV_UPLOAD_RE = /^\/est\/dev\/([0-9a-f]{64})$/;
@@ -256,6 +269,16 @@ const STUDIO_FILE_RE = /^\/est\/studio\/([0-9a-f]{64})\/(.+)$/;
  */
 const COMMUNITY_UPLOAD_RE = /^\/est\/community\/([0-9a-f]{64})$/;
 const COMMUNITY_FILE_RE = /^\/est\/community\/([0-9a-f]{64})\/(.+)$/;
+/**
+ * 1.795 (D-64, stream 5): a **shared** plugin's own UI (a bundle a project the viewer can read names),
+ * on this origin only: `/est/shared/<sha256>` takes an upload with a shared ticket (`k: 'shared'`,
+ * POST /account/est-shared-ui on the app, minted only for an account that can read a project naming
+ * the hash, signed with the project owner's tag), `/est/shared/<sha256>/<path>` serves its files exactly
+ * as `/est/dev/`'s, and the app frames only its wrapper, `/est/frame/shared/<sha256>/<ui.path>`. Its own
+ * store (so a viewer's opens never push the developers' out), sized as theirs.
+ */
+const SHARED_UPLOAD_RE = /^\/est\/shared\/([0-9a-f]{64})$/;
+const SHARED_FILE_RE = /^\/est\/shared\/([0-9a-f]{64})\/(.+)$/;
 const DEFAULT_APP_ORIGIN = 'https://cyber-audio.fly.dev';
 
 /** The plugin origin's CSP (security document §4), framed only by `ancestors`. */
@@ -302,7 +325,7 @@ function hostOf(hostHeader) {
 }
 
 /**
- * @param {{ EST_ORIGIN_HOST?: string, EST_ORIGIN_DIR?: string, EST_REGISTRY_DIR?: string, EST_APP_ORIGIN?: string, APP_ORIGIN?: string, EST_DEV_UI_KEY?: string, EST_DEV_UI_PUBLIC_KEY?: string }} env
+ * @param {{ EST_ORIGIN_HOST?: string, EST_ORIGIN_DIR?: string, EST_REGISTRY_DIR?: string, EST_APP_ORIGIN?: string, APP_ORIGIN?: string, EST_DEV_UI_KEY?: string, EST_DEV_UI_PUBLIC_KEY?: string, EST_UI_CACHE_DIR?: string, EST_UI_CACHE_MAX_BYTES?: string }} env
  * @param {{ anyHost?: boolean, files?: typeof DISK_FILES, paidGate?: ReturnType<typeof import('./storeDelivery.mjs').createPaidGate> | null, release?: EstOriginReleaseSource | null }} [o] Phase 2 (2-B, D-29): `anyHost`, every request is the plugin
  *   1.625: `files`, where `/est/b/` and `/est/v1/` are read (server/staticFiles.mjs' `createStaticFiles`
  *   with `ORIGIN_CACHE`); none, the disk each time.
@@ -332,9 +355,16 @@ export function createEstOrigin(env, o = {}) {
   const ancestors = String(env.EST_APP_ORIGIN || String(env.APP_ORIGIN ?? '').replace(/\/+$/, '') || DEFAULT_APP_ORIGIN).trim();
   const csp = pluginCsp(ancestors);
   const { verifyKey } = devUiKeysOf(env);
-  const devUi = verifyKey ? createDevUiStore({ verifyKey }) : null;
-  const studioUi = verifyKey ? createDevUiStore({ verifyKey, kind: 'studio' }) : null;
-  const communityUi = verifyKey ? createDevUiStore({ verifyKey, kind: 'community' }) : null;
+  // 1.795 (D-64): with `EST_UI_CACHE_DIR` (server/estOriginServer.mjs sets it: the machine's temporary
+  // space) every UI store keeps its files on disk under one total cap, `EST_UI_CACHE_MAX_BYTES` (default
+  // 2 GB), least recently used first; without it, in memory as before (the app's own copy, tests).
+  const cacheDir = typeof env.EST_UI_CACHE_DIR === 'string' && env.EST_UI_CACHE_DIR.trim() ? env.EST_UI_CACHE_DIR.trim() : null;
+  const budget = verifyKey && cacheDir ? createUiCacheBudget(uiCacheMaxBytesOf(env.EST_UI_CACHE_MAX_BYTES)) : null;
+  const store = (kind) => (verifyKey ? createDevUiStore({ verifyKey, kind, dir: cacheDir, budget }) : null);
+  const devUi = store('dev');
+  const studioUi = store('studio');
+  const communityUi = store('community');
+  const sharedUi = store('shared');
   /** 1.314 (EST-04): each hash's UI page from its est.json, read once (null: none). @type {Map<string, string | null>} */
   const pages = new Map();
   const pageOf = (hash) => {
@@ -345,6 +375,29 @@ export function createEstOrigin(env, o = {}) {
     // 1.688: with releases a hash not yet mirrored may arrive with the next one, so only a page read is kept.
     if (page !== null || !release) pages.set(hash, page);
     return page;
+  };
+  /**
+   * The sandbox attack order (stream D): each hash's own id and version from its est.json, read once, for
+   * the paid gate. `/est/b/` names a bundle by its hash alone, and a hash the paid list did not hold yet (a
+   * new version of a paid plugin that reached this origin before the list did) was served openly; with
+   * the id, 1.534's rule holds here too (a version of a paid id the list does not hold is refused).
+   * @type {Map<string, { id?: string, version?: string }>}
+   */
+  const idents = new Map();
+  const identOf = (hash) => {
+    const had = idents.get(hash);
+    if (had) return had;
+    /** @type {{ id?: string, version?: string }} */
+    let ident = {};
+    let read = false;
+    const manifest = bundleFile(hash, 'est.json');
+    try {
+      const m = manifest ? JSON.parse(fs.readFileSync(manifest, 'utf8')) : null;
+      if (m && typeof m.id === 'string' && typeof m.version === 'string') { ident = { id: m.id, version: m.version }; read = true; }
+    } catch { /* no manifest: the hash alone */ }
+    // As `pageOf`: with releases a hash may arrive with the next one, so only a manifest read is kept.
+    if (read || !release) idents.set(hash, ident);
+    return ident;
   };
   let uploadsInFlight = 0;
   const files = o.files ?? DISK_FILES;
@@ -516,14 +569,14 @@ export function createEstOrigin(env, o = {}) {
   };
 
   /**
-   * 1.413: `/est/frame/<b|dev|studio|community>/<sha256>/<ui.path>` (1.513: `community`), the frame wrapper (server/estFrameWrap.mjs):
+   * 1.413: `/est/frame/<b|dev|studio|community|shared>/<sha256>/<ui.path>` (1.513: `community`; 1.795: `shared`), the frame wrapper (server/estFrameWrap.mjs):
    * only for a UI page this origin would serve (the bundle's `ui.path`, to a frame, as `htmlAllowed`),
    * its CSP's `frame-src` exactly that page on the host the request named.
    */
   const wrapRoute = (req, res, m) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') { refuse(res, 405); return; }
     const [, kind, hash, rel] = m;
-    const page = kind === 'b' ? pageOf(hash) : kind === 'dev' ? devUi?.page(hash) ?? null : kind === 'community' ? communityUi?.page(hash) ?? null : studioUi?.page(hash) ?? null;
+    const page = kind === 'b' ? pageOf(hash) : kind === 'dev' ? devUi?.page(hash) ?? null : kind === 'community' ? communityUi?.page(hash) ?? null : kind === 'shared' ? sharedUi?.page(hash) ?? null : studioUi?.page(hash) ?? null;
     const host = hostOf(req.headers.host).full;
     if (!WRAP_REL_RE.test(rel) || !WRAP_HOST_RE.test(host) || !htmlAllowed(req, rel, page)) { refuse(res, 404); return; }
     const body = WRAP_BODY;
@@ -545,6 +598,7 @@ export function createEstOrigin(env, o = {}) {
       if (devUi && (DEV_UPLOAD_RE.test(pathname) || DEV_FILE_RE.test(pathname))) { devRoute(req, res, pathname); return true; }
       if (studioUi && (STUDIO_UPLOAD_RE.test(pathname) || STUDIO_FILE_RE.test(pathname))) { devRoute(req, res, pathname, studioUi, STUDIO_UPLOAD_RE, STUDIO_FILE_RE); return true; }
       if (communityUi && (COMMUNITY_UPLOAD_RE.test(pathname) || COMMUNITY_FILE_RE.test(pathname))) { devRoute(req, res, pathname, communityUi, COMMUNITY_UPLOAD_RE, COMMUNITY_FILE_RE); return true; }
+      if (sharedUi && (SHARED_UPLOAD_RE.test(pathname) || SHARED_FILE_RE.test(pathname))) { devRoute(req, res, pathname, sharedUi, SHARED_UPLOAD_RE, SHARED_FILE_RE); return true; }
       req.resume();
       if (req.method !== 'GET' && req.method !== 'HEAD') { refuse(res, 405); return true; }
       // 1.314 (EST-03): the host's own guard, the first script of every page served here.
@@ -574,7 +628,7 @@ export function createEstOrigin(env, o = {}) {
       if (ext === '.html' && !htmlAllowed(req, m[2], pageOf(m[1]))) { refuse(res, 404); return true; }
       if (ext === '.svg' && !svgAllowed(req)) { refuse(res, 404); return true; }
       // 1.514: a paid version's archive and DSP module only with a store ticket.
-      if ((ext === '.est' || ext === '.wasm') && gated(req, res, { hash: m[1] })) return true;
+      if ((ext === '.est' || ext === '.wasm') && gated(req, res, { hash: m[1], ...identOf(m[1]) })) return true;
       const origin = req.headers.origin;
       const cors = FETCHED.has(ext) && allowedOrigin(ancestors, typeof origin === 'string' ? origin : undefined)
         ? { 'access-control-allow-origin': /** @type {string} */ (origin), vary: 'Origin' }

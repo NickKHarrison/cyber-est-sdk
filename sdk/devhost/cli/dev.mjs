@@ -7,7 +7,7 @@
  * runs; `node sdk/devhost/bin/est-dev.mjs …` (or `npm run est:dev -- …`) runs it alone.
  *
  *   est dev [dir | file.est] [--port 4430] [--files-port 4431] [--no-watch] [--open] [--cyber [origin]]
- *   est dev [dir | file.est] --json [--seconds N] [--play 60,64,67]
+ *   est dev [dir | file.est] --json [--seconds N] [--play 60,64,67] [--key off|kick|sine]
  *   est dev <folder with ui/> --ui-preview params.json
  */
 import { spawn } from 'node:child_process';
@@ -38,6 +38,9 @@ export const usage = `est dev [dir | file.est] [options]
                        stop 1 s after the last (without --seconds; without either, stop 1 s after
                        stdin closes and its commands have run)
 
+  --key <kind>         with --json: what feeds an effect's sidechain (EST 1.1): off (silence, the
+                       default), kick (the test loop's drums) or sine. The page has a Key menu.
+
   A port in use stops it (EADDRINUSE): pass free ones, or --port 0 --files-port 0 for any.
   --ui-preview <file>  the custom UI against the parameters in <file> (no DSP: for a UI whose DSP
                        is not written yet)
@@ -52,8 +55,8 @@ export const usage = `est dev [dir | file.est] [options]
 
 /** @param {string[]} argv */
 export function parseArgs(argv) {
-  /** @type {{ target: string, port: number, filesPort: number, watch: boolean, open: boolean, json: boolean, seconds: number | null, play: number[], uiPreview: string | null, help: boolean, cyber: string[] }} */
-  const o = { target: '.', port: DEFAULT_HOST_PORT, filesPort: DEFAULT_FILES_PORT, watch: true, open: false, json: false, seconds: null, play: [], uiPreview: null, help: false, cyber: [] };
+  /** @type {{ target: string, port: number, filesPort: number, watch: boolean, open: boolean, json: boolean, seconds: number | null, play: number[], uiPreview: string | null, help: boolean, cyber: string[], key: string }} */
+  const o = { target: '.', port: DEFAULT_HOST_PORT, filesPort: DEFAULT_FILES_PORT, watch: true, open: false, json: false, seconds: null, play: [], uiPreview: null, help: false, cyber: [], key: 'off' };
   const num = (v, flag) => {
     const n = Number(v);
     if (!Number.isFinite(n) || n < 0) throw new Error(`${flag} needs a number`);
@@ -71,6 +74,11 @@ export function parseArgs(argv) {
     else if (a === '--seconds') o.seconds = num(next(), a);
     else if (a === '--play') o.play = next().split(',').map((k) => Math.round(num(k, a))).filter((k) => k >= 0 && k <= 127);
     else if (a === '--ui-preview') o.uiPreview = next();
+    else if (a === '--key') {
+      // 1.803: the sidechain's source (the page's Key menu has the same three).
+      o.key = next();
+      if (!['off', 'kick', 'sine'].includes(o.key)) throw new Error(`--key is off, kick or sine, not ${o.key}`);
+    }
     else if (a === '--cyber') {
       // EST Phase 5a (5-C): an origin may follow; without one, Cyber's live site.
       const v = argv[i + 1];

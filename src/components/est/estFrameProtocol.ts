@@ -196,6 +196,11 @@ export function communityUiUrl(pluginOrigin: string, hash: string, uiPath: strin
   return `${pluginOrigin.replace(/\/+$/, '')}/est/community/${hash}/${encodePath(uiPath)}`;
 }
 
+/** 1.795 (D-64): a shared plugin's UI page, uploaded for this session (`/est/shared/<hash>/<ui.path>`). */
+export function sharedUiUrl(pluginOrigin: string, hash: string, uiPath: string): string {
+  return `${pluginOrigin.replace(/\/+$/, '')}/est/shared/${hash}/${encodePath(uiPath)}`;
+}
+
 /**
  * 1.413: the frame wrapper's address (server/estFrameWrap.mjs) for a UI page on the plugin origin
  * (`/est/<b|dev|studio>/<hash>/<path>` → `/est/frame/<b|dev|studio>/<hash>/<path>`), or null for any
@@ -203,8 +208,8 @@ export function communityUiUrl(pluginOrigin: string, hash: string, uiPath: strin
  * navigations are checked against the wrapper's `frame-src` (that page alone), never the app's.
  */
 export function frameWrapUrl(pageUrl: string): string | null {
-  // 1.513 (stream 9): and `community`.
-  const m = /^(https?:\/\/[^/?#]+)\/est\/(b|dev|studio|community)\/([0-9a-f]{64}\/[^?#]+)$/.exec(pageUrl.split('#')[0]!);
+  // 1.513 (stream 9): and `community`; 1.795 (D-64): and `shared`.
+  const m = /^(https?:\/\/[^/?#]+)\/est\/(b|dev|studio|community|shared)\/([0-9a-f]{64}\/[^?#]+)$/.exec(pageUrl.split('#')[0]!);
   return m ? `${m[1]}/est/frame/${m[2]}/${m[3]}` : null;
 }
 

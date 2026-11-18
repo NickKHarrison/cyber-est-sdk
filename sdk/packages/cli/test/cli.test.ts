@@ -52,7 +52,7 @@ function allText(dir: string): string[] {
 /** The new plugin, built outside the repository, must pass every rule (every template and recipe passes Cyber's conformance run). */
 function scaffoldPackValidate(template: string) {
   const dir = join(tmp, `t-${template}`);
-  const made = est(['new', template, dir, '--id', `com.example.${template}`, '--name', `Trial ${template}`]);
+  const made = est(['new', template, dir, '--id', `com.example.${template}`, '--name', `Trial ${template}`, '--no-install']);
   expect(made.code, made.err).toBe(0);
   expect(made.out).toMatch(new RegExp(`from ${template}: Trial ${template} \\(com\\.example\\.${template}\\)`));
   // The SDK's library is copied in as est/ (either language), and nothing leads back into the repository.
@@ -105,12 +105,63 @@ describe('est new, pack and validate', () => {
   for (const t of asTemplates) it(`${t} (AssemblyScript)`, () => scaffoldPackValidate(t), 240_000);
   it('has the cookbook\'s eleven recipes to run (1.672: the spectrum tilt)', () => { expect(recipes).toHaveLength(11); });
   for (const t of recipes) it(`the cookbook's ${t} (AssemblyScript)`, () => scaffoldPackValidate(t), 240_000);
+  // 1.789 (V5): a recipe's folder carries the cookbook's AGENTS.md and CLAUDE.md (est new's "read AGENTS.md" names a file that is there).
+  it('a recipe\'s folder has AGENTS.md and CLAUDE.md', () => {
+    const dir = join(tmp, 'recipe-agents');
+    expect(est(['new', 'chorus', dir, '--no-install']).code).toBe(0);
+    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toContain('cookbook');
+    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toContain('AGENTS.md');
+  });
   for (const t of rustTemplates) it.skipIf(!rust)(`${t} (Rust; skipped where cargo or the wasm32-unknown-unknown target is missing)`, () => scaffoldPackValidate(t), 240_000);
+
+  // 1.786 (V3): the Rust SDK reports a sidechain (EST 1.1) and reads it: `Effect::SIDECHAIN_CHANNELS`, `io.sidechain`.
+  // Before, its glue had one input port, so a manifest's sidechain failed EST-C003 and no Rust plugin could take a key.
+  it.skipIf(!rust)('effect-rust with a sidechain: SIDECHAIN_CHANNELS and io.sidechain pass validate (skipped without cargo and wasm32)', () => {
+    const dir = join(tmp, 'rust-sidechain');
+    expect(est(['new', 'effect-rust', dir, '--id', 'com.example.rust-sidechain', '--name', 'Rust Sidechain', '--no-install']).code).toBe(0);
+    const mf = join(dir, 'est.json');
+    // 1.803: edited as JSON. (est new writes est.json on several lines, so the text replaces this test
+    // made before never matched: the manifest stayed EST 1.0 with no sidechain, and nothing checked it.)
+    const manifest = JSON.parse(readFileSync(mf, 'utf8')) as { abi: { est: string }; audio: { inputs: unknown[] } };
+    manifest.abi.est = '1.1';
+    manifest.audio.inputs = [{ channels: 2 }, { channels: 2, role: 'sidechain' }];
+    writeFileSync(mf, JSON.stringify(manifest, null, 2));
+    const lib = join(dir, 'src', 'lib.rs');
+    writeFileSync(lib, readFileSync(lib, 'utf8')
+      .replace('const STATE_MAGIC: u32', 'const SIDECHAIN_CHANNELS: u32 = 2;\n    const STATE_MAGIC: u32')
+      .replace('let y = self.filters[c].process(io.input(c, n) as f64) * g;', 'let key = if io.side_live { io.sidechain(c, n) as f64 } else { 0.0 };\n                let y = self.filters[c].process(io.input(c, n) as f64) * g * (1.0 - 0.5 * key.abs().min(1.0));'));
+    const v = est(['validate', '--json'], dir);
+    const report = JSON.parse(v.out) as { ok: boolean; checks: { id?: string; status: string; message?: string }[] };
+    expect(report.checks.filter(c => c.status === 'fail'), v.err).toEqual([]);
+    expect(report.ok).toBe(true);
+    expect((JSON.parse(est(['inspect', join(dir, 'dist', 'com.example.rust-sidechain-1.0.0.est'), '--json'], dir).out) as { manifest: { sidechain: number; edition: string } }).manifest).toMatchObject({ sidechain: 2, edition: '1.1' });
+    // 1.803: the golden spec's `key` feeds that sidechain. Before, est test fed it silence, so this
+    // plugin's ducking was never played: a render with a key now differs from the one without.
+    const golden = join(dir, 'test', 'golden.json');
+    const spec = JSON.parse(readFileSync(golden, 'utf8')) as Record<string, unknown>;
+    const silent = est(['test', '--no-build', '--update', '--seconds', '2'], dir);
+    expect(silent.code, silent.out).toBe(0);
+    expect(silent.out).not.toMatch(/golden key/);
+    const before = readFileSync(join(dir, 'test', 'golden.f32'));
+    writeFileSync(golden, JSON.stringify({ ...spec, key: { kind: 'bursts', level: 0.9 } }, null, 2));
+    const keyed = est(['test', '--no-build', '--seconds', '2'], dir);
+    expect(keyed.out).toMatch(/\. golden key: bursts into the sidechain/);
+    expect(keyed.out).toMatch(/x golden: differs by/);
+    expect(keyed.code).toBe(1);
+    expect(est(['test', '--no-build', '--update', '--seconds', '2'], dir).code).toBe(0);
+    expect(est(['test', '--no-build', '--seconds', '2'], dir).code).toBe(0);
+    expect(readFileSync(join(dir, 'test', 'golden.f32')).equals(before)).toBe(false);
+    // est demo --key plays the test loop's drums into it.
+    const demo = est(['demo', '--no-build', '--seconds', '2', '--key', 'kick'], dir);
+    expect(demo.code, demo.err).toBe(0);
+    expect(demo.err).not.toMatch(/--key ignored/);
+    expect(est(['demo', '--no-build', '--seconds', '2', '--key', 'loud'], dir).code).toBe(2);
+  }, 240_000);
 
   it('--ui adds the template\'s example UI (ui/index.html, ui.js, style.css: @cyber-est/ui knobs on its parameters) and it passes EST-U', () => {
     const t = asTemplates.find(x => x.startsWith('effect')) ?? 'effect-as';
     const dir = join(tmp, 'with-ui');
-    const made = est(['new', t, dir, '--id', 'com.example.knobs', '--name', 'Knobs', '--ui']);
+    const made = est(['new', t, dir, '--id', 'com.example.knobs', '--name', 'Knobs', '--ui', '--no-install']);
     expect(made.code, made.err).toBe(0);
     expect(made.out).toMatch(/a custom UI in ui\//);
     expect(readdirSync(join(dir, 'ui')).sort()).toEqual(['index.html', 'style.css', 'ui.js']);
@@ -140,14 +191,14 @@ describe('est new, pack and validate', () => {
   });
 
   it('refuses a bad id, an unknown template and a folder that is not empty', () => {
-    expect(est(['new', 'instrument-as', join(tmp, 'bad-id'), '--id', 'Not An Id'])).toMatchObject({ code: 1 });
-    const unknown = est(['new', 'no-such', join(tmp, 'x')]);
+    expect(est(['new', 'instrument-as', join(tmp, 'bad-id'), '--id', 'Not An Id', '--no-install'])).toMatchObject({ code: 1 });
+    const unknown = est(['new', 'no-such', join(tmp, 'x'), '--no-install']);
     expect(unknown.code).toBe(1);
     expect(unknown.err).toMatch(/no template "no-such" \(the templates: .*instrument-as/);
     mkdirSync(join(tmp, 'full'));
     writeFileSync(join(tmp, 'full', 'a.txt'), 'x');
-    expect(est(['new', 'instrument-as', join(tmp, 'full')]).err).toMatch(/is not empty/);
-    expect(est(['new', 'instrument-as'])).toMatchObject({ code: 2 });
+    expect(est(['new', 'instrument-as', join(tmp, 'full'), '--no-install']).err).toMatch(/is not empty/);
+    expect(est(['new', 'instrument-as', '--no-install'])).toMatchObject({ code: 2 });
   });
 });
 
@@ -188,7 +239,7 @@ describe('est test, doctor, help', () => {
   it("test plays the template's golden render (test/golden.json) and compares it; a changed render fails until --update", () => {
     const t = asTemplates.find(x => x.startsWith('effect')) ?? 'instrument-as';
     const dir = join(tmp, 'golden');
-    expect(est(['new', t, dir]).code).toBe(0);
+    expect(est(['new', t, dir, '--no-install']).code).toBe(0);
     const first = est(['test', '--seconds', '2'], dir);
     expect(first.code, first.err + first.out).toBe(0);
     expect(first.out).toMatch(/\. golden: within 0\.000001 \(largest difference/);
@@ -213,6 +264,69 @@ describe('est test, doctor, help', () => {
     expect(conformance.out).toMatch(/EST-C008/);
     expect(conformance.out).toMatch(/est test: 1 failed/);
     expect(conformance.code).toBe(1);
+  }, 240_000);
+
+  // 1.803 (the loop): every one of validate, test and doctor ends with one line, "Next: …",
+  // decided by one function (sdk/tests/next.test.ts); here, that the commands print it.
+  it('validate, test and doctor end with one Next: line; a build error names the file and line; --json gains a field', () => {
+    const t = asTemplates.find(x => x.startsWith('effect')) ?? 'instrument-as';
+    const dir = join(tmp, 'next-line');
+    expect(est(['new', t, dir, '--id', 'com.example.next-line']).code).toBe(0);
+    const last = (text: string) => text.trimEnd().split('\n').at(-1)!;
+    // Before any build: doctor says so, and what to run.
+    const fresh = est(['doctor', '--json'], dir);
+    const fj = JSON.parse(fresh.out) as { probes: unknown[]; ready: { as: boolean }; next: string; folder: { kind: string; canBuild: boolean; checks: { id: string; status: string; fix?: string }[] } };
+    expect(fresh.code).toBe(0);
+    expect(fj.probes.length).toBeGreaterThan(5);
+    expect(fj.folder).toMatchObject({ kind: 'as', canBuild: true });
+    expect(fj.folder.checks.filter(c => c.status === 'fix').map(c => c.id)).toEqual(['bundle']);
+    expect(fj.next).toBe('Next: npx est validate');
+    // A pass: the next step.
+    const ok = est(['validate', '--seconds', '2'], dir);
+    expect(ok.code, ok.err).toBe(0);
+    expect(last(ok.out)).toBe('Next: npx est dev to hear it, or drop dist/com.example.next-line-1.0.0.est on Cyber: Home → EST PLUGINS → Add a plugin');
+    const okJson = JSON.parse(est(['validate', '--no-build', '--seconds', '2', '--json'], dir).out) as { ok: boolean; next: string; checks: unknown[] };
+    expect(okJson).toMatchObject({ ok: true, next: last(ok.out) });
+    expect((JSON.parse(readFileSync(join(dir, 'dist', 'validation.json'), 'utf8')) as { next: string }).next).toBe(okJson.next);
+    expect(last(est(['test', '--no-build', '--seconds', '2'], dir).out)).toBe(last(ok.out));
+    expect(last(est(['doctor'], dir).out)).toBe(last(ok.out));
+    // A compiler error: its file and line; nothing on standard output but the line (and with --json, nothing).
+    const source = join(dir, 'assembly', 'index.ts');
+    const good = readFileSync(source, 'utf8');
+    writeFileSync(source, good.replace('this.gain.next()', 'this.gain.nxt()'));
+    const at = good.split('\n').findIndex(l => l.includes('this.gain.next()')) + 1;
+    for (const cmd of ['validate', 'test']) {
+      const broken = est([cmd], dir);
+      expect(broken.code, cmd).toBe(1);
+      expect(broken.out.trim(), cmd).toBe(`Next: fix assembly/index.ts:${at}: Property 'nxt' does not exist on type '~lib/est/dsp/smoother/Smoother'. (TS2339)`);
+      expect(broken.err, cmd).toContain(`est ${cmd}: the build failed (asc exited with 1)`);
+      // The compiler's own output is still shown, whole (read without its colours: asc colours it where the
+      // environment asks, as CI's FORCE_COLOR does, which puts codes inside `ERROR TS2339`).
+      expect(broken.err.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), ''), cmd).toContain('ERROR TS2339');
+    }
+    const brokenJson = est(['validate', '--json'], dir);
+    expect(brokenJson.code).toBe(1);
+    expect(brokenJson.out).toBe('');
+    expect(brokenJson.err).toContain(`Next: fix assembly/index.ts:${at}:`);
+    // A failed check: the first one's rule id, where, and its fix; doctor then names the same rule from dist/.
+    writeFileSync(source, good.replace('new Descriptor("com.example.next-line"', 'new Descriptor("com.example.another"'));
+    const idDoctor = JSON.parse(est(['doctor', '--json'], dir).out) as { next: string; folder: { checks: { id: string; status: string; text: string }[] } };
+    expect(idDoctor.folder.checks.find(c => c.id === 'id')).toMatchObject({ status: 'fix', text: `the code says the id is "com.example.another" (assembly/index.ts:${good.split('\n').findIndex(l => l.includes('new Descriptor(')) + 1}) and est.json says "com.example.next-line"` });
+    expect(idDoctor.next).toMatch(/^Next: edit assembly\/index\.ts:\d+: make the id "com\.example\.next-line"/);
+    const failed = est(['validate', '--seconds', '2'], dir);
+    expect(failed.code).toBe(1);
+    expect(last(failed.out)).toMatch(/^Next: fix EST-C001 \[phase:boot\]: Check that est\.json's `id` is the descriptor's id/);
+    writeFileSync(source, good);
+    // 1.803: a key in the golden spec of a plugin with no sidechain is ignored, said in a line, and nothing fails.
+    const golden = join(dir, 'test', 'golden.json');
+    writeFileSync(golden, JSON.stringify({ ...(JSON.parse(readFileSync(golden, 'utf8')) as Record<string, unknown>), key: { kind: 'bursts' } }, null, 2));
+    const ignored = est(['test', '--seconds', '2'], dir);
+    expect(ignored.out).toMatch(/- golden key: ignored \(this plugin has no sidechain input/);
+    expect(ignored.out).toMatch(/\. golden: within/);
+    expect(ignored.code, ignored.out).toBe(0);
+    const demo = est(['demo', '--no-build', '--seconds', '2', '--key', 'sine'], dir);
+    expect(demo.code).toBe(0);
+    expect(demo.err).toMatch(/est demo: --key ignored: this plugin has no sidechain input/);
   }, 240_000);
 
   it('dev is a command: est help lists it and its usage names the dev host', () => {

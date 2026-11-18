@@ -103,7 +103,7 @@ Instruments and note effects receive CLAP note events: `NOTE_ON` (key, channel, 
 - The host keeps a plain-value cache per instance (`params`), updated from `PARAM_VALUE` events it sends and from the plugin's output events; this cache is what projects store beside the opaque state so that a missing plugin's automation and UI stay meaningful.
 - Automation: the host converts its lanes to `PARAM_VALUE` events with sample offsets, one per 10 ms step or change (the same density Cyber uses for its own synths), and `PARAM_GESTURE_BEGIN/END` around user touches. Modulation (`PARAM_MOD`) is supported in the ABI but no Cyber source emits it in 1.0.
 - Smoothing is the plugin's job; the host documents the step density so authors can smooth accordingly.
-- Text: `value_to_text`/`text_to_value` are called outside `process()` for the generated UI and for "Type a value…".
+- Text: `value_to_text`/`text_to_value` are called outside `process()` for the generated UI and for "Type a value…". Since Cyber 1.804 the host calls `value_to_text` as a live instance starts (never in a render), once for every step of each stepped parameter (`CLAP_PARAM_IS_STEPPED`, whole `min` and `max`, at most 64 steps; at most 1024 steps an instance), into a 96-byte buffer, and shows the text in its generated controls and automation readouts. The text is UTF-8, at most 32 characters, with no control, invisible or direction character; a step whose text is empty, longer or not so shows its number. The calls share one block's fuel; `value_to_text` must not change the plugin's sound or state.
 
 ## 6. State and presets
 

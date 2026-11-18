@@ -1,7 +1,8 @@
 /** The dev host server's API (`server.mjs`): the session, the bundle, its events. */
 import type { EstParam } from '@/audio/est/EstNode';
 
-export interface Build { n: number; ok: boolean; at: string; via: string; message: string; log: string }
+/** `next` (1.803): the one line to do now (`Next: …`), when the server has one. */
+export interface Build { n: number; ok: boolean; at: string; via: string; message: string; log: string; next?: string }
 
 export interface ManifestLite {
   id: string; version: string; name: string; kind: 'effect' | 'instrument'; vendor?: string; description?: string;
@@ -11,6 +12,10 @@ export interface ManifestLite {
   /** DEV-F (1.321): a note effect has a note input (the keyboard shows) and a note output (`plugin-notes` in the log). */
   notes?: { inputs: number; outputs: number };
   stateVersion?: number;
+  /** EST 1.1 (the reader's): the edition, the main ports' channels and the sidechain's (0: none). */
+  edition?: string;
+  audio?: { inputs: number; outputs: number };
+  sidechain?: number;
 }
 
 export interface Session {
@@ -21,6 +26,8 @@ export interface Session {
   target: { kind: string; name: string };
   /** `est dev --ui-preview <params.json>`: the custom UI against these parameters, no DSP. */
   uiPreview: EstParam[] | null;
+  /** 1.803: the folder has `ui/index.html` though est.json names no `ui` (so nothing is packed): the page says how to add it. */
+  uiFolder?: boolean;
   plugin: null | { hash: string; id: string; version: string; name: string; kind: 'effect' | 'instrument' | 'preview'; manifest: ManifestLite; presets: { id: string; name: string }[] };
 }
 

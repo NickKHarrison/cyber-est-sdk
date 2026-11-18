@@ -278,5 +278,6 @@ extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry = { CLAP_VERSION_INI
 // - one thread: every main-thread call runs on the audio thread between blocks (no clap.thread-pool);
 // - no clap.gui: a UI is a web page in a sandboxed frame (ui/, @est/ui), or Cyber's generated knobs;
 // - no files, no sockets, no clock, no random numbers in process: state, presets and bundle assets;
-// - no libc or libm: est/runtime.hpp (memset, memcpy, malloc, free, new, delete, the maths);
+// - no libc or libm linked: est/runtime.hpp (memset, memcpy, malloc, free, new, delete, the maths), and
+//   the kit's own <cmath> and <math.h>, so std::tanh and sinf compile as they are;
 // - no exceptions and no RTTI (-fno-exceptions -fno-rtti), memory with est.json's maximum.

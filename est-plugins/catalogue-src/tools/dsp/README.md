@@ -12,6 +12,7 @@ and [docs/releases/1.651.md](../../../../docs/releases/1.651.md) (review 2, area
 |---|---|---|
 | `voices.ts` | `VoiceAllocator` | Steal policy; a click-free steal fade with the waiting note; release marks set once; the pedal; choke groups; a NOTE_END for every played note |
 | `envelope.ts` | `Adsr`, `Ar`, `Fall` | Exponential segments set by a −60 dB time; idle under an end level; every level under 1e-20 is 0 |
+| `rcenv.ts` (1.820) | `RcAdsr` | An analogue chip's envelope: the attack an exponential rise toward 1.3 of the peak, stopped at the peak; the same end and floor rules as `Adsr`. Imported from its own file, never `index.ts` |
 | `smooth.ts` | `Glide`, `onePoleCoef`, `t60Coef` | A one-pole that flushes; a time constant and a −60 dB time never confused |
 | `clock.ts` | `StepClock` | Steps on the host's song position and bar start; meter changes; forward only; re-sync on any jump; swing without replay |
 | `random.ts` | `chance`, `bipolar`, `hashOf`, `Dice` | Seeded by song step, voice and key, never by a counter |

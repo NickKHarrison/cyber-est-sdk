@@ -299,7 +299,7 @@
   {
     "id": "EST-M018",
     "title": "A zero-width or direction character in a text field",
-    "explain": "A text field (the name, vendor, description, a parameter or preset name, a tag) holds a zero-width (U+200B–U+200F) or bidirectional control character (U+202A–U+202E, U+2066–U+2069), which can make one name look like another (1.314, EST-14).",
+    "explain": "A text field (the name, vendor, description, a parameter or preset name, a tag) holds an invisible or direction character: a zero-width character or direction mark (U+200B–U+200F), a line or paragraph separator or bidirectional control (U+2028–U+202E, U+2066–U+206F), the soft hyphen (U+00AD), the Arabic letter mark (U+061C), U+180E, the word joiner and invisible operators (U+2060–U+2064), the BOM (U+FEFF) or a Tags-block character (U+E0000–U+E007F). They can make one name look like another or carry hidden text (1.314, EST-14; widened in 1.758).",
     "fix": "Remove the character; write the name as it reads.",
     "severity": "error",
     "step": "manifest",

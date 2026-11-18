@@ -1,0 +1,9 @@
+// EST's freestanding <cstring> (1.805): std::memset, memcpy, memmove, memcmp (see string.h).
+#pragma once
+#include <string.h>
+namespace std {
+using ::memset;
+using ::memcpy;
+using ::memmove;
+using ::memcmp;
+} // namespace std

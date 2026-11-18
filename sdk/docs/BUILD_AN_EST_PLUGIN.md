@@ -1,36 +1,24 @@
 # Build an EST plugin
 
-This page takes you from nothing to a working audio effect that Cyber installs, with npm alone. You need Node 20 or newer and a terminal; nothing else. If you work with a chat assistant, give it this page (the block at the end says how).
+From an idea to your own plugin playing in Cyber, in four steps. You need Node 20 or newer and a terminal. No install at all? Use [the playground](playground.md) with [the one prompt](ONE_PROMPT.md) instead.
 
 An EST plugin is one file, a `.est` bundle: your sound code compiled to WebAssembly, plus a manifest (`est.json`). Cyber runs it in a sandbox: it cannot reach the network, your files or the page.
 
-## 1. Install the kit and make a plugin
+## 1. Make the folder
 
 ```sh
-npx @cyber-est/cli new effect-as my-fx --id com.example.my-fx --name "My FX"
-cd my-fx
-npm install --save-dev --save-exact @cyber-est/cli@0.1.0
-npx est doctor
+npx @cyber-est/cli new
 ```
 
-The first line makes the folder `my-fx` from the `effect-as` template: an effect written in AssemblyScript (TypeScript's syntax, compiled straight to WebAssembly, so there is no other toolchain to install). The id is yours: a reversed domain you own, or `com.example.…` while you try things out. It never changes once you share the plugin.
+It asks three things: what the plugin should do, effect or instrument, and a name. It makes the folder, writes your sentence into its `AGENTS.md` under **What to build**, pins the kit in `package.json` and installs it. To skip the questions (an assistant has no terminal to answer on): `npx @cyber-est/cli new --kind effect --name "My FX" --idea "a warm drive"`, or name a template and a folder: `npx @cyber-est/cli new effect-as my-fx`.
 
-The `npm install` puts `est` and the compiler in the folder. From then on, in this folder, `npx est <command>` is the kit. **Never type a bare `npx est` in a folder without it**: npm would fetch an unrelated package called `est`. Elsewhere, write `npx @cyber-est/cli <command>`. `npx est doctor` says if anything is missing, with the command that fixes it.
+In that folder, `npx est <command>` is the kit. **Never type a bare `npx est` in a folder without it**: npm would fetch an unrelated package. Elsewhere, write `npx @cyber-est/cli <command>`.
 
-The folder holds:
+## 2. Build it
 
-| File | What it is |
-|---|---|
-| `assembly/index.ts` | your plugin's code |
-| `est.json` | the manifest: id, name, version, the parameters |
-| `test/golden.json` | the golden render: an input and parameter changes, and the output they must give |
-| `est/` | the kit's DSP library (smoothers, filters, oscillators, delay lines): read it, do not edit it |
-| `AGENTS.md`, `llms.txt` | the template explained, for you and for a coding agent |
-| `est-validator-rules.json` | every check, with its id, what it means and the fix |
+**With an AI assistant:** open the folder in it and say "build it". The folder's `AGENTS.md` holds your sentence, the rules and the library on one page.
 
-## 2. The code
-
-The template starts as a gain into a filter. Here is a whole effect instead, a soft-clipping drive with two knobs. Replace `assembly/index.ts` with it:
+**By hand:** the plugin is `assembly/index.ts`. Here is a whole effect, a soft-clipping drive with two knobs:
 
 ```ts
 // My FX: a soft-clipping drive. Drive pushes the signal into a tanh curve; Output sets the level after it.
@@ -93,9 +81,7 @@ class MyFx extends Effect {
 function abort(message: usize, file: usize, line: u32, column: u32): void { unreachable(); }
 ```
 
-How it fits together: `describe()` is the plugin's identity and must match `est.json`. `parameters()` declares each knob once, by a number that never changes. Cyber calls `paramChanged` with every new value, and `render` for each block of samples: read `io.input`, write `io.output`. The smoothers glide each change over 10 ms, so a knob turned fast does not click.
-
-Now keep `est.json` in step. Set its `parameters` to the same ids and names, and the description and features to the ones above:
+`describe()` is the plugin's identity and must match `est.json`. `parameters()` declares each knob once, by a number that never changes. Cyber calls `paramChanged` with every new value and `render` for each block: read `io.input`, write `io.output`. Keep `est.json` in step:
 
 ```json
 "description": "A soft-clipping drive.",
@@ -106,7 +92,7 @@ Now keep `est.json` in step. Set its `parameters` to the same ids and names, and
 ],
 ```
 
-`test/golden.json`'s `events` name parameters by id, and the template's name four. Replace them with two of yours:
+and the golden test's events (`test/golden.json`), which name parameters by id:
 
 ```json
 "events": [
@@ -115,55 +101,47 @@ Now keep `est.json` in step. Set its `parameters` to the same ids and names, and
 ],
 ```
 
-## 3. Validate, test, play
+## 3. Hear it
 
 ```sh
-npx est validate        # builds, packs, runs every check Cyber's install runs
+npx est dev             # plays it at http://localhost:4430 and rebuilds when you save
+npx est validate        # every check Cyber runs when a plugin is added
 npx est test --update   # the sound changed on purpose: render the golden again
-npx est test            # from now on: the golden render must stay the same
-npx est dev             # play it at http://localhost:4430; it rebuilds when you save
 ```
 
-`est validate` writes `dist/com.example.my-fx-1.0.0.est` and `dist/validation.json`. It prints **PASS** or **FAIL**. Each failed check has a rule id (`EST-…`), what was found, and the fix; the JSON has the same, for an assistant to read. Fix, run it again, until it passes. A **note** about the output's peak is advice, not a failure: the checks drive every knob to its extreme with full-scale clicks, so a drive at +24 dB peaks above 1.0 there.
+Every command ends with one line that starts `Next:`: the first error with its fix, or the next step. Do that one thing. `npx est doctor` says what is wrong with the folder. A failed check has a rule id (`EST-…`), what was found and the fix; `dist/validation.json` has the same for an assistant. A **note** about the output's peak is advice: the checks drive every knob to its extreme.
 
-`est dev` opens a page that runs your plugin in Cyber's own runtime, with its knobs, a test signal and meters. Without a screen (an agent), `npx est dev --json --seconds 3 < /dev/null` prints the meters as JSON lines; it needs Playwright's Chromium once (`npm install --save-dev --save-exact @playwright/test@1.64.1 && npx playwright install chromium`).
+## 4. Drop it into Cyber
 
-When a block costs too much (`EST-P001`, a warning), `npx est profile --debug` lists the functions that spend it, by name.
+`npx est validate` wrote `dist/<id>-1.0.0.est`. In Cyber, on Home: **EST PLUGINS → Add a plugin**, and drop that file on it. Cyber runs the same checks, then it is yours: open it, or put it on a track.
 
-Then load it in Cyber, while adding your own plugins is open there: on Home, **EST PLUGINS → Add a plugin**, and drop the `.est` on it. A developer with a registered signing key can also use **Settings → Plugins → Developer tools → Load a bundle file…**. What you load stays on your own account. Cyber runs the same checks and names the same rule ids.
+Publishing it for others comes later, when you want it: [publish on the EST Store](PUBLISH_ON_THE_EST_STORE.md).
 
-## 4. What you can't do
+## What you can't do
 
-The sandbox makes every plugin safe to install and makes every render the same on every machine. So:
+The sandbox keeps every plugin safe to add and every render the same on every machine:
 
-- **No `Math.random`, no clock.** AssemblyScript's `Math.random` asks the host for a seed, an import EST refuses (`EST-W004`, naming `env.seed`). For noise, keep a seed of your own and step it (the cookbook's `drum-synth` has a three-line xorshift). `Date` is the clock: count samples instead.
-- **No allocation in `render()`.** `new`, arrays and strings only in field initialisers, the constructor or `activate`. The kit's heap never gives memory back, so a buffer made every block runs it out and the plugin stops (`EST-C013`, "probably allocating in render()").
-- **No imports.** No `console`, no `trace`, no host functions, no network. Keep the `abort` function at the bottom and asconfig.json's `"use"` line: they turn a failed assertion into a trap instead of an import.
-- **No top-level code** but constants (an EST module may have no start function).
-- **A shipped version never changes.** Bump `version` (in `est.json` and `describe()`) for every change you give anyone.
+- **No `Math.random`, no clock.** `Math.random` asks the host for a seed, an import EST refuses (`EST-W004`, naming `env.seed`). Step a seed of your own. Count samples instead of reading the time.
+- **No allocation in `render()`.** `new`, arrays and strings only in field initialisers, the constructor or `activate`, or the plugin runs out of memory and stops (`EST-C013`, "probably allocating in render()").
+- **No imports, no top-level code** but constants. Keep the `abort` function at the bottom.
+- **A version you gave someone never changes.** Bump `version` in `est.json` and `describe()`.
 
-Every check is in the rules table: [validator-rules.md](validator-rules.md), and `est-validator-rules.json` in your folder.
+Every check: [validator-rules.md](validator-rules.md).
 
-## 5. Where next
+## Where next
 
-- Other starting points: `npx est new instrument-as my-synth`, and the cookbook's recipes (`compressor`, `chorus`, `bitcrusher`, `wavetable`, `drum-synth`, `ring-mod`, `widener`, `auto-wah`, `schroeder-reverb`, `step-sequencer`, `spectrum-tilt`): `npx @cyber-est/cli new chorus my-chorus`. [templates.md](templates.md) and [cookbook.md](cookbook.md) say what each is.
+- An instrument, a sampler, a note effect, the cookbook: [templates.md](templates.md), [cookbook.md](cookbook.md).
 - Your own page as the plugin's window: `est new … --ui` ([ui.md](ui.md)).
-- The whole contract: [concepts.md](concepts.md), and [for-agents.md](for-agents.md) for an agent's loop.
+- C or C++ you already have: `npx @cyber-est/cli port <folder>` ([Port your plugin](PORT_YOUR_VST.md)).
 
 ## Paste this into your assistant
 
+With no folder open (a chat assistant), use [the one prompt](ONE_PROMPT.md): `npx @cyber-est/cli prompt "what it should do"` prints it. With the folder open:
+
 ```
-I am building an EST audio plugin for Cyber with the @cyber-est/cli kit, in AssemblyScript.
-The folder was made by `npx @cyber-est/cli new effect-as <dir>`; read its AGENTS.md first.
-Rules: no Math.random or Date (no imports at all; seed an xorshift of your own); no allocation
-in render(), process or paramChanged (only field initialisers, the constructor or activate);
-no top-level code but constants; keep the export block and the abort function as they are.
-Keep est.json's id and parameters in step with describe() and parameters(), and
-test/golden.json's events in step with the parameter ids.
-The loop: `npx est validate`, read dist/validation.json (each failed check has rule, message,
-fix), fix, repeat until it passes; then `npx est test` (after a deliberate change to the sound,
-`npx est test --update` first) and `npx est dev --json --seconds 3 < /dev/null` to see the meters.
-What I want the plugin to do: <describe it here>
+Read AGENTS.md in this folder, then build what its "What to build" says.
+Run `npx est validate` and follow its `Next:` line until it passes, then `npx est test --update`.
+Tell me what you built and the choices you made for me.
 ```
 
-More prompts, one for every template and recipe and for the usual follow-ups: [the prompt kit](PROMPT_KIT.md). When it works: [sharing what you made](SHARING.md).
+More prompts: [the prompt kit](PROMPT_KIT.md). Sharing what you made: [SHARING.md](SHARING.md).

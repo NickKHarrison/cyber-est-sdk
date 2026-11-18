@@ -41,7 +41,13 @@ button:disabled, select:disabled, input:disabled { opacity: 1; color: #9ba1ad; c
 input[type="number"] { width: 7em; }
 input[type="file"] { padding: 2px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.uis { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+/* 1.803: the generated panel beside the plugin's own window on a wide screen (the window keeps its
+   own width, the panel takes the rest), one above the other on a narrow one. */
+.uis { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.uis > div { min-width: 0; }
+@media (min-width: 1000px) { .uis.two { grid-template-columns: minmax(260px, 1fr) minmax(0, auto); } }
+.reload { margin: 6px 0; }
+.next { margin: 6px 0; }
 .generated { display: flex; flex-wrap: wrap; gap: 10px; }
 .group { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px 10px; margin: 0; }
 .group legend { color: var(--dim); padding: 0 4px; }

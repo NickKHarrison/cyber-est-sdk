@@ -6,6 +6,7 @@ import { defaultSamplerPatch, samplerHashes, sanitiseSamplerPatch, type SamplerP
 import { hash32, hashString, sanitiseMidiFxList, type MidiFx } from '../../sequencer/midiFx';
 import { sanitiseFx, takesKey, type FxSlot } from '../mixer/fxDefs';
 import { FULL_SEL, RACK_SEL_MAX, distributedZones, isFullSel, sanitiseZone, zoneGain, type RackZone } from './zones';
+import { sanitiseMacroColour } from './macroMap';
 import { MACROS_DEFAULT, MACROS_MAX, MACRO_INDEX_RE, macroListLength, sanitiseMacroCount, stepMacroCount } from './macroCount';
 import { randomMacroValue } from './rackRandom';
 import { RACK_MAX_VARIATIONS, morphValues, sanitiseVariations, withOverwritten, withRenamed, withStored, withoutVariation, type RackVariation } from './variations';
@@ -78,6 +79,8 @@ export interface RackMacro {
   name: string; value: number; maps: RackMap[];
   /** 1.386: left alone by Randomize (Live's "exclude from randomization"); absent: false. */
   exclude?: boolean;
+  /** 1.741: the macro's colour (a palette HSL triple, `macroMap.ts`' `sanitiseMacroColour`); absent: the accent. */
+  colour?: string;
 }
 
 /** 1.386: a macro variation, Live's: the macros' values kept under a name, recalled in one click (1.600: as many values as the rack's macros when stored). 1.673: shared with the Audio Effect Rack (`variations.ts`). */
@@ -195,11 +198,12 @@ function sanitiseMacro(raw: unknown, i: number, chains: readonly RackChain[]): R
     const min = clamp(x.min, -1e6, 1e6, 0), max = clamp(x.max, -1e6, 1e6, 1);
     maps.push({ chain: chain.id, param: x.param, min, max });
   }
-  return { name: text(r.name, `Macro ${i + 1}`, 16), value: clamp(r.value, 0, 1, 0), maps, ...(r.exclude === true ? { exclude: true } : {}) };
+  const colour = sanitiseMacroColour(r.colour);
+  return { name: text(r.name, `Macro ${i + 1}`, 16), value: clamp(r.value, 0, 1, 0), maps, ...(r.exclude === true ? { exclude: true } : {}), ...(colour ? { colour } : {}) };
 }
 
 /** 1.600: whether a macro holds nothing (its default name, at 0, no maps, not excluded): a hidden one past the eighth is then let go. */
-const isDefaultMacro = (m: RackMacro, i: number): boolean => m.name === `Macro ${i + 1}` && m.value === 0 && !m.maps.length && !m.exclude;
+const isDefaultMacro = (m: RackMacro, i: number): boolean => m.name === `Macro ${i + 1}` && m.value === 0 && !m.maps.length && !m.exclude && !m.colour;
 
 /** A rack's patch from anything (a song, a peer, a preset): its limits applied; never fewer than one chain. */
 export function sanitiseRackPatch(raw: unknown): RackPatch {
@@ -434,6 +438,27 @@ export function addMacroMap(patch: RackPatch, i: number, map: RackMap): RackPatc
 
 export function removeMacroMap(patch: RackPatch, i: number, at: number): RackPatch {
   return { ...patch, macros: patch.macros.map((x, k) => (k === i ? { ...x, maps: x.maps.filter((_, n) => n !== at) } : x)) };
+}
+
+/** 1.741: a macro renamed (16 characters; empty: its default name). */
+export function renameMacro(patch: RackPatch, i: number, name: string): RackPatch {
+  if (i < 0 || i >= patch.macros.length) return patch;
+  return { ...patch, macros: patch.macros.map((x, k) => (k === i ? { ...x, name: text(name, `Macro ${i + 1}`, 16) } : x)) };
+}
+
+/** 1.741: a macro's colour (a palette value; anything else, or null, takes it off). */
+export function setMacroColour(patch: RackPatch, i: number, colour: string | null): RackPatch {
+  if (i < 0 || i >= patch.macros.length) return patch;
+  const c = sanitiseMacroColour(colour);
+  return { ...patch, macros: patch.macros.map((x, k) => { if (k !== i) return x; const { colour: _c, ...rest } = x; return c ? { ...rest, colour: c } : rest; }) };
+}
+
+/** 1.741: a mapping's range (`at` of macro `i`), each end held as the sanitiser holds it; may be inverted. */
+export function setMacroMapRange(patch: RackPatch, i: number, at: number, min: number, max: number): RackPatch {
+  const m = patch.macros[i]?.maps[at];
+  if (!m) return patch;
+  const lo = clamp(min, -1e6, 1e6, m.min), hi = clamp(max, -1e6, 1e6, m.max);
+  return { ...patch, macros: patch.macros.map((x, k) => (k === i ? { ...x, maps: x.maps.map((y, n) => (n === at ? { ...y, min: lo, max: hi } : y)) } : x)) };
 }
 
 /** "Group into Rack": a track's own instrument as a rack of one chain (null for an engine a chain cannot play). */

@@ -1,9 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { findAsc } from '../../../tools/src/index';
-import type { EstCommand } from '../command';
+import { REPO_DIR, type EstCommand } from '../command';
+import { checkLine, folderChecks, isPluginFolder } from '../folderDoctor';
 import { CLI_VERSION, versionLine } from '../main';
 import { INSTALL_HELP, findWasmClang } from '../../../../cpp/toolchain.mjs';
 
@@ -61,41 +63,75 @@ function playwrightProbe(cwd: string): Probe {
   const name = "Playwright's Chromium (only for est dev --json)";
   const pw = resolveFrom(cwd, '@playwright/test');
   if (!pw) return { name, ok: false, version: null, fix: 'npm install --save-dev --save-exact @playwright/test@1.64.1 && npx playwright install chromium', for: 'dev' };
+  // 1.803: a Chromium already on the machine, named by EST_CHROMIUM, serves as well (headless.mjs `chromiumPath`).
+  const own = String(process.env.EST_CHROMIUM ?? '').trim();
+  if (own && existsSync(own)) return { name, ok: true, version: `EST_CHROMIUM: ${own}`, fix: null, for: 'dev' };
   const check = `import(${JSON.stringify(pathToFileURL(pw).href)}).then(m => { const p = (m.chromium ?? m.default?.chromium).executablePath(); process.stdout.write(require('node:fs').existsSync(p) ? 'ok' : 'missing'); }, () => process.stdout.write('missing'))`;
   const r = spawnSync(process.execPath, ['-e', check], { encoding: 'utf8', timeout: 20_000 });
   const ok = r.stdout === 'ok';
-  return { name, ok, version: ok ? 'installed' : null, fix: ok ? null : 'npx playwright install chromium', for: 'dev' };
+  return { name, ok, version: ok ? 'installed' : null, fix: ok ? null : 'npx playwright install chromium   (or set EST_CHROMIUM to the path of a Chromium already on this machine)', for: 'dev' };
 }
 
-/** `est doctor [--json]`: checks the toolchains; prints the exact command for anything missing. */
+/** Whether this `est` runs from Cyber's clone (the packed kit has no `scripts/` beside its assets). */
+export const fromClone = (): boolean => existsSync(join(REPO_DIR, 'scripts', 'sdk-build.mjs'));
+
+/**
+ * `est doctor [dir] [--json]`: checks the toolchains; prints the exact command for anything
+ * missing. 1.803: in a plugin folder (or given one) it then says what is wrong with **that folder**
+ * (`folderDoctor.ts`: hints computed without building, never a validator rule) and ends with one
+ * `Next:` line.
+ */
 const command: EstCommand = {
   name: 'doctor',
-  summary: 'Check Node, the meter, rustup with wasm32-unknown-unknown, cargo, asc and clang for wasm32; print the command for anything missing',
+  summary: 'Say what is wrong with this plugin folder and the command that fixes it; check Node, the meter and the build tools',
   usage: [
-    'est doctor [--json]',
+    'est doctor [dir] [--json]',
     '',
-    'Checks what the templates need: Node 20 or newer and binaryen (the meter, which comes with',
+    'In a plugin folder (or given one): what is wrong with that folder, a line each with the exact',
+    'command or edit that fixes it, and a last line that starts "Next:" with the one thing to do now.',
+    'It looks at est.json, the kit installed in the folder, the build tools this folder needs (the',
+    'others are only noted), the id and the parameters in the code against est.json, the memory',
+    'limit, the golden spec, and what the last est validate left in dist/. These are hints, worked',
+    'out without building: est validate is still the check that decides. Exit 1 only when the',
+    'folder cannot build.',
+    '',
+    'It first checks what the templates need: Node 20 or newer and binaryen (the meter, which comes with',
     '@cyber-est/cli) for every one; rustup, the wasm32-unknown-unknown target and cargo for the Rust',
     'templates (the -rust ones); asc for the AssemblyScript ones (the -as ones and the cookbook\'s',
     'recipes; it comes with @cyber-est/cli); a clang with the wasm32 target and wasm-ld for',
     'cpp-clap (Emscripten\'s or wasi-sdk\'s clang counts; EST_CLANG names one). It also reports Playwright\'s Chromium, which only',
-    'est dev --json needs. It installs nothing and fetches nothing. Exit 0 when at least one kind of',
-    'template can be built, 1 otherwise.',
+    'est dev --json needs. It installs nothing and fetches nothing. Outside a plugin folder: exit 0',
+    'when at least one kind of template can be built, 1 otherwise.',
   ].join('\n'),
   async run(args, ctx) {
-    const p = probes(ctx.cwd);
+    const given = args.positional[0];
+    const dir = resolve(ctx.cwd, given ?? '.');
+    const p = probes(dir);
     const all = p.filter(x => x.for === 'all').every(x => x.ok);
     const rust = all && p.filter(x => x.for === 'rust').every(x => x.ok);
     const as = all && p.filter(x => x.for === 'as').every(x => x.ok);
     const cpp = all && p.filter(x => x.for === 'cpp').every(x => x.ok);
     const devJson = p.filter(x => x.for === 'dev').every(x => x.ok);
+    // A folder named on the command line is always checked; the current one only when it looks like a plugin's.
+    const folder = given !== undefined || isPluginFolder(dir) ? folderChecks({ dir, probes: p, version: CLI_VERSION, clone: fromClone() }) : null;
     if (args.flags.json) {
-      ctx.out(JSON.stringify({ version: CLI_VERSION, probes: p, ready: { rust, as, cpp, devJson } }, null, 2));
+      ctx.out(JSON.stringify({ version: CLI_VERSION, probes: p, ready: { rust, as, cpp, devJson }, ...(folder ? { folder, next: folder.next } : {}) }, null, 2));
     } else {
       ctx.out(versionLine());
-      for (const x of p) ctx.out(`${x.ok ? 'ok     ' : x.for === 'dev' ? 'absent ' : 'missing'} ${x.name}${x.version ? `: ${x.version}` : ''}${x.fix ? `\n          run: ${x.fix}` : ''}`);
+      for (const x of p) {
+        // In a folder, another language's missing tool is not this folder's problem: a note, with no command to run.
+        const unneeded = !x.ok && !!folder?.kind && ['rust', 'as', 'cpp'].includes(x.for) && x.for !== folder.kind;
+        if (unneeded) ctx.out(`note    ${x.name}: missing, and this folder does not need it`);
+        else ctx.out(`${x.ok ? 'ok     ' : x.for === 'dev' ? 'absent ' : 'missing'} ${x.name}${x.version ? `: ${x.version}` : ''}${x.fix ? `\n          run: ${x.fix}` : ''}`);
+      }
       ctx.out(`\nRust templates: ${rust ? 'ready' : 'not ready'}; AssemblyScript templates: ${as ? 'ready' : 'not ready'}; C++ (cpp-clap): ${cpp ? 'ready' : 'not ready'}; est dev --json: ${devJson ? 'ready' : 'not ready (optional)'}`);
+      if (folder) {
+        ctx.out(`\nThis folder (${folder.dir}):`);
+        for (const c of folder.checks) ctx.out(checkLine(c));
+        ctx.out(`\n${folder.next}`);
+      }
     }
+    if (folder) return folder.canBuild ? 0 : 1;
     return rust || as || cpp ? 0 : 1;
   },
 };

@@ -11,6 +11,7 @@
 //   (refused, never cleaned, as every display text: shared/estCommunity.mjs `displayRefusal`).
 // Display only: nothing here is trusted for an install, and the pages escape every character of it.
 import { sniffImage } from './imageUploads.mjs';
+import { claimsCyber } from './estCommunity.mjs'; // Order P (stream P4, P4-2)
 import { imageSize, mediaSeconds, sniffTrailer, TRAILER_TYPES } from './storePageMedia.mjs'; // 1.521
 
 /** The most screenshots a version may carry. */
@@ -26,7 +27,7 @@ export const META_LINKS = Object.freeze(['homepage', 'source', 'support']);
 /** The largest `POST /registry/meta` body: six screenshots in base64, and the text. */
 export const META_BODY_MAX_BYTES = Math.ceil(SCREENSHOTS_MAX * SCREENSHOT_MAX_BYTES * 4 / 3) + 64 * 1024;
 
-const INVISIBLE = /[\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff]/;
+const INVISIBLE = /[\u00ad\u061c\u115f\u1160\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\u3164\ufeff\uffa0]|\u034f|\u17b4|\u17b5/; // Order P (P4-1): and the blank letters (Hangul fillers, U+034F, U+17B4/5)
 /** C0 and C1 controls (tab, newline and carriage return are taken out first: `controlIn`). */
 const CONTROL = /\p{Cc}/u;
 /** @param {unknown} v @returns {v is Record<string, any>} */
@@ -60,6 +61,12 @@ export function linkValue(raw) {
 }
 
 /**
+ * Order P (stream P4, P4-2): the words for display text that claims to be Cyber's (`claimsCyber`: "by Cyber",
+ * "official Cyber"), which a Community plugin's summary, tags, changelog and a developer's bio may not say.
+ */
+export const CLAIM_WORDS = 'the text reads as Cyber\'s own ("by Cyber", "official Cyber", "the Cyber team"): a Community plugin is its developer\'s. Say what it is for instead ("a reverb for Cyber")';
+
+/**
  * Why a meta body cannot be kept, or null. `{ changelog?, links? }`: the text parts (the screenshots
  * are checked one by one with `screenshotRefusal`).
  * @param {{ changelog?: unknown, links?: unknown }} m
@@ -70,6 +77,7 @@ export function metaTextRefusal(m) {
     if (m.changelog.length > CHANGELOG_MAX_CHARS) return `the changelog is longer than ${CHANGELOG_MAX_CHARS} characters (only CHANGELOG.md's top section is sent)`;
     if (INVISIBLE.test(m.changelog)) return 'the changelog has an invisible or right-to-left control character (zero-width or bidirectional), which Cyber refuses';
     if (controlIn(m.changelog)) return 'the changelog has a control character';
+    if (claimsCyber(m.changelog)) return CLAIM_WORDS;
   }
   if (m.links !== undefined) {
     if (!isObj(m.links)) return 'links is not an object';
@@ -148,9 +156,10 @@ export const PAGE_ACCENTS = Object.freeze([
 export const PAGE_ACCENT_IDS = Object.freeze(PAGE_ACCENTS.map((a) => a.id));
 /** The three layouts, each within the store's design. */
 export const PAGE_TEMPLATES = Object.freeze([
-  { id: 'standard', label: 'Standard', note: 'The banner across the top, the trailer beside the screenshot.' },
-  { id: 'showcase', label: 'Showcase', note: 'A tall banner, then the trailer full width.' },
-  { id: 'compact', label: 'Compact', note: 'A slim banner strip; the trailer and screenshot side by side.' },
+  // 1.785 (V1): the words say where the banner is drawn (full width under the plugin since 1.704) and what is cropped.
+  { id: 'standard', label: 'Standard', note: 'The banner full width under your plugin, cropped to its middle 1600 × 400; the trailer beside the screenshot.' },
+  { id: 'showcase', label: 'Showcase', note: 'The whole banner under your plugin, then the trailer full width.' },
+  { id: 'compact', label: 'Compact', note: 'A slim strip of the banner (its middle 1600 × 300); the trailer and screenshot side by side.' },
 ]);
 export const PAGE_TEMPLATE_IDS = Object.freeze(PAGE_TEMPLATES.map((t) => t.id));
 

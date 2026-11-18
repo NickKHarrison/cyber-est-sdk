@@ -8,11 +8,13 @@ New to this, or working with a chat assistant? `BUILD_AN_EST_PLUGIN.md` in this 
 
 ## The loop
 
+`npx @cyber-est/cli new` with no arguments asks three questions (what it should do, instrument or effect, a name), writes your sentence into the new folder's `AGENTS.md` for an AI assistant, and pins the kit in its `package.json`. Or name a template yourself:
+
 ```
 npx @cyber-est/cli new effect-as my-chorus --id com.example.my-chorus --name "My Chorus"
 cd my-chorus
 npm install --save-dev --save-exact @cyber-est/cli@0.1.0   # once: est and asc in this folder
-npx est doctor     # what is missing, with the command that installs it
+npx est doctor     # what is wrong with this folder, with the command that fixes it
 npx est dev        # play it at http://localhost:4430; it rebuilds on save
 npx est validate   # builds, packs and runs every check Cyber's install runs: dist/validation.json
 npx est pack       # dist/com.example.my-chorus-1.0.0.est
@@ -20,7 +22,9 @@ npx est pack       # dist/com.example.my-chorus-1.0.0.est
 
 Run `npx est` only in a folder where `@cyber-est/cli` is installed (the `npm install` line above). Elsewhere, write `npx @cyber-est/cli <command>`: a bare `npx est` in a folder without it would fetch npm's unrelated package called `est`.
 
-The templates: `effect-as` and `instrument-as` (AssemblyScript, nothing else to install), `effect-rust` and `instrument-rust` (Rust: `est doctor` names `rustup` and the `wasm32-unknown-unknown` target). Add `--ui` for a custom UI.
+The templates: `effect-as` and `instrument-as` (AssemblyScript, nothing else to install), `effect-rust` and `instrument-rust` (Rust: `est doctor` names `rustup` and the `wasm32-unknown-unknown` target), the `sampler-*`, `midi-effect-*` and `visualiser-*` pairs, and `cpp-clap` (C or C++, for a port). Add `--ui` for a custom UI.
+
+`est port <your C or C++ source folder>` starts a port: it reads your source (it runs nothing in it and changes nothing), and writes a new plugin folder with the parameters it found, your DSP files, and `PORT_PLAN.md` for you or your assistant to follow. It says plainly what does not port: a native window, threads, files. PORT_YOUR_VST.md ("Port your plugin") beside this README has the steps.
 
 `est validate <dir>` runs that folder's own build (its `cargo` or its `node_modules/.bin/asc`) before it checks anything: validate only folders whose build you trust. Cyber itself checks only the `.est` bytes.
 

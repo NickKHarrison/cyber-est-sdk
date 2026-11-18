@@ -81,7 +81,7 @@ describe('est compare', () => {
 describe('the C++ kits', () => {
   it.skipIf(noClang)('est new cpp-clap: a folder outside the repository that builds, validates and passes est test (skipped without a clang for wasm32)', () => {
     const dir = join(tmp, 'my-port');
-    const made = est(['new', 'cpp-clap', dir, '--id', 'com.example.my-port', '--name', 'My Port']);
+    const made = est(['new', 'cpp-clap', dir, '--id', 'com.example.my-port', '--name', 'My Port', '--no-install']);
     expect(made.code, made.err).toBe(0);
     for (const f of ['est-build.json', 'src/plugin.cpp', 'src/gain.hpp', 'est-abi-1.0.json', 'est-abi-1.1.json', 'AGENTS.md']) expect(existsSync(join(dir, f)), f).toBe(true);
     expect(readFileSync(join(dir, 'est-build.json'), 'utf8')).not.toContain(REPO);
@@ -94,6 +94,16 @@ describe('the C++ kits', () => {
     expect(t.code, t.out).toBe(0);
     expect(t.out).toMatch(/golden: within/);
   }, 240_000);
+
+  // 1.786 (V6): the exact clang lines for a porter's own build system, from the package (no Cyber clone).
+  it.skipIf(noClang)('est pack --print: the C/C++ build\'s exact commands, nothing built (skipped without a clang for wasm32)', () => {
+    const dir = join(tmp, 'print-port');
+    expect(est(['new', 'cpp-clap', dir, '--no-install']).code).toBe(0);
+    const r = est(['pack', '--print'], dir);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toMatch(/--target=wasm32/);
+    expect(existsSync(join(dir, 'dist'))).toBe(false);
+  }, 120_000);
 
   it.skipIf(noClang || !cxx)('the JUCE kit: the EST half validates, and est compare holds it against the shared DSP built natively (skipped without clang for wasm32 or a native C++ compiler)', () => {
     const kit = join(tmp, 'juce-shared-dsp');

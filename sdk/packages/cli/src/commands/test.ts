@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { compareGolden, compareNotes, formatReport, notesJson, goldenBytes, goldenFromBytes, readProject, renderGoldenBundleFull, validate, type GoldenNote, type GoldenSpec } from '../../../tools/src/index';
+import { compareGolden, compareNotes, formatReport, nextLine, notesJson, goldenBytes, goldenFromBytes, readProject, renderGoldenBundleFull, validate, type GoldenNote, type GoldenSpec } from '../../../tools/src/index';
 import { flagString, type EstCommand } from '../command';
-import { buildAndPack, shown } from '../build';
+import { buildOrNext, shown } from '../build';
 
 /**
  * `est test [dir] [--update] [--no-build]`: the plugin's golden render (4-B's format, the
@@ -25,6 +25,8 @@ const command: EstCommand = {
     'The golden spec, test/golden.json (every template has one; the build block\'s `golden` names',
     'another): { "sampleRate": 48000, "frames": 12288 (a multiple of 128),',
     '  "input": { "kind": "noise", "seed": 1, "level": 0.5 } (an effect; "none" for an instrument),',
+    '  "key": { "kind": "bursts", "level": 0.5 } (optional: what feeds an effect\'s sidechain; "noise",',
+    '         "bursts" (a kick-like pattern) or "none"; ignored, with a line saying so, without a sidechain),',
     '  "events": [{ "type": "param", "time": 0.1, "id": 0, "value": -6 },',
     '             { "type": "noteOn", "time": 0, "key": 60, "velocity": 0.8, "noteId": 1, "channel": 0, "port": 0 }],',
     '  "tolerance": 1e-6, "render": "golden.f32" }',
@@ -35,8 +37,11 @@ const command: EstCommand = {
   valueFlags: ['seconds'],
   async run(args, ctx) {
     const dir = resolve(ctx.cwd, args.positional[0] ?? '.');
-    const p = buildAndPack(dir, ctx, { noBuild: args.flags['no-build'] === true });
+    const p = buildOrNext(dir, ctx, { noBuild: args.flags['no-build'] === true, name: 'test' });
+    if (!p) return 1;
     let failed = 0;
+    let goldenDiffers = false;
+    let goldenError: string | undefined;
     const specFile = readProject(dir).golden;
     if (!existsSync(specFile)) ctx.out(`golden render: none (${shown(ctx.cwd, specFile)} is not there; a template has one)`);
     else {
@@ -45,6 +50,9 @@ const command: EstCommand = {
       try {
         const full = await renderGoldenBundleFull(p.bytes, spec);
         const out = full.audio;
+        // 1.803: the spec's `key` feeds the sidechain when the plugin has one; said either way.
+        if (full.key === 'fed') ctx.out(`  . golden key: ${spec.key!.kind} into the sidechain`);
+        else if (full.key === 'ignored') ctx.out('  - golden key: ignored (this plugin has no sidechain input: EST 1.1, est.json\'s second audio input with "role": "sidechain")');
         // DEV-F (1.321): a note effect's notes, compared exactly with the stored list.
         if (spec.notes) {
           const notesFile = join(dirname(specFile), spec.notes);
@@ -53,7 +61,7 @@ const command: EstCommand = {
             ctx.out(`  + golden notes: ${shown(ctx.cwd, notesFile)} written (${full.notes.length} notes)`);
           } else {
             const diff = compareNotes(full.notes, JSON.parse(readFileSync(notesFile, 'utf8')) as GoldenNote[]);
-            if (diff) { failed++; ctx.out(`  x golden notes: ${diff} (est test --update writes the new list)`); }
+            if (diff) { failed++; goldenDiffers = true; ctx.out(`  x golden notes: ${diff} (est test --update writes the new list)`); }
             else ctx.out(`  . golden notes: the same ${full.notes.length} notes`);
           }
         }
@@ -66,6 +74,7 @@ const command: EstCommand = {
           if (c.maxDiff <= tolerance) ctx.out(`  . golden: within ${tolerance} (largest difference ${c.maxDiff.toExponential(2)})`);
           else {
             failed++;
+            goldenDiffers = true;
             const frames = out.length / 2;
             const where = c.at < 0 ? 'a different length' : `differs by ${c.maxDiff.toExponential(2)} at frame ${c.at % frames} (${c.at < frames ? 'left' : 'right'})`;
             ctx.out(`  x golden: ${where} (est test --update writes the new render)`);
@@ -73,7 +82,8 @@ const command: EstCommand = {
         }
       } catch (err) {
         failed++;
-        ctx.out(`  x golden: ${err instanceof Error ? err.message : String(err)}`);
+        goldenError = err instanceof Error ? err.message : String(err);
+        ctx.out(`  x golden: ${goldenError}`);
       }
     }
     const seconds = flagString(args, 'seconds') ? Number(flagString(args, 'seconds')) : undefined;
@@ -81,6 +91,8 @@ const command: EstCommand = {
     ctx.out(formatReport(v));
     if (!v.ok) failed++;
     ctx.out(failed ? `est test: ${failed} failed` : 'est test: all passed');
+    // 1.803: one line, the next thing to do (a failed check first, then a render that differs).
+    ctx.out(nextLine({ kind: 'report', report: v, bundle: shown(ctx.cwd, p.file), goldenDiffers, goldenError, from: 'test' }));
     return failed ? 1 : 0;
   },
 };

@@ -1,0 +1,20 @@
+{
+  "$comment": "How est builds this plugin (sdk/cpp/build.mjs): each source compiled to wasm32 with clang, linked with EST's flags (the exported, growable table; a 64 KiB stack; est.json's memoryPagesMax as the maximum) into build/module.wasm. est.json is the only file that names the plugin: build/est_plugin.h is written from it before every build. Written by est port: \"sources\" is what is compiled now (the adapter passes the sound through); \"port\" records the original's files, copied into src/original/. Move each of \"port\".\"sources\" into \"sources\" when src/adapter.hpp includes its header (PORT_PLAN.md, step 2).",
+  "sources": [
+    "src/plugin.cpp"
+  ],
+  "include": [
+    "src",
+    "src/original"
+  ],
+  "std": "c++17",
+  "module": "build/module.wasm",
+  "golden": "test/golden.json",
+  "port": {
+    "from": "original",
+    "sources": [],
+    "files": {
+      "src/original/Overdrive.h": "Overdrive.h"
+    }
+  }
+}

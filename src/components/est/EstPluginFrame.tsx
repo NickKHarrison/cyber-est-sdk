@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { frameAttended, frameCommitBudget, writeCost } from './frameCommitBudget';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { SHARED_SHIELD_WORDS, armShared, isSharedRecord, sharedArmed, shieldDrops, shieldKeyNow, subscribeSharedShield } from './sharedShield';
 import { noteEstInstanceFrame } from '../../audio/est/instanceState';
 import type { EstParam } from '../../audio/est/EstNode';
 import type { EstInstalled } from '../../audio/est/library';
@@ -162,6 +164,14 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
   instance?: { stripId: string; slotId: string } | null;
 }) {
   const ui = installed.manifest.ui!;
+  // 1.795 (D-64): a shared plugin's window is shielded until the first press (sharedShield.ts): the host's
+  // own layer over the frame, and every writing message dropped meanwhile.
+  const shieldKey = isSharedRecord(installed) ? shieldKeyNow(installed.ref.hash) : null;
+  const armedNow = useSyncExternalStore(subscribeSharedShield, () => (shieldKey ? sharedArmed(shieldKey) : true));
+  const shielded = !!shieldKey && !armedNow;
+  const shieldedRef = useRef(shielded);
+  shieldedRef.current = shielded;
+  const [dropped, setDropped] = useState(0);
   const [nonce] = useState(newNonce);
   const frame = useRef<HTMLIFrameElement>(null);
   const hostEl = useRef<HTMLDivElement>(null);
@@ -219,6 +229,9 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
     let uncommitted: Record<string, number> = {};
     const gestures = new Set<number>();
     let lastCommit = -Infinity;
+    const budget = frameCommitBudget();
+    /** A gesture that began with a real input behind it: its end's write is attended however long the drag. */
+    let gestureAttended = false;
     /** Write what is uncommitted now (the unmount, or a commit whose turn has come). */
     const commitNow = () => {
       if (quiet) { clearTimeout(quiet); quiet = null; }
@@ -227,13 +240,25 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
       if (Object.keys(p).length) { lastCommit = Date.now(); live.current.edit.write(p); }
     };
     /** 1.314 (EST-15): a commit at most every COMMIT_MS; an early one waits out the rest of it. */
+    // The sandbox attack order (stream E): and within the frame's budget (`frameCommitBudget.ts`): a write
+    // with no real input behind it (the page's user activation, now or when its gesture began) is rare,
+    // one with it bounded, so a window's own script cannot flood the undo history or a live room's doc.
+    // A write that waits loses nothing: its values stay previewed and go in the next one.
     const commit = () => {
-      const wait = COMMIT_MS - (Date.now() - lastCommit);
-      if (wait > 0 && Object.keys(uncommitted).length) {
+      if (!Object.keys(uncommitted).length) { commitNow(); return; }
+      const now = Date.now();
+      const attended = gestureAttended || frameAttended(frame.current?.ownerDocument.defaultView);
+      // Charged by what it holds (`writeCost`): a slower write may not simply be a larger one.
+      const cost = writeCost(Object.keys(uncommitted).length);
+      const wait = Math.max(COMMIT_MS - (now - lastCommit), budget.wait(attended, now, cost));
+      if (wait > 0) {
         if (quiet) clearTimeout(quiet);
-        quiet = setTimeout(commit, wait);
+        // Looked at again within a second: an input meanwhile makes the write an attended one.
+        quiet = setTimeout(commit, Math.min(wait, 1000));
         return;
       }
+      budget.take(attended, now, cost);
+      gestureAttended = false;
       commitNow();
     };
     const flush = () => {
@@ -271,15 +296,21 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
       // 1.346: a key the frame guard hands back: played as the page's own key, only while the frame
       // has the focus (so a plugin cannot press keys while the person is elsewhere).
       const key = checkKeyMessage(e.data, nonce);
-      if (key) { playFrameKey(frame.current, key); return; }
+      if (key) {
+        if (shieldedRef.current) { setDropped(n => n + 1); return; } // 1.795: a shielded window plays nothing
+        playFrameKey(frame.current, key);
+        return;
+      }
       const m = checkFrameMessage(e.data, nonce, live.current.params, live.current.resizable, live.current.audioOk);
       if (!m) { refuse(); return; }
+      // 1.795 (D-64): before the first press a shared plugin's window writes nothing (its values, gestures).
+      if (shieldedRef.current && shieldDrops(m.type)) { setDropped(n => n + 1); return; }
       if (ver.current !== m.v) { ver.current = m.v; setVersion(m.v); }
       if (m.type === 'est:ready') { sendInit(); return; }
       if (m.type === 'est:resize') { setSize({ w: m.w, h: m.h }); return; }
       if (m.type === 'est:audio') { listen(m.fftSize, m.rate); return; }
       if (m.type === 'est:gesture') {
-        if (m.phase === 'begin') gestures.add(m.id);
+        if (m.phase === 'begin') { gestures.add(m.id); if (frameAttended(frame.current?.ownerDocument.defaultView)) gestureAttended = true; }
         else { gestures.delete(m.id); if (!gestures.size) { if (raf) { cancelAnimationFrame(raf); flush(); } commit(); } }
         return;
       }
@@ -427,7 +458,7 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
   }, [edit.values, params, nonce]);
 
   return (
-    <div ref={hostEl} className="relative flex min-h-0 flex-1 items-start justify-center overflow-auto bg-cyber-0" data-testid="est-frame-host" data-rejected={rejected} data-ui-version={version}>
+    <div ref={hostEl} className="relative flex min-h-0 flex-1 items-start justify-center overflow-auto bg-cyber-0" data-testid="est-frame-host" data-rejected={rejected} data-ui-version={version} data-shield={shieldKey ? (shielded ? 'on' : 'off') : undefined} data-dropped={shieldKey ? dropped : undefined}>
       {blocked ? <p role="note" className="p-4 text-sm" data-testid="est-frame-blocked" data-probe={blocked}>This plugin&apos;s own window needs the plugin site, which your network blocks. Sound and saving work as usual.</p> : src ? <>
       {!revealed && <p role="status" className="absolute p-4 text-[11px] text-muted-foreground" data-testid="est-frame-opening">Opening the plugin&apos;s own window…</p>}
       <iframe
@@ -446,7 +477,20 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
         data-testid="est-frame"
         className="block flex-none border-0 bg-cyber-0"
         style={{ width: size.w, height: size.h, maxWidth: '100%', visibility: revealed ? undefined : 'hidden' }}
-      /></> : <p className="p-4 text-sm" data-testid="est-frame-unavailable">This plugin's own page is not on the plugin origin, so it cannot be shown.</p>}
+      />
+      {shielded && shieldKey && (
+        // 1.795 (D-64): the host's own layer over a shared plugin's frame until the first press. Transparent
+        // over the plugin (it draws underneath), its words on a strip; a click or Enter lifts it.
+        <button
+          type="button"
+          className="absolute inset-0 flex cursor-pointer items-end justify-center bg-transparent p-2 focus-visible:outline focus-visible:outline-2"
+          aria-label={SHARED_SHIELD_WORDS}
+          data-testid="est-frame-shield"
+          onClick={() => armShared(shieldKey)}
+        >
+          <span className="rounded bg-cyber-0/90 px-2 py-1 text-[11px] text-foreground shadow">{SHARED_SHIELD_WORDS}</span>
+        </button>
+      )}</> : <p className="p-4 text-sm" data-testid="est-frame-unavailable">This plugin's own page is not on the plugin origin, so it cannot be shown.</p>}
     </div>
   );
 }

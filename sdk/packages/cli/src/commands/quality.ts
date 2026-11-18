@@ -58,7 +58,8 @@ const command: EstCommand = {
   ].join('\n'),
   valueFlags: ['profile', 'preset', 'levels', 'values', 'json', 'md'],
   async run(args, ctx) {
-    if (!args.positional.length) throw new UsageError('est quality needs a bundle or a plugin folder');
+    // 1.789 (V3b): the plugin folder here by default, as the other commands.
+    if (!args.positional.length) args.positional.push('.');
     const files: { name: string; bytes: () => Uint8Array }[] = [];
     for (const spec of args.positional) {
       const p = resolve(ctx.cwd, spec);
@@ -85,6 +86,8 @@ const command: EstCommand = {
       const report = await qualityOf(bytes, profileFor(profileFile && resolve(ctx.cwd, profileFile), id), { only: only ? [only] : args.flags['only-listed'] === true ? Object.keys(levelsFor(levelsFile, id) ?? {}) : undefined, progress: s => ctx.err(s), levels: levelsFor(levelsFile, id), values: valuesFor(valuesFile, id) });
       reports.push(report);
       ctx.out(qualityTable(report));
+      // 1.789 (V5): an empty table said nothing; name why and the next step.
+      if (!report.presets.length) ctx.err(`est quality: ${f.name} has no presets to measure (est.json's "presets" names none). Add presets (PROMPT_KIT.md, "Add 8 presets"), then run it again.`);
       bad += report.presets.filter(p => p.error || p.flags.some(x => !x.startsWith('level '))).length;
     }
     const json = flagString(args, 'json'), md = flagString(args, 'md');

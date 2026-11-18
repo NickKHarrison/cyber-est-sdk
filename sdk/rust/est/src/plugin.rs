@@ -22,6 +22,9 @@ pub trait Effect: Sized + 'static {
     const STATE_MAGIC: u32;
     /// Raise it when `save_state`'s bytes change; `load_state` gets the version that saved them.
     const STATE_VERSION: u32 = 1;
+    /// EST 1.1 sidechain input channels (0: none; 1 or 2: est.json's `{ "role": "sidechain" }` port).
+    /// 1.786 (V3): read it with `io.sidechain(c, n)`; `io.side_live` says whether a key is chosen.
+    const SIDECHAIN_CHANNELS: u32 = 0;
     fn new() -> Self;
     /// Before processing starts (the sample rate never changes while active). False refuses.
     fn activate(&mut self, _sample_rate: f64, _max_frames: u32) -> bool { true }

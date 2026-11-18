@@ -2,11 +2,11 @@
 
 ```
 est dev [folder | file.est] [--port 4430] [--files-port 4431] [--no-watch] [--open]
-est dev [folder | file.est] --json [--seconds N] [--play 60,64,67]
+est dev [folder | file.est] --json [--seconds N] [--play 60,64,67] [--key off|kick|sine]
 est dev <folder with ui/> --ui-preview params.json
 ```
 
-`est` is `node <cyber>/sdk/packages/cli/bin/est.mjs` (see [getting started](getting-started.md#0-check-your-tools)); `est dev --help` lists every option.
+`est` is `npx est` in a plugin's folder with `@cyber-est/cli` installed, else `npx @cyber-est/cli` (see [getting started](getting-started.md#0-check-your-tools)); `est dev --help` lists every option.
 
 The dev host is a page for playing a plugin while you build it, on **Cyber's own runtime**: the page is built from Cyber's own EST code, so the bundle goes through the compiling Worker exactly as an install does (Cyber's reader, the meter, the compile and the conformance run), and the metered module runs in Cyber's `est-plugin` audio processor. What works here works in Cyber.
 
@@ -25,18 +25,39 @@ The target is a plugin's **folder** (`est.json` and a `Cargo.toml` or `asconfig.
 - **Transport**: play, stop and the tempo. While it plays, the instance gets the same transport events Cyber's sends (tempo, beats, seconds, the bar, 4/4), one per scheduler window.
 - **Keyboard** (an instrument): two octaves on screen, the computer keys (A to K and the row above; Z and X for the octave; not while a field or a control has the focus), and Web MIDI after **Use MIDI** (notes, bend, the wheel, sustain, any CC). Notes go through Cyber's own note mapping, with ids.
 - **Input** (an effect): a test signal (a 220 Hz sine at −12 dBFS, noise, tone bursts) or an audio file, looped.
-- **Generated UI and custom UI** side by side: the generated knobs (made with `@cyber-est/ui`), and the plugin's page in Cyber's own frame component. A change in either reaches the other and the instance. Under the page, the frame protocol version it speaks (from its `est:ready`) and, in version 2, the sample rate it was given and the output meters it is sent (`est:meter`, at most 30 a second, only when they change).
+- **Sidechain key** (an effect with a sidechain, EST 1.1): what feeds the sidechain input. **Off** is silence, as in Cyber when no key is chosen; **The test loop's drums** is the kick and hats of the loop Cyber's own plugin pages play; **Sine** is a steady 110 Hz tone. A plugin with no sidechain shows a line saying so.
+- **Generated panel and your window**, both at once: the generated knobs (made with `@cyber-est/ui`) are what Cyber draws from your parameters, and people see them wherever your own window is not shown; beside them is the plugin's own page (`ui/`), in Cyber's own frame component. On a wide screen they sit side by side; on a narrow one the window is under the panel. Both show the same running instance: a change in either reaches the other and the sound. If the folder has `ui/index.html` but `est.json` has no `"ui"` entry, the page says so, with the entry to add. Under the page, the frame protocol version it speaks (from its `est:ready`) and, in version 2, the sample rate it was given and the output meters it is sent (`est:meter`, at most 30 a second, only when they change).
 - **Parameters**: every parameter the instance reports (id, name, module, range, default, flags) with a value to type; a range marks `(log)` when est.json gives the parameter `"scale": "log"` (since EST 1.286), and the generated knobs, the custom UI's `est:init` (its `scale` key) and the processor's mapping of a lane's 0…1 follow it, as in Cyber.
 - **Output**: peak and RMS of each channel in dBFS.
 - **State**: **Save and load the state** saves it, loads it back and compares the parameters and the bytes (after the parameter changes before it have reached the plugin); the bundle's presets load from the list.
 - **Validation**: the install check (Cyber's pipeline: metering points, determinism, the cost of a block) and the last `validation.json`.
 - **Event log**: everything above, what the custom UI does (`ui` lines, below), and what the instance says (its errors, its own parameter changes, block statistics).
 
-After a rebuild the page re-checks the new bundle and, if the audio was running, makes the new instance from the old one's state.
+## A rebuild hands over
+
+Save a file and the folder is built again. If the audio is running, the sound does not stop:
+
+1. The old instance keeps playing while the new bundle is built, checked as an install checks it, and made.
+2. Then the two cross over in a 20 ms fade (Cyber's own, the one its Follow uses).
+3. The new instance takes what the old one was doing: the keys still held (sent again as note-ons), the parameter values, the state where the new build still loads it, and the transport from the beat it was at.
+
+The page says what it kept: `Reloaded in 240 ms without stopping: kept 1 held note, 4 parameter values, the state.` If the state's layout changed and the new build refuses the old state, it starts fresh and takes the values alone.
+
+If the new build fails (the compiler stops, the bundle is refused, or the install check fails), nothing changes hands: **the last good build is still playing**, and the page shows why with the one `Next:` line.
+
+## The next thing to do
+
+Every build ends with one line that starts `Next:`, in the terminal and on the page (with `--json`, the `build` line's `next` field):
+
+- a compiler error: the first one, with its file and line (`Next: fix assembly/index.ts:79: Property 'nxt' does not exist … (TS2339)`);
+- a failed check: the first one's rule id, where, and its fix in a few words (`Next: fix EST-C008 [phase:params]: …`);
+- a good build: `Next: play it at http://localhost:4430; when it sounds right, drop dist/dev.est on Cyber: Home → EST PLUGINS → Add a plugin`.
+
+`est validate`, `est test` and `est doctor` end the same way: one function decides the line for all of them. It is a hint read from what the build and the validator already said; it never changes a rule or its id.
 
 ## `--json`: for an agent without a screen
 
-`est dev --json` runs the page in Playwright's Chromium, headless (an optional peer of `@cyber-est/cli`: `npm install --save-dev --save-exact @playwright/test@1.64.1 && npx playwright install chromium` in the plugin's folder, or `npx playwright install chromium` once at the clone's root; `est doctor` reports it), starts the audio and prints one JSON object a line:
+`est dev --json` runs the page in Playwright's Chromium, headless (an optional peer of `@cyber-est/cli`: `npm install --save-dev --save-exact @playwright/test@1.64.1 && npx playwright install chromium` in the plugin's folder; `est doctor` reports it), starts the audio and prints one JSON object a line. Where a Chromium is already on the machine and another cannot be downloaded, set `EST_CHROMIUM` to the path of its program and `npx playwright install` is not needed (the `@playwright/test` package still is):
 
 ```
 {"type":"build","n":1,"ok":true,"via":"@cyber-est/tools (rust)","message":"ready: My Gain 1.0.0 (3f2a…)","hash":"3f2a…"}
@@ -52,6 +73,8 @@ After a rebuild the page re-checks the new bundle and, if the audio was running,
 {"n":9,"t":1713,"type":"done","cmd":"state","seq":2}
 ```
 
+After a rebuild that handed over, a `reload` line: `{"type":"reload","ok":true,"ms":240,"kept":{"notes":1,"params":4,"state":true},"hash":"…"}`. When the new build was not taken: `"ok":false`, with `message`, `next` (the `Next:` line) and `"playing":"the last good build"`.
+
 `t` is milliseconds on the page's clock. Meters come four times a second, in dBFS (`null` is silence). `install` with `"ok":false` carries `code`, `rule` (the validator's rule id, as Cyber's refusal names it) and `message`: the refusal, as Cyber would word it. `stats` lines (twice a second) carry the live instance's `blocks`, `meanUs` and `maxUs` (see [the cost of a block](#the-cost-of-a-block)).
 
 ### Commands
@@ -65,6 +88,7 @@ It reads commands on stdin, one JSON object a line:
 | `{"cmd":"param","id":0,"value":-6}` | a parameter, in plain units (Hz, dB …), clamped to its range |
 | `{"cmd":"play"}`, `{"cmd":"stop"}`, `{"cmd":"tempo","bpm":128}` | the transport |
 | `{"cmd":"signal","kind":"sine"}` | an effect's input: `sine`, `noise`, `pulse`, `off` |
+| `{"cmd":"key","kind":"kick"}` | what feeds an effect's sidechain: `off`, `kick` (the test loop's drums), `sine`. `--key <kind>` sets it from the start. A `key` line follows; without a sidechain it carries a `note` saying the key feeds nothing |
 | `{"cmd":"state"}` | the state round trip, once every earlier parameter change has reached the plugin |
 | `{"cmd":"preset","id":"presets/warm.bin"}` | a bundle preset |
 | `{"cmd":"params"}` | prints every parameter with its value |
@@ -111,7 +135,7 @@ A parameter the page writes is a `param` line with `"origin":"frame"` (and `patc
 
 Two numbers measure the DSP's cost, and they are not the same measurement:
 
-- **`est validate`'s `block … µs`** (and `blockUs` on the `install` line): the mean wall time of one 128-frame `process()` call over the 10-second conformance run, timed with a microsecond clock, on the machine that validates, the host's own work around the call included. This is the number the budget (`EST-P001`, 100 µs) is checked against; compare plugins with it.
+- **`est validate`'s `block … µs`** (and `blockUs` on the `install` line): the mean wall time of one 128-frame `process()` call over the 10-second conformance run, timed with a microsecond clock, on the machine that validates, the host's own work around the call included. This is the number the budget (`EST-P001`, 100 µs) is checked against; compare plugins with it. Since 1.803 it is **the best of up to three runs**: the conformance check plays its signal twice anyway and the faster run is the figure; `est validate` and `est test` make one more run only when both were over the budget. Anything else the machine is doing only adds time, so the smallest run is the nearest to what the plugin costs; a plugin that is over budget on every run still warns.
 - **The `stats` lines' `meanUs` and `maxUs`**: the live instance in the audio thread, over the last half second. An audio worklet has only a millisecond clock, so each block is timed as 0 or 1000 µs: `meanUs` is an estimate that averages out over many blocks (and is often 0 for a light plugin), and `maxUs` is 0 or a whole number of milliseconds. Use them to see that the live instance runs and is not far over budget, not to measure it.
 
 ## Profiling: `est profile`

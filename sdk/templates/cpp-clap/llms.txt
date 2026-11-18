@@ -1,33 +1,29 @@
 # EST plugin: an EST effect in C++ (CLAP)
 
-> An EST plugin is a CLAP 1.2 plugin compiled to WebAssembly (wasm32, no imports), packed with its manifest into a `.est` bundle that a host such as Cyber validates, meters and runs in a sandbox. Start with AGENTS.md in this folder. Every link below is a file in this folder (made by `est new`) or a page of the kit's documentation (`sdk/docs/` in the Cyber clone the kit runs from: `<cyber>/sdk/docs/…`).
+> An EST plugin is a CLAP 1.2 plugin compiled to WebAssembly (wasm32, no imports), packed with its manifest into a `.est` bundle that a host such as Cyber checks and runs in a sandbox. Start with AGENTS.md. Every file under the first three headings is in this folder (`est new` made it). The pages under "On the web" are not in this folder.
 
 ## This plugin
 
-- [AGENTS.md](AGENTS.md): the layout, the commands, the toolchain, the allocation and determinism rules, the identity and state rules, the rule ids, and the loop: build, `est validate`, read dist/validation.json, fix
-- [est.json](est.json): the manifest (its `$schema` is the schema below); the only file that names the plugin
-- [src/gain.hpp](src/gain.hpp): the DSP, plain C++
-- [src/plugin.cpp](src/plugin.cpp): the CLAP side (entry, factory, descriptor, parameters, state, ports)
-- [est-build.json](est-build.json): the build (sources, include folders, defines, standard)
+- [AGENTS.md](AGENTS.md): what to build, the loop, the rules, the library on one page, what costs time
+- [est.json](est.json): the manifest
+- [src/plugin.cpp](src/plugin.cpp): the plugin
 - [test/golden.json](test/golden.json): the golden render's spec (its events name parameters by id)
+- [package.json](package.json): the kit, pinned, and the scripts
 
-## The contract, machine-readable (in this folder)
+## The contract, machine-readable
 
-- [est-manifest-1.schema.json](est-manifest-1.schema.json): the manifest's JSON Schema (2020-12)
-- [est-validator-rules.json](est-validator-rules.json): every validator rule: its id (EST-M, -B, -W, -C, -U, -P), title, explanation, fix and severity
-- [est-abi-1.0.json](est-abi-1.0.json): the ABI: every CLAP struct's size and offsets on wasm32 and every constant
-- [est-ui.d.ts](est-ui.d.ts): the types of the UI library (`window.EstUI`), for a custom UI
+- [est-manifest-1.schema.json](est-manifest-1.schema.json): the manifest's JSON Schema (est.json's `$schema`)
+- [est-validator-rules.json](est-validator-rules.json): every validator rule: `id` (EST-M, -B, -W, -C, -U, -P), `title`, `explain`, `fix`, `severity`
+- [est-abi-1.0.json](est-abi-1.0.json): the ABI for EST 1.0: every CLAP struct's layout on wasm32 (only for code written without the kit's runtime)
+- [est-abi-1.1.json](est-abi-1.1.json): the same for EST 1.1
+- [est-ui.d.ts](est-ui.d.ts): the types of the window's page library (`window.EstUI`)
 
-## The kit
+## On the web (not in this folder)
 
-- sdk/cpp/include/est/runtime.hpp: the freestanding runtime (memset, memcpy, malloc, free, new, delete, the maths)
-- sdk/cpp/include/clap/: the CLAP 1.2.2 headers
-- sdk/docs/porting-cpp.md: porting a C++ plugin: the toolchain, what breaks and EST's replacements, `est compare`
-- sdk/docs/porting-juce.md: a JUCE plugin: one source tree, the desktop build and the EST module
-- sdk/docs/porting-clap.md: what EST adds to CLAP and what it refuses
-- sdk/docs/concepts.md, sdk/docs/getting-started.md, sdk/docs/dev-host.md, sdk/docs/for-agents.md
-- sdk/docs/manifest.md and sdk/docs/validator-rules.md: the same as the two JSON files above, as pages
-
-## Optional
-
-- `<cyber>/docs/est/EST_SPECIFICATION_DRAFT.md`: the EST specification: background, not needed to write a plugin
+- https://github.com/NickKHarrison/cyber-est-sdk/blob/main/sdk/docs/dev-host.md : `est dev` and `est dev --json`
+- https://github.com/NickKHarrison/cyber-est-sdk/blob/main/sdk/docs/concepts.md : blocks, events, parameters, state, the sandbox
+- https://github.com/NickKHarrison/cyber-est-sdk/blob/main/sdk/docs/ui.md : a window of your own
+- https://github.com/NickKHarrison/cyber-est-sdk/blob/main/sdk/docs/manifest.md : every est.json field, as a page
+- https://github.com/NickKHarrison/cyber-est-sdk/blob/main/sdk/docs/validator-rules.md : every rule, as a page
+- https://github.com/NickKHarrison/cyber-est-sdk/blob/main/sdk/docs/PUBLISH_ON_THE_EST_STORE.md : publishing
+- https://github.com/NickKHarrison/cyber-est-sdk/blob/main/docs/est/EST_SPECIFICATION_DRAFT.md : the EST specification (background; not needed to write a plugin)

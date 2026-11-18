@@ -1,173 +1,132 @@
 # An EST sampler in AssemblyScript
 
-This folder is an EST plugin: a WebAssembly instrument that Cyber (and any EST host) installs from a `.est`
-bundle. It starts as three samples (two velocity layers of a pluck on the upper keys, a looped drone on the lower ones), played from notes with pitch, a one-shot or loop mode and an ADSR, eight voices. AssemblyScript is TypeScript's syntax compiled straight to WebAssembly by `asc`, with no native toolchain. You change the template into your plugin, then build, validate and pack it with the `est` command. This file is for you and for any coding agent working on the plugin; `CLAUDE.md` points here.
+This folder is an EST plugin: a WebAssembly instrument that Cyber installs from a `.est` bundle. It starts as three samples (two velocity layers of a pluck, a looped drone) played from notes with pitch, a one-shot or loop mode and an ADSR, eight voices; you change it into the plugin described under **What to build**. AssemblyScript is TypeScript's syntax compiled straight to WebAssembly, with no other toolchain.
+
+## What to build
+
+<!-- est:idea -->
+Nobody has said yet what this plugin should do. Ask the person for one sentence, write it here, then build it.
+<!-- /est:idea -->
 
 ## This template: samples in the module
 
-An EST module imports nothing and reads no file at run time (that is the sandbox), so a sampler's
-samples travel **inside `module.wasm`**, as data, and nothing is fetched while it plays. The path:
+An EST module reads no file while it plays, so a sampler's samples travel **inside the module**, as data:
 
-1. Put 16-bit PCM mono WAVs in `assets/` (export them as that from any editor).
-2. Map them in `samples.json`: `{ "file": "assets/kick.wav", "root": 36, "keys": [36, 36], "velocity": [0, 1] }`;
-   two entries on the same keys with different `velocity` ranges are velocity layers; `"loop": [start, end]`
-   (frames) is what the Loop mode repeats. The first entry that matches a note plays it.
-3. `node tools/embed-samples.mjs` writes `assembly/samples.ts`; then `est validate` as always. The folder's test
-   (and `--check`) fails while the generated file is out of date.
+1. Put 16-bit PCM mono WAVs in `assets/`.
+2. Map them in `samples.json`: `{ "file": "assets/kick.wav", "root": 36, "keys": [36, 36], "velocity": [0, 1] }`. Two entries on the same keys with different `velocity` ranges are velocity layers; `"loop": [start, end]` (frames) is what the Loop mode repeats. The first entry that matches a note plays it.
+3. `node tools/embed-samples.mjs` writes `assembly/samples.ts`; then validate as always (`--check` says whether it is up to date).
 
-Keep the samples small: they count against `limits.memoryPagesMax` (64 KiB a page; raise it, and
-asconfig.json's `maximumMemory`, for more than about 600 KB of samples; the tool refuses more than a million frames).
-A note with no matching sample ends at once (its NOTE_END is sent). Pitch is
-`2^((key + Tune - root) / 12)` × the WAV's rate ÷ the host's, with linear interpolation.
+Keep the samples small: they count against `limits.memoryPagesMax` (raise it, and `asconfig.json`'s `maximumMemory`, past about 600 KB of samples). A note with no matching sample ends at once.
 
 ## The files
 
 | File | What |
 |---|---|
-| `samples.json` | Which WAV plays which notes: each entry's file, root key, key range, velocity range and loop points. |
-| `assets/*.wav` | The samples: 16-bit PCM mono WAVs, at any rate (the plugin resamples to the host's). |
-| `tools/embed-samples.mjs` | Writes the samples into the source (`assembly/samples.ts`): run it after changing `samples.json` or a WAV (`--check` says whether it is up to date). |
-| `assembly/samples.ts` | Generated: the sample table (`INFO`) and every frame (`DATA`). Do not edit it. |
-| `est.json` | The manifest: id, name, version, kind (`instrument`), one note input, the limits and the parameter list. `$schema` gives your editor completions. |
+| `est.json` | The manifest: id, name, version, kind, ports, limits and the parameter list. |
 | `assembly/index.ts` | The plugin: the export block, `describe()`, `parameters()`, a voice class and one class extending `Instrument`. |
-| `asconfig.json` | The compiler's options (leave them) and an `"est"` block telling `est` how to build it and where the module lands. |
+| `samples.json` | Which WAV plays which notes: file, root key, key range, velocity range, loop points. |
+| `assets/*.wav` | The samples: 16-bit PCM mono, at any rate. |
+| `tools/embed-samples.mjs` | Writes the samples into the source (`assembly/samples.ts`): run it after changing `samples.json` or a WAV. |
+| `assembly/samples.ts` | Generated: do not edit it. |
+| `asconfig.json` | The compiler's options and how `est` builds it. Change only `maximumMemory`, with `est.json`'s limit. |
 | `test/golden.json`, `test/golden.f32` | The golden render: notes and events, and what the plugin must output. |
-| `est/` | The SDK's library (copied in by `est new`): read it for the exact signatures, do not edit it. |
-| `est-manifest-1.schema.json` | The manifest's schema (copied in by `est new`). |
-| `llms.txt` | Where everything is, for a coding agent. |
-| `est-validator-rules.json` | Every validator rule: id, title, explanation, fix (copied in by `est new`). |
-| `est-abi-1.0.json` | The ABI: every CLAP struct's layout on wasm32 (only for code written without the SDK's runtime). |
-| `est-ui.d.ts` | The UI library's types, for a custom UI in TypeScript. |
-
-The SDK library is imported as `"est"`: `est/` in this folder, the copy `est new` made (asconfig.json's `"path"` and `"runtime"` point at it; in the SDK's own template they lead to the library in the SDK).
-
-## The commands
-
-```sh
-est doctor      # Node and asc: what is missing and the command to fix it
-est pack        # asc (the release target), then dist/<id>-<version>.est
-est validate    # every check Cyber's install runs; a readable report, and validation.json next to the bundle
-est test        # the golden render in test/ and the conformance run
-est inspect dist/<id>-<version>.est
-est dev         # the dev host: play the plugin from a keyboard while you build it
-```
-
-`est` is the kit's command, run from a clone of Cyber's repository (it is not on npm yet): `node <cyber>/sdk/packages/cli/bin/est.mjs <command>`, or `npm run est -- <command>` at the clone's root. Give it a short name once, at the clone's root (`npm ci` first): `alias est="node $PWD/sdk/packages/cli/bin/est.mjs"`. `est help <command>` shows a command's options.
+| `est/` | The kit's library, copied in: read it for exact signatures, do not edit it. |
+| `package.json` | The kit, pinned, and `npm run validate`, `test`, `dev` and `pack`. |
+| `est-validator-rules.json`, `est-manifest-1.schema.json`, `est-abi-1.*.json`, `est-ui.d.ts` | The rules, the schema, the ABI and the window library's types. |
 
 ## The loop
 
-1. Change `assembly/index.ts` (and `est.json` when the parameters or the identity change).
-2. `est validate`: it builds, packs (`dist/<id>-<version>.est`) and runs every check Cyber's install
-   runs. Read `dist/validation.json`: every failed check has a `rule`, a `message`, a `fix` and a
-   `where` (`--json` prints the same report).
-3. Fix what it names and go back to 2. When it is green, `est test` (the golden render; after
-   changing the sound on purpose, `est test --update`).
-4. Listen: `est dev` (a page on http://localhost:4430), or without a screen
-   `est dev --json --seconds 3 < /dev/null`: JSON lines of meters and events. Pipe commands in, one
-   JSON object a line (`{"cmd":"param","id":0,"value":-6}`, `{"cmd":"wait","ms":500}`,
-   `{"cmd":"state"}`, `{"cmd":"note","key":60,"ms":300}` …): they run in order, each after the one
-   before has finished, and without `--seconds` the run ends a second after the last. A port in
-   use stops it: add `--port 0 --files-port 0`. (`sdk/docs/dev-host.md` in the kit has it all.)
-5. Install: in Cyber (an admin account), **Settings → Plugins**, turn on **Developer mode**, then
-   **Load a bundle file…** and pick `dist/<id>-<version>.est`. Cyber runs the same checks; a refusal
-   names the same rule id.
+Run `est` as `npx est <command>` in this folder: `package.json` pins the kit (if `node_modules` is missing, `npm install` first). Never a bare `npx est` in a folder without the kit: npm would fetch another package of that name.
 
-The rule ids are stable. Their prefix says where to look:
+1. Read **What to build**. Change the source and, when the parameters or the identity change, `est.json`.
+2. `npx est validate` builds, packs `dist/<id>-<version>.est` and runs every check Cyber runs when a plugin is added. Read `dist/validation.json`: each failed check has `rule`, `message`, `fix` and `where`. Fix and repeat until `"ok": true`.
+3. `npx est test`: the golden render in `test/` and the conformance run. After changing the sound on purpose: `npx est test --update`.
+4. Hear it (below), then tell the person what you built and the choices you made for them.
 
-| Prefix | What it checks |
-|---|---|
-| `EST-M` | the manifest (`est.json`) |
-| `EST-B` | the bundle and its archive |
-| `EST-W` | the WebAssembly module: imports, exports, memory, features, no start function |
-| `EST-C` | conformance: lifecycle, ports, parameters, state round trip, notes, tail, determinism, level |
-| `EST-U` | the custom UI, when there is one |
-| `EST-P` | performance (a warning only) |
+**Follow the `Next:` line** that ends every `est validate`, `est test`, `est doctor` and `est dev` build: the first error or failed check with its fix, or the next step.
 
-The full list, with each rule's explanation and fix, is `est-validator-rules.json` in this folder
-(as a page: `sdk/docs/validator-rules.md` in the kit).
+Also: `npx est doctor` (what is wrong with this folder or machine, and the fix), `npx est pack` (build and pack only), `npx est profile --json` (which function costs most).
 
-## How the instrument is written
+Rule ids are stable; the prefix says where to look: `EST-M` the manifest, `EST-B` the bundle, `EST-W` the WebAssembly module, `EST-C` conformance and behaviour, `EST-U` the window, `EST-P` speed (a warning). `est-validator-rules.json` lists every rule: `id`, `title`, `explain`, `fix`, `severity`.
 
-- **The export block** at the top of `assembly/index.ts` stays as it is: `clap_entry`, `free`,
-  and a `malloc` that calls `setup(describe(), parameters(), make)` first. `describe()`'s first
-  feature is `"instrument"`.
-- **Parameters are declared once**, in `parameters()` (`new Param(ID, "Name").range(…).default(…)`,
-  `.unit("ms")`, `.hertz()`, `.labels([…])`, `.module("Envelope")`), and listed in `est.json`. Ids
-  never change. The glue calls `paramChanged(id, value)` with each new value, at its own sample;
-  every default arrives first, before `activate`.
-- **Notes arrive at their sample**: `noteOn(io, note)`, `noteOff`, `choke`, `noteExpression`,
-  `midi`; `note.time` is the frame in the block, `note.key`, `note.velocity` (0…1) and
-  `note.noteId` say which.
-- **`Voices<T>` does the bookkeeping**: `new Voices<MyVoice>(n)` in a field initialiser makes the
-  voices (a voice class extends `Voice`, has a constructor without arguments, and overrides
-  `release()` and `stop()`); `this.voices.start(io, note)` gives a free voice or steals the oldest
-  (ending its note); `this.voices.release(note)`, `this.voices.choke(io, note)`; in `render`, call
-  `this.voices.end(i, io, n)` the moment a voice falls silent.
-- `render(io, from, to)` **adds** the voices into frames `from`…`to` (`io.add(c, n, v)`).
-- `tail()` is the longest a released note sounds (an `Envelope`'s `tailFrames()`); it must be
-  true, and `est.json`'s `limits.tailSeconds` must cover its largest value.
-- **Identity**: the `Descriptor`'s id (its first argument) must be `est.json`'s `id` exactly
-  (else the plugin does not start: `EST-C001`); its first feature (`"audio-effect"` or
-  `"instrument"`) decides the kind, which must match `est.json`'s `kind` and ports (`EST-C003`,
-  `EST-C004`); the parameter ids must be `est.json`'s (`EST-C008`). The name, vendor, version,
-  description and other features are not compared (Cyber shows `est.json`'s): keep them the same
-  anyway.
-- **The state magic** (the `Descriptor`'s four characters, `"TMPI"`) starts every saved state; a
-  state with another magic is refused on load. Any four characters will do; choose yours before
-  you ship and **never change it afterwards**, or every saved state and preset of the earlier
-  versions stops loading. Raise the `Descriptor`'s `stateVersion` instead when your own bytes
-  change.
+## The rules
 
-### The rules the validator holds you to
+- **Allocate nothing while playing**: not in `render`, `process`, the parameter hook or a note handler.
+  - `new`, array literals, strings and closures only in field initialisers, the constructor or `activate`. No top-level code but constants (it would become a start function, which traps: `EST-W`).
+- **Be deterministic, import nothing**: the same input and events give the same output, bit for bit. No clock, no file, no host function. For noise, step your own seed, a 32-bit xorshift (`x ^= x << 13; x ^= x >> 17; x ^= x << 5`), set from a constant in `reset`.
+- **Size every buffer and time from the sample rate `activate` gives.** The validator runs at 48 kHz; Cyber runs at the device's rate.
+- **The ids agree**: the descriptor's id is `est.json`'s `id` (`EST-C001`); the kind and ports match (`EST-C003`, `EST-C004`); each parameter has one numeric id in the code, in `est.json`'s `parameters`, in `test/golden.json`'s events and in the window (`EST-C008`), and it never changes.
+- **The state magic** (four characters, where the plugin is described) never changes once anyone has a version.
+- **Stay in range**: no output above +18 dBFS, no NaN, memory within `limits.memoryPagesMax` (64 KiB pages).
+- **Flush tiny numbers** (`EST-C027`): set a state that feeds itself (a feedback path, a filter's memory, an envelope falling to 0) to 0 once it is below `1e-20`. The kit's `Filter` already does.
+- **Every note you start ends**: tell the host when a voice stops sounding (`Voices` does, when you call `end`). A choke stops at once. After the tail the output is silent.
+- **Every version is new**: bump `version` in `est.json` for each build you hand to anyone.
 
-- **Every note you start ends**: a NOTE_END for each when its voice stops sounding. `Voices` sends
-  it if you call `end` when a voice falls silent.
-- **A choke stops at once**, a held note sounds, and after the tail the output is silent.
-- **No top-level code but constants** (AssemblyScript would put it in a start function, which an
-  EST host's meter traps: `EST-W`).
-- **Allocate nothing in `render`, `process`, `paramChanged` or the note handlers**: no `new`, no
-  array literals, no string building, no closures. Allocate only in the plugin's constructor and
-  field initialisers, or in `activate` (a `DelayLine`'s buffer). The runtime is a bump allocator
-  that never frees.
-- **Be deterministic**; **import nothing**; stay within `limits.memoryPagesMax`; no output above
-  +18 dBFS; no NaN.
+## How it is written (AssemblyScript)
 
-## The DSP library
+- **The export block** at the top of `assembly/index.ts` and the `abort` function at the bottom stay as they are. `describe()` is the identity and the state magic; its first feature (`"audio-effect"` or `"instrument"`) decides the kind.
+- **Parameters** are declared once, in `parameters()`, and listed in `est.json`. Values are plain units (dB, Hz, ms), never 0 to 1.
+- `paramChanged(id, value)` gets each new value at its own sample. Every default arrives there first, before `activate`, so `activate` sets each block's sample rate and then resets it, as the template does.
+- **Notes arrive at their sample**: `noteOn(io, note)`, `noteOff`, `choke`. `Voices<T>` keeps the books: `start(io, note)` gives a free voice or steals the oldest; in `render`, call `end(i, io, n)` the moment a voice falls silent.
+- `render(io, from, to)` **adds** the voices into frames `from` to `to` with `io.add(c, n, v)`: the outputs start each block at zero.
+- `tail()` is the longest a released note sounds (an `Envelope`'s `tailFrames()`), and `limits.tailSeconds` in `est.json` must cover it.
+- `saveState(w)` and `loadState(r, version)` add your own bytes after the parameters, which are saved for you.
 
-`Smoother`, `Oscillator`, `Filter`, `Envelope`, `Lfo`, `Voices`, `DelayLine`, `Biquad`, `keyToHz`,
-`dbToGain`, `gainToDb`: the Rust crate's blocks with camelCase names, rendering the same samples.
-Where AssemblyScript forces a difference, the library's `index.ts` lists it.
+## The library on one page (AssemblyScript)
 
-## A custom UI
+Import everything from `"est"`. Numbers are `f64` unless a type is shown. If a function is not listed here, it does not exist: write the few lines yourself.
 
-Made with `est new … --ui`, this folder has one in `ui/` (`ui/index.html`, `ui/ui.js` and
-`ui/style.css`: an `<est-knob>` per parameter, bound to the template's parameters, and `est.json`'s
-`"ui"` entry): change the page to match your parameters. Made without `--ui`, it has none and Cyber
-generates knobs from the parameters; add a UI by hand with these files:
+The library's source is in `est/`: read it for anything more, do not edit it.
 
-- `ui/index.html` loads `<script src="est-ui.js"></script>` and then your script, both files.
-  `est pack` copies `est-ui.js` (the UI library) into the bundle: do not add it yourself. It gives
-  `EstUI.connect()`, `EstUI.bind(el, id)` and the `<est-knob param="ID">` and `<est-slider>`
-  elements; `est-ui.d.ts` in this folder has its types.
-- `est.json`: `"ui": { "path": "ui/index.html", "size": { "w": 440, "h": 180 } }`. Cyber draws the
-  frame at exactly that size (CSS pixels) and never scales it.
-- What loads: scripts, CSS and `.png`, `.webp`, `.svg` images and `.woff2` fonts that are files of
-  the bundle (inline `<style>` and `style=""` too; no inline script, no `.jpg` or `.gif`, nothing
-  from another host, no `fetch`). `EST-U` rules check it.
-- `est dev --json` reports the page as `ui` lines: its load, `est:ready`, each message the host
-  refused and why, console errors, uncaught errors and files that did not load.
-  `{"cmd":"ui-param","id":0,"value":0.5}` on its stdin makes the page itself write a parameter
-  (through its `@est/ui` connection); the `param` line with `"origin":"frame"` after it proves the
-  UI reaches the host.
+- **Base class**: extend `Effect` or `Instrument`. You must write `render(io: Io, from: i32, to: i32): void`. Optional hooks: `activate(sampleRate: f64, maxFrames: u32): bool`, `reset(): void`, `paramChanged(id: u32, value: f64): void`, `tail(): u32` and `latency(): u32` (frames), `event(io: Io, e: Event): void`, `saveState(w: StateWriter): void`, `loadState(r: StateReader, version: u32): bool`.
+- **`Io`**: `io.channels: i32`, `io.frames: i32`, `io.input(c: i32, n: i32): f32`, `io.output(c, n, v: f32)`, `io.add(c, n, v: f32)`, `io.param(id: u32): f64`, `io.transport`.
+- **Note hooks**: `noteOn(io: Io, note: Note): void`, `noteOff` and `choke` (the same arguments). Out: `io.noteEnd(id: i32, port: i16, channel: i16, key: i16, n: i32)`, `io.sendNoteOn(id: i32, channel: i16, key: i16, velocity: f64, n: i32)`, `io.sendNoteOff` (the same arguments).
+- **`Note`** fields: `time: i32` (its frame in the block), `noteId: i32` (-1: none), `port: i16`, `channel: i16`, `key: i16`, `velocity: f64` (0 to 1). There is no `id` field. Cast before maths: `keyToHz(<f64>note.key)`.
+- **`Transport`** fields: `tempo: f64`, `playing: bool`, `beat: f64`, `barStart: f64`, `num: u16`, `den: u16`.
+- **`Event`** fields: `kind` (`EventKind.Param`, `NoteOn`, `NoteOff`, `Choke`, `Transport` …), `time: i32`, `id: u32`, `value: f64`, `note`, `transport`.
+- **`Param`**: `new Param(id: u32, "Name")`, then `.range(min, max)`, `.default(v)`, `.unit("dB")`, `.decimals(n)`, `.hertz()`, `.log()`, `.labels(["A", "B"])` (a switch: values 0, 1 …), `.module("Group")`, `.bypass()`, `.hidden()`, `.readOnly()`.
+- **`Descriptor`**: `new Descriptor(id, name, vendor, version, description, features: string[], stateMagic, stateVersion: u32)`; `.noteEffect()` for notes out.
+- **Maths**: `dbToGain(db)`, `gainToDb(gain)`, `keyToHz(key)`, `clamp(x, lo, hi)`, `exp(x)`, `ln(x)`, `exp2(x)`, `log2(x)`, `floor(x)`, `round(x)`, `sinTurns(t)` and `cosTurns(t)` (`t` in turns: 1 is a whole cycle), `tanHalfTurns(t)`, `onePole(seconds, sampleRate)` (a smoothing coefficient). The language's own `Math.sqrt`, `Math.abs`, `Math.sin`, `Math.tanh`, `Math.pow` and `Math.exp` also work; never `Math.random`.
+- **`Smoother`**: `new Smoother(seconds)`; `setSampleRate(sr)`, `setTime(seconds)`, `setTarget(v)`, `jump(v)`, `reset()` (jump to the target), `next(): f64` once a sample, `settled(): bool`.
+- **`Filter`** (state-variable, one per channel): `setSampleRate(sr)`, `setMode(FilterMode.Low)` (or `Band`, `High`, `Notch`; `filterModeFromIndex(v)`), `setCutoff(hz)`, `setResonance(r)` (0 to 1), `setSmoothing(seconds)`, `reset()`, `process(x: f64): f64`.
+- **`Biquad`**: `set(BiquadKind.Peak, freq, q, gainDb, sampleRate)` (or `LowShelf`, `HighShelf`, `LowPass`, `HighPass`), `reset()`, `process(x: f64): f64`.
+- **`DelayLine`** (`f64` in and out): `allocate(maxFrames: i32): bool` in `activate`, `clear()`; each sample, `read(delayFrames: f64): f64` **before** `write(x: f64)`. The shortest delay is 1 frame; a fraction is interpolated.
+- **`Oscillator`**: `setSampleRate(sr)`, `setFrequency(hz)`, `setWave(Wave.Sine)` (or `Saw`, `Square`, `Triangle`; `waveFromIndex(v)`), `reset(phase)`, `next(): f64` (-1 to 1).
+- **`Lfo`**: `setSampleRate(sr)`, `setRate(hz)`, `setSync(beats)` (0: free), `setTempo(bpm)`, `setWave(Wave.Sine)`, `reset(phase)`, `next(): f64` (-1 to 1).
+- **`Envelope`** (ADSR): `setSampleRate(sr)`, `setAdsr(attack, decay, sustain, release)` (seconds; sustain 0 to 1) or `setAttack`, `setDecay`, `setSustain`, `setRelease`; `start()`, `release()`, `reset()`, `next(): f64`, `isActive(): bool`, `tailFrames(): u32`.
+- **`Voices<T>`**: `new Voices<MyVoice>(n)` in a field initialiser; `start(io, note): i32` (the voice's index), `release(note)`, `choke(io, note)`, `voice(i): T`, `note(i): Note`, `isOn(i): bool`, `end(i, io, n)`, `reset()`. A voice class extends `Voice`, has a constructor with no arguments, and overrides `release(): void` and `stop(): void`.
+- **State**: `w.u32(v)`, `w.f32(v)`, `w.f64(v)`; `r.u32()`, `r.f32()`, `r.f64()`.
 
-The guide, with a complete example and the plugin origin's exact policy, is `sdk/docs/ui.md` in the
-kit.
+## What costs time
 
-## The golden render
+`npx est validate` reports a block's mean cost and warns past 100 µs (`EST-P001`, a warning only). The warning is the best of three runs, so the cost is real (`npx est profile --json` names the function). The usual causes:
 
-`test/golden.json` says what to play (notes and `events`, the length) and `test/golden.f32` is what came out.
-`est test` plays it again and compares, then runs the conformance checks; it exits 1 if anything
-fails. **The events name parameters by their id** (`{ "type": "param", "id": 1, "value": 800 }`,
-plain units), so when you add, remove, renumber or re-range a parameter, change the events to
-match. After changing the sound on purpose, render it again (`est test --update`), listen, and
-commit both files.
+- **A sine a sample.** `sinTurns`, `cosTurns`, a sine `Oscillator` and a sine `Lfo` each sum a series with a division per term. One LFO is fine; one per voice adds up. Cheaper: a triangle or saw `Lfo`, your own phase with a parabola, or one value every 16 frames, smoothed.
+- **A gliding `Filter`** works out its coefficients again every sample while its cutoff or resonance moves. If you move the cutoff all the time (an envelope, an LFO), call `setSmoothing(0)` once and `setCutoff` every 16 frames.
+- **`DelayLine`'s `read` with a fraction** interpolates: a chorus needs it, a plain echo can round its delay to whole frames.
+- **`exp`, `ln`, `dbToGain`, `keyToHz` a sample.** Work them out in `paramChanged` or at the note's start, and smooth the result.
+
+## Easy to get wrong
+
+- **A frequency or time knob** wants a log scale: `.log()` on the parameter and `"scale": "log"` on its row in `est.json`'s `parameters`.
+- **A switch or chooser** (`.labels`) shows its labels on Cyber's knobs: at most 64 steps, 32 characters a label.
+- **Smooth every level and cutoff change** (`Smoother`), or a moving knob clicks.
+- **`test/golden.json`'s events name parameters by id** (`{ "type": "param", "time": 0.1, "id": 1, "value": 800 }`: plain units, seconds). Change them when a parameter changes, then `npx est test --update`.
+- **A note in `test/golden.json`**: `{ "type": "noteOn", "time": 0.1, "key": 60, "channel": 0, "port": 0, "noteId": 1, "velocity": 0.8 }`, then a `noteOff` with the same `noteId`.
+- **`test/golden.f32`** is every left frame, then every right frame (little-endian float32), not interleaved.
+- **validate's `peak`** is the stress run's worst case, not the level at the defaults.
+
+## Hear it
+
+- With a screen: `npx est dev` opens a page that plays the plugin (add `--port 0 --files-port 0` if a port is taken).
+- Without one: `npx est dev --json` needs a browser download (Playwright's Chromium; `npx est doctor` says how). Without it, **still check**: `npx est demo` writes `dist/demo.wav`, and `test/golden.f32` is the plugin's real output. Read one and check the level and the shape (silent? clipping? does a knob change it?). Tell the person what you checked, and that nobody has listened yet.
+
+## The window
+
+Cyber draws knobs from the parameters, and that is enough to start. A window of your own is a web page in the bundle (`ui/index.html`, named by `"ui"` in `est.json`), never a native one: scripts as files, nothing from another host, no `fetch`. The `EST-U` rules in `est-validator-rules.json` say what a page may hold, and `est-ui.d.ts` has the page library's types.
+
+## Put it in Cyber
+
+In Cyber, on Home: **EST PLUGINS → Add a plugin**, and drop `dist/<id>-<version>.est` there. Cyber runs the same checks; a refusal names the same rule id. It stays on the person's own account.
+
+Publishing on the EST Store is a later step and the person's choice: a published id starts with their own `dev.<10 hex>` name, which Cyber shows them, in `est.json` and in the source alike.

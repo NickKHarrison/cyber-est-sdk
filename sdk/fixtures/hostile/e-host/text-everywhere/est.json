@@ -1,0 +1,58 @@
+{
+  "est": 1,
+  "id": "dev.a1b2c3d4e5.text-everywhere",
+  "version": "1.0.0",
+  "name": "<img src=x onerror=\"window.__estPwned=1\"></title><script>win",
+  "vendor": "\"><a href=\"javascript:window.__estPwned=1\">Cyber</a><svg/onl",
+  "description": "</p><script>window.__estPwned=1</script><a href=\"javascript:window.__estPwned=1\">x</a>{{supportEmail}} ${7*7} [x](javascript:window.__estPwned=1) <iframe srcdoc=\"<script>parent.__estPwned=1</script>\"><svg/onload=window.__estPwned=1><svg/onload=window.__estPwned=1><svg/onload=window.__estPwned=1><svg/onload=window.__estPwned=1><svg/onload=window.__estPwned=1><svg/onload=window.__estPwned=1><svg/onl",
+  "license": "MIT\"><img src=x onerror=window.__estPwned=1><svg/onload=window._",
+  "kind": "effect",
+  "features": [
+    "audio-effect",
+    "<b onmouseover=window.__estPwned=1><svg/onload=window.__estPwned",
+    "__proto__",
+    "constructor"
+  ],
+  "abi": {
+    "est": "1.0",
+    "clap": "1.2"
+  },
+  "module": {
+    "path": "module.wasm"
+  },
+  "audio": {
+    "inputs": [
+      {
+        "channels": 2
+      }
+    ],
+    "outputs": [
+      {
+        "channels": 2
+      }
+    ]
+  },
+  "notes": {
+    "inputs": 0,
+    "outputs": 0
+  },
+  "limits": {
+    "maxLatencyFrames": 0,
+    "memoryPagesMax": 64,
+    "tailSeconds": 0
+  },
+  "permissions": [],
+  "parameters": [
+    {
+      "id": 0,
+      "name": "<img src=x onerror=\"window.__estPwned=1\"> javascript:window.__estPwned=1 <svg/onload=window.__estPwned=1><svg/onload=window.__estPwned=1><svg/onload=window.__estPwned=1><svg/onload=window.__estPwned=1><svg/onload=window.__estPwned=1><svg/onload=window.__e",
+      "unit": "\"><i onx=1><svg/"
+    },
+    {
+      "id": 1,
+      "name": "__proto__",
+      "unit": ""
+    }
+  ],
+  "presets": "presets/presets.json"
+}

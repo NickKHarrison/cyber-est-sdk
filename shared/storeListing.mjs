@@ -164,7 +164,7 @@ const count = (v) => Math.max(0, Math.floor(Number(v) || 0));
  *   counts?: { installs?: number, plays?: number, wishlists?: number }, price?: { display: string } | null, licence?: string, hasOwnUi?: boolean,
  *   art?: { url: string, width: number, height: number } | null,
  *   demo?: { url: string, seconds: number } | null, links?: Record<string, string> | null, reviewApproved?: boolean,
- *   sale?: { display: string, endsAt: string } | null, checked?: boolean }} p
+ *   sale?: { display: string, endsAt: string } | null, checked?: boolean, hidden?: boolean }} p
  * @returns {StoreListing}
  */
 export function buildStoreListing(p) {
@@ -203,6 +203,8 @@ export function buildStoreListing(p) {
     checked: p.checked === true,
     // 1.519: a running sale shows only on a paid listing (its normal price stays in `price`).
     sale: licence === 'paid' ? saleOf(p.sale) : null,
+    // 1.825: only on an admin's list, a plugin hidden from the store (shared/storeHidden.mjs); absent otherwise, so every other answer is unchanged.
+    ...(p.hidden === true ? { hidden: /** @type {true} */ (true) } : {}),
   };
 }
 
@@ -225,6 +227,7 @@ function saleOf(v) {
  *   reviewApproved: boolean,
  *   sale: { display: string, endsAt: string } | null,
  *   checked: boolean,
+ *   hidden?: true,
  * }} StoreListing
  */
 

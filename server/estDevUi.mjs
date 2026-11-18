@@ -27,7 +27,10 @@
 // plugin origin refuses POST (405), as before Phase 5a. The page's CSP gains nothing (its
 // `connect-src` and `frame-src` already name the plugin origin, Phase 2).
 import { createHash, createPrivateKey, createPublicKey, randomBytes, sign as edSign, verify as edVerify } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { json, readBody, readBytes, sameOrigin } from './http.mjs';
+import { WRAP_REL_RE } from './estFrameWrap.mjs';
 
 /** A ticket lives this long (one upload, right after it is asked for). */
 export const DEV_UI_TICKET_MS = 2 * 60 * 1000;
@@ -59,6 +62,56 @@ export const STUDIO_UI_MAX_TOTAL_BYTES = DEV_UI_MAX_TOTAL_BYTES;
 export const STUDIO_UI_MAX_ACCOUNT_BYTES = STUDIO_UI_MAX_TOTAL_BYTES / 4;
 /** A bundle's UI is forgotten this long after it was last uploaded or served. */
 export const DEV_UI_KEEP_MS = 12 * 60 * 60 * 1000;
+/**
+ * 1.795 (D-64, stream 5): the plugin origin's UI stores on disk (`EST_UI_CACHE_DIR`, the machine's
+ * temporary space): every store together holds at most this (`EST_UI_CACHE_MAX_BYTES`), the least
+ * recently used bundle of any store going first. 2 GB: 128 accounts at their full 16 MB share, or
+ * 256 of the largest UIs (8 MB), where the memory stores held 64 MB each. Still a cache: a restart
+ * empties it and the client's HEAD-then-upload refills it, so no volume is needed.
+ */
+export const UI_CACHE_DEFAULT_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+/** 1.795: on disk a bundle's UI is kept this long after its last use (the cap, not the clock, is what bounds it). */
+export const UI_CACHE_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * 1.795: the total cap from the environment (`EST_UI_CACHE_MAX_BYTES`, bytes; unset, empty or not a
+ * positive whole number: the default).
+ * @param {string | undefined} raw
+ */
+export function uiCacheMaxBytesOf(raw) {
+  const n = Number(String(raw ?? '').trim());
+  return Number.isSafeInteger(n) && n > 0 ? n : UI_CACHE_DEFAULT_MAX_BYTES;
+}
+
+/**
+ * 1.795: one budget the disk stores share (LRU across them). Each store adds a bundle under its own
+ * key with the function that forgets it; `fit(bytes)` forgets the least recently used until `bytes`
+ * more would fit.
+ * @param {number} maxBytes
+ */
+export function createUiCacheBudget(maxBytes = UI_CACHE_DEFAULT_MAX_BYTES) {
+  /** @type {Map<string, { bytes: number, forget: () => void }>} oldest use first */
+  const entries = new Map();
+  let total = 0;
+  const remove = (key) => { const e = entries.get(key); if (e) { total -= e.bytes; entries.delete(key); } };
+  return {
+    maxBytes,
+    /** @param {number} bytes */
+    fit(bytes) {
+      while (total + bytes > maxBytes && entries.size) {
+        const [key, e] = /** @type {[string, { bytes: number, forget: () => void }]} */ (entries.entries().next().value);
+        remove(key);
+        e.forget();
+      }
+    },
+    /** @param {string} key @param {number} bytes @param {() => void} forget */
+    add(key, bytes, forget) { remove(key); entries.set(key, { bytes, forget }); total += bytes; },
+    /** @param {string} key */
+    touch(key) { const e = entries.get(key); if (e) { entries.delete(key); entries.set(key, e); } },
+    remove,
+    total: () => total,
+  };
+}
 /** The most entries a bundle may have (as the client's reader: BUNDLE_MAX_ENTRIES). */
 const MAX_ENTRIES = 512;
 const HASH_RE = /^[0-9a-f]{64}$/;
@@ -91,6 +144,8 @@ export function devUiKeysOf(env) {
 }
 
 const ACCOUNT_TAG_RE = /^[0-9a-f]{16}$/;
+/** The ticket kinds besides `dev` (a ticket without `k`): 1.320 `studio`, 1.513 `community`, 1.795 `shared`. */
+const TICKET_KINDS = new Set(['studio', 'community', 'shared']);
 /**
  * 1.454: the account a ticket is for, as the plugin origin sees it: 16 hex of SHA-256 over the
  * account's id, so the ticket (which the browser carries in the clear) never names the account.
@@ -101,12 +156,12 @@ export const accountTagOf = (sub) => createHash('sha256').update(`cyber-est-dev-
 /**
  * A ticket for one upload of bundle `hash`. 1.454: `account` (an `accountTagOf` tag), signed in it as
  * `a`, so the plugin origin holds the account to its share.
- * @param {any} key  an Ed25519 private key @param {string} hash @param {number} [now] @param {'dev' | 'studio' | 'community'} [kind] @param {string | null} [account]
+ * @param {any} key  an Ed25519 private key @param {string} hash @param {number} [now] @param {'dev' | 'studio' | 'community' | 'shared'} [kind] @param {string | null} [account]
  */
 export function signTicket(key, hash, now = Date.now(), kind = 'dev', account = null) {
   // 1.320 (DEV-B): a Plugin Studio ticket says so (`k: 'studio'`), and is good only on /est/studio/.
   const a = typeof account === 'string' && ACCOUNT_TAG_RE.test(account) ? { a: account } : {};
-  const payload = b64url(JSON.stringify({ h: hash, exp: now + DEV_UI_TICKET_MS, n: randomBytes(16).toString('hex'), ...(kind === 'studio' || kind === 'community' ? { k: kind } : {}), ...a }));
+  const payload = b64url(JSON.stringify({ h: hash, exp: now + DEV_UI_TICKET_MS, n: randomBytes(16).toString('hex'), ...(TICKET_KINDS.has(kind) ? { k: kind } : {}), ...a }));
   return `v1.${payload}.${b64url(edSign(null, Buffer.from(`v1.${payload}`), key))}`;
 }
 
@@ -127,7 +182,8 @@ export function checkTicket(key, token, hash, now = Date.now(), kind = 'dev') {
   if (p.h !== hash) return { ok: false, why: 'a ticket for another bundle' };
   // 1.320 (DEV-B): a developer ticket never opens the Studio's store, nor a Studio ticket the developer's.
   // 1.513 (stream 9): nor either the community store (`k: 'community'`, server/estUiAllow.mjs), nor a community ticket theirs.
-  if ((p.k === 'studio' || p.k === 'community' ? p.k : 'dev') !== kind) return { ok: false, why: 'a ticket for another kind of upload' };
+  // 1.795 (D-64): nor a shared plugin's (`k: 'shared'`, /est/shared/), nor any other kind's.
+  if ((TICKET_KINDS.has(p.k) ? p.k : 'dev') !== kind) return { ok: false, why: 'a ticket for another kind of upload' };
   if (p.exp <= now) return { ok: false, why: 'an expired ticket' };
   if (p.exp > now + DEV_UI_TICKET_MS + 60_000) return { ok: false, why: 'not a ticket' };
   return { ok: true, nonce: p.n, exp: p.exp, account: typeof p.a === 'string' && ACCOUNT_TAG_RE.test(p.a) ? p.a : null };
@@ -182,28 +238,53 @@ export function readStoredEntries(buf) {
 }
 
 /**
- * The plugin origin's store of developer UIs (in memory).
+ * The plugin origin's store of developer UIs (in memory, or since 1.795 on disk).
  * 1.320 (DEV-B): `kind` `'studio'` is the Plugin Studio's store (/est/studio/), taking Studio tickets only.
  * 1.454: `maxAccountBytes`, one account's share (by the ticket's `a`; a ticket without one, such as
  * one signed before 1.454 (1.457 for the Studio's) during a deploy, is held to the total only, as before).
  * 1.457: the Studio's store defaults to `STUDIO_UI_MAX_TOTAL_BYTES` and `STUDIO_UI_MAX_ACCOUNT_BYTES`.
  * 1.513 (stream 9): `kind` `'community'` is an allowed community version's UI (/est/community/), community tickets only, sized as the developers'.
- * @param {{ verifyKey: import('node:crypto').KeyObject, kind?: 'dev' | 'studio' | 'community', now?: () => number, maxUiBytes?: number, maxTotalBytes?: number, maxAccountBytes?: number, keepMs?: number }} o
+ * 1.795 (D-64, stream 5): `kind` `'shared'` is a shared plugin's UI (/est/shared/), shared tickets only
+ * (each signed with the project owner's tag, so one project's plugins count against its owner's share),
+ * sized as the developers'. And `dir` with `budget`: the files on disk under `<dir>/<kind>/<hash>/`
+ * (emptied when the store is made: a cache, which the client refills), only the index in memory, the
+ * total held by the `budget` every disk store shares (`createUiCacheBudget`) instead of `maxTotalBytes`;
+ * the per-bundle and per-account caps unchanged.
+ * @param {{ verifyKey: import('node:crypto').KeyObject, kind?: 'dev' | 'studio' | 'community' | 'shared', now?: () => number, maxUiBytes?: number, maxTotalBytes?: number, maxAccountBytes?: number, keepMs?: number, dir?: string | null, budget?: ReturnType<typeof createUiCacheBudget> | null }} o
  */
-export function createDevUiStore({ verifyKey, kind = 'dev', now = () => Date.now(), maxUiBytes = DEV_UI_MAX_UI_BYTES, maxTotalBytes = kind === 'studio' ? STUDIO_UI_MAX_TOTAL_BYTES : DEV_UI_MAX_TOTAL_BYTES, maxAccountBytes = kind === 'studio' ? STUDIO_UI_MAX_ACCOUNT_BYTES : DEV_UI_MAX_ACCOUNT_BYTES, keepMs = DEV_UI_KEEP_MS }) {
-  /** @type {Map<string, { files: Map<string, Buffer>, bytes: number, used: number, page: string, account: string | null }>} by hash, oldest use first */
+export function createDevUiStore({ verifyKey, kind = 'dev', now = () => Date.now(), maxUiBytes = DEV_UI_MAX_UI_BYTES, maxTotalBytes = kind === 'studio' ? STUDIO_UI_MAX_TOTAL_BYTES : DEV_UI_MAX_TOTAL_BYTES, maxAccountBytes = kind === 'studio' ? STUDIO_UI_MAX_ACCOUNT_BYTES : DEV_UI_MAX_ACCOUNT_BYTES, dir = null, budget = null, keepMs = dir ? UI_CACHE_KEEP_MS : DEV_UI_KEEP_MS }) {
+  const root = dir ? path.join(path.resolve(dir), kind) : null;
+  if (root) {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.mkdirSync(root, { recursive: true });
+  }
+  const shared = root ? (budget ?? createUiCacheBudget()) : null;
+  const keyOfHash = (hash) => `${kind}:${hash}`;
+  /**
+   * By hash, oldest use first. In memory `files` holds the bytes; on disk the names and sizes, the bytes under `root`.
+   * @type {Map<string, { files: Map<string, Buffer | number>, bytes: number, used: number, page: string, account: string | null }>}
+   */
   const bundles = new Map();
   /** Tickets used, by nonce, until they expire. */
   const used = new Map();
   let total = 0;
 
-  const forget = (hash) => { const b = bundles.get(hash); if (b) { total -= b.bytes; bundles.delete(hash); } };
+  const forget = (hash) => {
+    const b = bundles.get(hash);
+    if (!b) return;
+    total -= b.bytes;
+    bundles.delete(hash);
+    if (root) {
+      shared?.remove(keyOfHash(hash));
+      try { fs.rmSync(path.join(root, hash), { recursive: true, force: true }); } catch (err) { console.warn('[est-ui-cache] could not remove a bundle:', err?.message); }
+    }
+  };
   const sweep = () => {
     const t = now();
     for (const [n, exp] of used) if (exp <= t) used.delete(n);
     for (const [h, b] of bundles) if (t - b.used > keepMs) forget(h);
   };
-  const touch = (hash, b) => { b.used = now(); bundles.delete(hash); bundles.set(hash, b); };
+  const touch = (hash, b) => { b.used = now(); bundles.delete(hash); bundles.set(hash, b); shared?.touch(keyOfHash(hash)); };
 
   /** The ticket's check, before and after the body (1.314, EST-07: the route asks before reading). */
   const ticketOf = (hash, ticket) => {
@@ -246,15 +327,21 @@ export function createDevUiStore({ verifyKey, kind = 'dev', now = () => Date.now
       let manifest;
       try { manifest = JSON.parse(entries.get('est.json')?.toString('utf8') ?? ''); } catch { return { ok: false, status: 400, why: 'no readable est.json' }; }
       const page = manifest?.ui?.path;
-      if (typeof page !== 'string' || !safePath(page) || !page.endsWith('.html') || !entries.has(page)) return { ok: false, status: 400, why: 'the bundle has no UI page' };
-      const dir = page.includes('/') ? page.slice(0, page.lastIndexOf('/') + 1) : '';
+      // Stream C (the 2026-11-18 EST sandbox attack): the UI page must be one the frame wrapper would
+      // frame (`WRAP_REL_RE`), the same rule as the curated page route's `uiPageOf`, so a developer,
+      // Studio or community bundle whose `ui.path` the wrapper refuses (a dot-leading segment, a space)
+      // is refused here too rather than kept and served as a page nothing could open (EST_PUBLIC_GATES
+      // row 10, place 10). `WRAP_REL_RE` already implies `safePath` and the `.html` ending.
+      if (typeof page !== 'string' || !WRAP_REL_RE.test(page) || !entries.has(page)) return { ok: false, status: 400, why: 'the bundle has no UI page' };
+      const folder = page.includes('/') ? page.slice(0, page.lastIndexOf('/') + 1) : '';
       const modulePath = typeof manifest?.module?.path === 'string' ? manifest.module.path : 'module.wasm';
+      /** @type {Map<string, Buffer>} */
       const files = new Map();
       let bytes = 0;
       for (const [name, data] of entries) {
-        if (!name.startsWith(dir) || name === 'est.json' || name === modulePath) continue;
+        if (!name.startsWith(folder) || name === 'est.json' || name === modulePath) continue;
         bytes += data.length;
-        files.set(name, Buffer.from(data)); // a copy: the upload's buffer is let go
+        files.set(name, data);
       }
       if (bytes > maxUiBytes) return { ok: false, status: 413, why: `the UI is ${bytes} bytes, over ${maxUiBytes}` };
       const account = t.account;
@@ -268,11 +355,34 @@ export function createDevUiStore({ verifyKey, kind = 'dev', now = () => Date.now
         }
       }
       forget(hash);
-      while (total + bytes > maxTotalBytes && bundles.size) forget(bundles.keys().next().value);
-      const b = { files, bytes, used: now(), page, account };
-      bundles.set(hash, b);
+      /** @type {Map<string, Buffer | number>} */
+      const kept = new Map();
+      if (root && shared) {
+        // 1.795: on disk. Room first (any store's least recently used), then the files, written whole
+        // before the index names them (a failed write leaves nothing named).
+        if (bytes > shared.maxBytes) return { ok: false, status: 413, why: `the UI is ${bytes} bytes, over the cache's ${shared.maxBytes}` };
+        shared.fit(bytes);
+        const at = path.join(root, hash);
+        try {
+          for (const [name, data] of files) {
+            const file = path.join(at, name);
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            fs.writeFileSync(file, data);
+            kept.set(name, data.length);
+          }
+        } catch (err) {
+          try { fs.rmSync(at, { recursive: true, force: true }); } catch { /* left for the next start, which empties the folder */ }
+          console.warn('[est-ui-cache] could not write a bundle:', err?.message);
+          return { ok: false, status: 507, why: 'the plugin origin could not keep the UI just now: try again in a moment' };
+        }
+        shared.add(keyOfHash(hash), bytes, () => forget(hash));
+      } else {
+        while (total + bytes > maxTotalBytes && bundles.size) forget(bundles.keys().next().value);
+        for (const [name, data] of files) kept.set(name, Buffer.from(data)); // a copy: the upload's buffer is let go
+      }
+      bundles.set(hash, { files: kept, bytes, used: now(), page, account });
       total += bytes;
-      return { ok: true, files: [...files.keys()] };
+      return { ok: true, files: [...kept.keys()] };
     },
     /** 1.314 (EST-04): the bundle's own UI page (the manifest's `ui.path`), or null when it is not held. */
     page(hash) {
@@ -283,8 +393,13 @@ export function createDevUiStore({ verifyKey, kind = 'dev', now = () => Date.now
     file(hash, name) {
       sweep();
       const b = bundles.get(hash);
-      const data = b?.files.get(name);
-      if (!b || !data) return null;
+      const held = b?.files.get(name);
+      if (!b || held === undefined) return null;
+      let data;
+      if (typeof held === 'number') {
+        // 1.795: from disk. Gone from under it (the temporary space cleaned): forgotten, so the client's HEAD uploads again.
+        try { data = fs.readFileSync(path.join(/** @type {string} */ (root), hash, name)); } catch { forget(hash); return null; }
+      } else data = held;
       touch(hash, b);
       return data;
     },
@@ -310,12 +425,14 @@ export function studioUiTickets(signKey, now = () => Date.now()) {
  * admin, same-origin; D-41). 404 `unavailable` without a key or a plugin origin.
  * 1.325 (DEV-E §1): a verified developer's too (`devTools`, server/estDevTools.mjs), so Follow's build
  * shows its own UI and the frame reloads in place on a rebuild.
- * 1.422 (H2): any signed-in account's while the developers surface is open to it (`devTools.ownRefusal`),
+ * 1.791 (D-64): any signed-in account that may add its own (`devTools.ownRefusal`), and with EST_OWN_PLUGINS=0
+ * still one holding the hash as its own; 1.422 (H2): any signed-in account's while the developers surface is open to it (`devTools.ownRefusal`),
  * so a plugin added from Home shows its own UI too.
- * @param {{ auth: ReturnType<typeof import('./auth.mjs').createAuth>, signKey: import('node:crypto').KeyObject | null, origin: string | null, now?: () => number, devTools?: { refusal(user: any): { status: number, error: string, code: string } | null, ownRefusal?(user: any): { status: number, error: string, code: string } | null }, holdsOwn?: ((sub: string, hash: string) => Promise<boolean> | boolean) | null }} o
+ * @param {{ auth: ReturnType<typeof import('./auth.mjs').createAuth>, signKey: import('node:crypto').KeyObject | null, origin: string | null, now?: () => number, devTools?: { refusal(user: any): { status: number, error: string, code: string } | null, ownRefusal?(user: any): { status: number, error: string, code: string } | null, ownWindowRefusal?(user: any): { status: number, error: string, code: string } | null }, holdsOwn?: ((sub: string, hash: string) => Promise<boolean> | boolean) | null, blocked?: ((hash: string) => string | null) | null }} o
  * `holdsOwn` (the security review of 1.412–1.435, S1): the library's own-bundle check, asked for an account Add a plugin lets in without developer tools.
+ * `blocked` (1.797, D-64): Block now's reason for a hash (`estCatalogue.hashBlocked`); a blocked bundle's window gets no ticket (403 `blocked`), for anyone.
  */
-export function createEstDevTickets({ auth, signKey, origin, now = () => Date.now(), devTools = adminOnly(auth), holdsOwn = null }) {
+export function createEstDevTickets({ auth, signKey, origin, now = () => Date.now(), devTools = adminOnly(auth), holdsOwn = null, blocked = null }) {
   return {
     /** @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res @param {URL} url */
     handle(req, res, url) {
@@ -325,7 +442,9 @@ export function createEstDevTickets({ auth, signKey, origin, now = () => Date.no
       if (!auth.enabled) { req.resume(); json(res, 404, { error: 'sign-in is not configured' }); return true; }
       const user = auth.userFromRequest(req);
       if (!user) { req.resume(); json(res, 401, { error: 'sign in first' }); return true; }
-      const refused = devTools.ownRefusal ? devTools.ownRefusal(user) : devTools.refusal(user);
+      // 1.791 (D-64, stream 5): an own bundle's window follows what the account holds (`ownWindowRefusal`, then
+      // `holdsOwn` below), so it opens for every account that added one, and keeps opening once adding closes.
+      const refused = devTools.ownWindowRefusal ? devTools.ownWindowRefusal(user) : devTools.ownRefusal ? devTools.ownRefusal(user) : devTools.refusal(user);
       if (refused) { req.resume(); json(res, refused.status, { error: refused.error, code: refused.code }); return true; }
       if (!sameOrigin(req)) { req.resume(); json(res, 403, { error: 'cross-origin request refused' }); return true; }
       readBody(req, 1024).then((text) => {
@@ -333,12 +452,15 @@ export function createEstDevTickets({ auth, signKey, origin, now = () => Date.no
         try { body = JSON.parse(text); } catch { /* bad JSON */ }
         const hash = body && typeof body === 'object' ? body.hash : null;
         if (typeof hash !== 'string' || !HASH_RE.test(hash)) { json(res, 400, { error: 'send { hash }' }); return; }
+        // 1.797 (D-64): Block now stops the window too: no ticket for a blocked bundle, an admin's included.
+        const why = blocked ? blocked(hash) : null;
+        if (why) { json(res, 403, { error: `This plugin has been blocked by Cyber and will not open (${why}).`, code: 'blocked' }); return; }
         // The security review of 1.412–1.435 (S1): an account let in only as Add a plugin's (no
         // developer tools: `refusal` still refuses it) gets a ticket only for a bundle it claimed or
         // holds as its own, so a ticket costs a claim within EST_ACCOUNT_LIMITS (its count, bytes and
         // hour) and the plugin origin's shared store holds only bundles their accounts installed.
         // Without it any signed-in account could mint unlimited tickets and fill that store.
-        const ownOnly = !!devTools.ownRefusal && !!devTools.refusal(user);
+        const ownOnly = !!(devTools.ownWindowRefusal || devTools.ownRefusal) && !!devTools.refusal(user);
         const go = () => {
           const t = now();
           // 1.454: the account's tag in the ticket, so the plugin origin holds it to its share.

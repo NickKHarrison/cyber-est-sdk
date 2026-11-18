@@ -1,9 +1,13 @@
 {
   "files": {
     "sdk/cpp/build.mjs": "3f81642820842cf0102c5b523780bfa00b36a74f7a281b4f08c88f8f2c23df3a",
+    "sdk/cpp/freestanding/cmath": "249a23e0be28c6d29ddb2d6db9eb5535c4bef51d060fa74eedc83ca53b5a4700",
     "sdk/cpp/freestanding/cstddef": "d71125e54fe74072507e075b793f69a87d11279c9f852057c0fcf1afa66f634b",
     "sdk/cpp/freestanding/cstdint": "0c5e5b06018d7df54e45bceaf2b5b0af3b83882197e7817d62345e22db6d08eb",
-    "sdk/cpp/include/est/runtime.hpp": "852dde68baa15e6da71bcd8341f0ff67c6fe93ff708c758156a089c52b405ad9",
+    "sdk/cpp/freestanding/cstring": "6139998a8a8a64930bece591a51b048ff464d9961538ea46580e78d4f4a42195",
+    "sdk/cpp/freestanding/math.h": "f05075411b1cf2ef71c574eaf5e3cab5fb437de22d16142b9c5071f071463977",
+    "sdk/cpp/freestanding/string.h": "2806f101609dece2e32a077248472d5ce97cc44955265f05e5621c88452486b1",
+    "sdk/cpp/include/est/runtime.hpp": "6d1a9d3b8fffbcf9eaa28b581e0dcd9eed47cd3c3d26aa799a4971d7544ce890",
     "sdk/cpp/toolchain.mjs": "37b0471875b72a4c8b92fa4f7510e0f502db8968735fb669b3c19cd787ee63ef",
     "sdk/kits/juce-shared-dsp/dsp/SharedGain.h": "683f0b53df8f0bd6694f16d04a9c61a212c55f16032c4bd30b09180bb5c1e853",
     "sdk/kits/juce-shared-dsp/est/est-build.json": "e23029d6f6a27efba85e570f017a89f8b815f354674789f6c6c3e2c3adf7f554",

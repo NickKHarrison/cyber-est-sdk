@@ -146,6 +146,19 @@ export function chargeKept(obj: object): boolean {
 }
 
 /**
+ * `chargeKept` for several objects kept together: all of them charged, or none (false) when the
+ * budget has no room for them all, so a caller that then sanitises them afresh charges each once.
+ */
+export function chargeKeptAll(objs: readonly object[]): boolean {
+  if (!budget) return true;
+  let c = 0;
+  for (const o of objs) c += cost.get(o) ?? 0;
+  if (c > budget.left) return false;
+  budget.left -= c;
+  return true;
+}
+
+/**
  * What a placeholder holds under `NEWER`: the raw object (`raw`), the fields this build owns on it
  * (`own`: copied from the placeholder onto `raw` as it is given back, e.g. its id after a duplicate),
  * or (`merge`) a part of a known object (an unknown engine's `engine` and `patch` on a track),

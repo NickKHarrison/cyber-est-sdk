@@ -18,12 +18,28 @@ import { buildEstShim } from '../../src/audio/est/runtime/shim';
 
 const FRAMES = 128;
 
+/**
+ * A signal a golden spec names (its `input`, and since 1.803 its `key`), all integer arithmetic:
+ * - `noise`: `level` × (½ seeded noise + ½ a 110 Hz square);
+ * - `bursts` (1.803): a 110 Hz square at `level`, on for the first quarter of each period and silent
+ *   for the rest, `rate` periods a second (default 2): a kick-like pattern, so what follows a key
+ *   (a ducker, a gate) is seen to move when the key starts and stops;
+ * - `none`: silence.
+ */
+export interface GoldenSignal { kind: 'noise' | 'bursts' | 'none'; seed?: number; level?: number; rate?: number }
+
 export interface GoldenSpec {
   sampleRate: number;
   /** The render's length in frames (a multiple of 128). */
   frames: number;
-  /** An effect's input ('noise': `level` × (½ noise + ½ a 110 Hz square)); an instrument's is silence. */
-  input: { kind: 'noise' | 'none'; seed?: number; level?: number };
+  /** An effect's input (`GoldenSignal`); an instrument's is silence. */
+  input: GoldenSignal;
+  /**
+   * 1.803: what feeds the plugin's **sidechain** (EST 1.1: est.json's `{ "role": "sidechain" }`
+   * input), in the same vocabulary as `input`. Absent or `none`: silence, as before. A plugin with
+   * no sidechain ignores it (`est test` says so); nothing else about the render changes.
+   */
+  key?: GoldenSignal;
   /** The events, as Cyber's processor takes them (`time` in seconds from the start). */
   events: EstEvent[];
   /** The largest difference allowed from the stored render, per sample. */
@@ -47,14 +63,24 @@ export function estShim(): WebAssembly.Module {
   return shim;
 }
 
-/** Channel `c`'s input, frames `from`…`from + n`, for a spec (exact: integers and powers of two only). */
-export function goldenInput(spec: GoldenSpec, c: number, from: number, n: number): Float32Array {
+/** Channel `c` of a signal, frames `from`…`from + n` (exact: integers and powers of two only). */
+export function goldenSignal(signal: GoldenSignal, sampleRate: number, c: number, from: number, n: number): Float32Array {
   const out = new Float32Array(n);
-  if (spec.input.kind !== 'noise') return out;
-  const level = spec.input.level ?? 0.5;
-  const half = Math.round(spec.sampleRate / 220);
+  if (signal.kind !== 'noise' && signal.kind !== 'bursts') return out;
+  const level = signal.level ?? 0.5;
+  const half = Math.round(sampleRate / 220);
+  if (signal.kind === 'bursts') {
+    const rate = signal.rate && signal.rate > 0 ? signal.rate : 2;
+    const period = Math.max(4, Math.round(sampleRate / rate));
+    const on = Math.floor(period / 4);
+    for (let i = 0; i < n; i++) {
+      const f = from + i;
+      out[i] = f % period < on ? level * (Math.floor(f / half) % 2 ? -1 : 1) : 0;
+    }
+    return out;
+  }
   // The noise is the same sequence for any block size: frame f's value is the xorshift's f-th step.
-  let s = ((spec.input.seed ?? 1) * 0x9e3779b1 + c * 0x85ebca6b) >>> 0 || 1;
+  let s = ((signal.seed ?? 1) * 0x9e3779b1 + c * 0x85ebca6b) >>> 0 || 1;
   for (let f = 0; f < from; f++) { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; }
   for (let i = 0; i < n; i++) {
     s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0;
@@ -65,13 +91,30 @@ export function goldenInput(spec: GoldenSpec, c: number, from: number, n: number
   return out;
 }
 
+/** Channel `c`'s input, frames `from`…`from + n`, for a spec (exact: integers and powers of two only). */
+export function goldenInput(spec: GoldenSpec, c: number, from: number, n: number): Float32Array {
+  return goldenSignal(spec.input, spec.sampleRate, c, from, n);
+}
+
+/** What became of a spec's `key`: fed to the sidechain, ignored (the plugin has none), or none asked. */
+export type GoldenKey = 'fed' | 'ignored' | 'none';
+
+/** The manifest fields a golden render reads (`sidechain` and `edition`: EST 1.1's, absent in a 1.0 bundle). */
+export type GoldenManifest = Pick<EstManifest, 'id' | 'kind' | 'audio' | 'limits' | 'parameters'> & Partial<Pick<EstManifest, 'sidechain' | 'edition' | 'notes'>>;
+
+/** Whether a spec's key reaches this plugin (it has a sidechain input, which only an EST 1.1 bundle may). */
+export function goldenKeyOf(spec: Pick<GoldenSpec, 'key'>, manifest: Pick<GoldenManifest, 'sidechain' | 'edition'>): GoldenKey {
+  if (!spec.key || spec.key.kind === 'none') return 'none';
+  return manifest.edition === '1.1' && (manifest.sidechain ?? 0) > 0 ? 'fed' : 'ignored';
+}
+
 /** Play `spec` through the plugin: the render, planar (left frames, then right). */
-export function renderGolden(module: WebAssembly.Module, manifest: Pick<EstManifest, 'id' | 'kind' | 'audio' | 'limits' | 'parameters'>, spec: GoldenSpec): Float32Array {
+export function renderGolden(module: WebAssembly.Module, manifest: GoldenManifest, spec: GoldenSpec): Float32Array {
   return renderGoldenFull(module, manifest, spec).audio;
 }
 
 /** Play `spec` through the plugin: the render and (DEV-F, 1.321) the notes it sent, in order. */
-export function renderGoldenFull(module: WebAssembly.Module, manifest: Pick<EstManifest, 'id' | 'kind' | 'audio' | 'limits' | 'parameters'>, spec: GoldenSpec): { audio: Float32Array; notes: GoldenNote[] } {
+export function renderGoldenFull(module: WebAssembly.Module, manifest: GoldenManifest, spec: GoldenSpec): { audio: Float32Array; notes: GoldenNote[]; key: GoldenKey } {
   if (spec.frames % FRAMES) throw new Error(`a golden render's length is a multiple of ${FRAMES} frames`);
   const inst = standInInstance({ module, shim: estShim(), manifest }, spec.sampleRate);
   const ready = inst.boot.find(m => m.type === 'ready');
@@ -92,8 +135,11 @@ export function renderGoldenFull(module: WebAssembly.Module, manifest: Pick<EstM
   const out = new Float32Array(spec.frames * 2);
   // The whole input, once (its noise is sequential).
   const inL = goldenInput(spec, 0, 0, spec.frames), inR = goldenInput(spec, 1, 0, spec.frames);
+  // 1.803: the key, into the sidechain (the plugin's second input) when it has one: as many channels as est.json gives it.
+  const key = goldenKeyOf(spec, manifest);
+  const keys = key === 'fed' ? Array.from({ length: manifest.sidechain ?? 0 }, (_, c) => goldenSignal(spec.key!, spec.sampleRate, c, 0, spec.frames)) : [];
   for (let f = 0; f < spec.frames; f += FRAMES) {
-    const { out: o, posted } = inst.block(inL.slice(f, f + FRAMES), inR.slice(f, f + FRAMES), f);
+    const { out: o, posted } = inst.block(inL.slice(f, f + FRAMES), inR.slice(f, f + FRAMES), f, keys.length ? { key: keys.map(k => k.slice(f, f + FRAMES)) } : undefined);
     const err = posted.find(m => m.type === 'error');
     if (err) throw new Error(`the plugin stopped at frame ${f} (${String(err.phase)}: ${String(err.message)})`);
     take(posted, f);
@@ -102,7 +148,7 @@ export function renderGoldenFull(module: WebAssembly.Module, manifest: Pick<EstM
   }
   take(inst.send({ type: 'notes:flush' }), spec.frames);
   inst.send({ type: 'dispose' });
-  return { audio: out, notes };
+  return { audio: out, notes, key };
 }
 
 /** A note list as the stored file's text: one note a line. */

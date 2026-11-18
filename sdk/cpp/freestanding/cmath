@@ -1,0 +1,39 @@
+// EST's freestanding <cmath> (1.805): `std::` names for the freestanding <math.h> beside it, so a
+// C++ source that includes <cmath> and calls std::tanh, std::pow … compiles as it is. Found last
+// (`-idirafter`): a C++ library your own clang brings wins. What is here, what is not and what
+// each costs: the comment at the top of math.h.
+#pragma once
+#include <math.h>
+
+namespace std {
+// One argument: double (the C function), float, and anything else (an int) as double.
+#define EST_CMATH_1_(fn) \
+   using ::fn; \
+   inline float fn(float x) { return ::fn##f(x); } \
+   template <class T> inline double fn(T x) { return ::fn((double)x); }
+// Two arguments: both double, both float, and any other pair as double.
+#define EST_CMATH_2_(fn) \
+   using ::fn; \
+   inline float fn(float x, float y) { return ::fn##f(x, y); } \
+   template <class A, class B> inline double fn(A x, B y) { return ::fn((double)x, (double)y); }
+EST_CMATH_1_(sin) EST_CMATH_1_(cos) EST_CMATH_1_(tan) EST_CMATH_1_(asin) EST_CMATH_1_(acos) EST_CMATH_1_(atan)
+EST_CMATH_1_(sinh) EST_CMATH_1_(cosh) EST_CMATH_1_(tanh) EST_CMATH_1_(exp) EST_CMATH_1_(exp2)
+EST_CMATH_1_(log) EST_CMATH_1_(log2) EST_CMATH_1_(log10) EST_CMATH_1_(sqrt) EST_CMATH_1_(cbrt)
+EST_CMATH_1_(fabs) EST_CMATH_1_(floor) EST_CMATH_1_(ceil) EST_CMATH_1_(trunc) EST_CMATH_1_(round)
+EST_CMATH_2_(atan2) EST_CMATH_2_(pow) EST_CMATH_2_(fmod) EST_CMATH_2_(fmin) EST_CMATH_2_(fmax)
+EST_CMATH_2_(hypot) EST_CMATH_2_(copysign)
+#undef EST_CMATH_1_
+#undef EST_CMATH_2_
+
+inline double abs(double x) { return ::fabs(x); }
+inline float abs(float x) { return ::fabsf(x); }
+inline int abs(int x) { return x < 0 ? -x : x; }
+inline long long abs(long long x) { return x < 0 ? -x : x; }
+
+inline bool isnan(double x) { return x != x; }
+inline bool isnan(float x) { return x != x; }
+inline bool isinf(double x) { return __builtin_isinf(x); }
+inline bool isinf(float x) { return __builtin_isinf(x); }
+inline bool isfinite(double x) { return __builtin_isfinite(x); }
+inline bool isfinite(float x) { return __builtin_isfinite(x); }
+} // namespace std

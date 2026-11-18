@@ -11,7 +11,17 @@
  *   freestanding build may still name (`__cxa_pure_virtual`, `__cxa_atexit`);
  * - `est::` maths without libm (`exp`, `log`, `sin`, `cos`, `tan`, `pow`, `db_to_gain`,
  *   `gain_to_db`; `sqrt`, `floor`, `fabs` are single WebAssembly instructions), the same results
- *   on every engine, so a render is deterministic;
+ *   on every engine, so a render is deterministic. Since 1.805 also `est::fast_exp` (no division:
+ *   the one to call per sample), `est::tanh` and `est::atan`;
+ * - (1.805) `<cmath>` and `<math.h>` themselves, for a port: `sdk/cpp/freestanding/` holds small
+ *   versions built on the functions here, found only where your clang brings no C++ library of
+ *   its own. What they have: `sin cos tan asin acos atan atan2 sinh cosh tanh exp exp2 log log2
+ *   log10 pow sqrt cbrt hypot fabs abs floor ceil trunc round fmod fmin fmax copysign isnan isinf
+ *   isfinite`, each for `float` and `double` (`sinf` …), and `M_PI` and friends. What they have
+ *   not: `long double`, `erf`, `tgamma`, `lgamma`, `frexp`, `ldexp`, `modf`, `remainder`,
+ *   `nextafter`, `fma`, `lround`, `lrint`, `fenv`. Costs: `exp`, `exp2`, `tanh`, `sinh`, `cosh`
+ *   are about 15 multiplications; `sin`, `cos`, `atan` about 20 operations; `log`, `log2`,
+ *   `log10` and so `pow` cost about 20 divisions: call those when a knob moves, not per sample;
  * - `est::write_all` / `est::read_all` for `clap.state`'s streams, `est::streq`, `est::strcpy`.
  *
  * Include it everywhere you need it; in exactly one source file define `EST_RUNTIME_IMPL` first
@@ -90,6 +100,72 @@ static inline double est_log(double x) {
    return 2.0 * sum + e * EST_LN2;
 }
 
+/* exp without a division (1.805): the argument reduced to |r| <= ln(2)/2 with ln 2 in two parts,
+ * then a degree-13 polynomial (the next term is below 2e-16 of the sum). Within 3e-16 relative of
+ * the true value from -700 to 700 (`est_exp` drifts to 8e-14 at the far ends; it is left exactly
+ * as it was, for the renders that already depend on its bits).
+ * `est_expm1_small_` is exp(r) - 1 for |r| <= 0.35, exact to the last bits near 0. */
+#define EST_LN2_HI 6.93147180369123816490e-01
+#define EST_LN2_LO 1.90821492927058770002e-10
+static inline double est_expm1_small_(double r) {
+   double p = 1.6059043836821613e-10;      /* 1/13! */
+   p = p * r + 2.08767569878681e-09;        /* 1/12! */
+   p = p * r + 2.505210838544172e-08;       /* 1/11! */
+   p = p * r + 2.755731922398589e-07;       /* 1/10! */
+   p = p * r + 2.7557319223985893e-06;      /* 1/9! */
+   p = p * r + 2.48015873015873e-05;        /* 1/8! */
+   p = p * r + 1.984126984126984e-04;       /* 1/7! */
+   p = p * r + 1.388888888888889e-03;       /* 1/6! */
+   p = p * r + 8.333333333333333e-03;       /* 1/5! */
+   p = p * r + 4.1666666666666664e-02;      /* 1/4! */
+   p = p * r + 1.6666666666666666e-01;      /* 1/3! */
+   p = p * r + 0.5;
+   p = p * r + 1.0;
+   return p * r;
+}
+/* v * 2^k for k in [-2046, 2046], in two steps so a result below 2^-1022 still scales correctly. */
+static inline double est_scale2_(double v, int k) {
+   int k1 = k / 2, k2 = k - k1;
+   union { double d; uint64_t u; } a, b;
+   a.u = (uint64_t)(k1 + 1023) << 52;
+   b.u = (uint64_t)(k2 + 1023) << 52;
+   return v * a.d * b.d;
+}
+static inline double est_fast_exp(double x) {
+   if (x != x) return x;
+   if (x < -745.0) return 0.0;
+   if (x > 709.0) x = 709.0;
+   double kf = est_floor(x * 1.4426950408889634 + 0.5); /* x / ln 2, rounded */
+   int k = (int)kf;
+   double r = (x - kf * EST_LN2_HI) - kf * EST_LN2_LO;
+   return est_scale2_(1.0 + est_expm1_small_(r), k);
+}
+
+/* tanh (1.805): one division. Small arguments go through exp(2x) - 1 computed directly, so
+ * tanh(x) is x to the last bits near 0 (a quiet signal stays itself); past 19 it is 1. */
+static inline double est_tanh(double x) {
+   if (x != x) return x;
+   double a = est_fabs(x), t;
+   if (a > 19.0) t = 1.0;
+   else if (a < 0.17) { double m = est_expm1_small_(2.0 * a); t = m / (m + 2.0); }
+   else { double e = est_fast_exp(2.0 * a); t = (e - 1.0) / (e + 1.0); }
+   return x < 0.0 ? -t : t;
+}
+
+/* atan (1.805): |x| > 1 folded to 1/x, then past tan(pi/12) rotated by pi/6, then the series to
+ * x^31 (|x| <= 0.268, so the next term is below 1e-19). */
+static inline double est_atan(double x) {
+   if (x != x) return x;
+   double a = est_fabs(x), add = 0.0, sgn = 1.0;
+   if (a > 1.0) { a = 1.0 / a; add = 1.5707963267948966; sgn = -1.0; }
+   double off = 0.0;
+   if (a > 0.2679491924311227) { a = (1.7320508075688772 * a - 1.0) / (1.7320508075688772 + a); off = 0.5235987755982989; }
+   double a2 = a * a, sum = 0.0;
+   for (int i = 31; i >= 1; i -= 2) sum = sum * a2 + ((i & 2) ? -1.0 : 1.0) / i;
+   double r = add + sgn * (off + sum * a);
+   return x < 0.0 ? -r : r;
+}
+
 static inline double est_pow(double base, double ex) { return base <= 0.0 ? (ex == 0.0 ? 1.0 : 0.0) : est_exp(ex * est_log(base)); }
 
 static inline double est_sin_core(double x) { /* |x| <= pi/4 */
@@ -165,6 +241,9 @@ inline double sqrt(double x) { return est_sqrt(x); }
 inline double floor(double x) { return est_floor(x); }
 inline double clamp(double x, double lo, double hi) { return est_clamp(x, lo, hi); }
 inline double exp(double x) { return est_exp(x); }
+inline double fast_exp(double x) { return est_fast_exp(x); }
+inline double tanh(double x) { return est_tanh(x); }
+inline double atan(double x) { return est_atan(x); }
 inline double log(double x) { return est_log(x); }
 inline double pow(double b, double e) { return est_pow(b, e); }
 inline double sin(double x) { return est_sin(x); }

@@ -82,8 +82,11 @@ node -e "const k = require('./keygen.json'); if (!k.publicKey || !k.keyId) { con
 [ "$(stat -c %a "$KEYDIR/developer-key.pem" 2>/dev/null || stat -f %Lp "$KEYDIR/developer-key.pem")" = "600" ] || { echo "sdk-smoke: the developer key is not mode 600" >&2; exit 1; }
 
 say "est new effect-as smoke && est validate --json && est pack"
-"$EST" new effect-as smoke --id org.test.smoke --name Smoke
+"$EST" new effect-as smoke --id org.test.smoke --name Smoke --no-install
 cd smoke
+# 1.800: the folder carries its assistant files (generated, packed with the template) and a package.json pinning this kit.
+for f in AGENTS.md CLAUDE.md .cursor/rules/est.mdc llms.txt package.json; do [ -f "$f" ] || { echo "sdk-smoke: est new made no $f" >&2; exit 1; }; done
+grep -q '"@cyber-est/cli": "'"$("$EST" --version)"'"' package.json || { echo "sdk-smoke: the new folder's package.json does not pin this kit" >&2; cat package.json >&2; exit 1; }
 set +e
 "$EST" validate --json > ../validate.out
 CODE=$?
@@ -107,8 +110,9 @@ EOF
 # A cookbook recipe from the package (the guide's `est new chorus my-chorus`): the recipes are packed with the templates.
 say "est new chorus (a cookbook recipe) && est validate --json"
 cd "$WORK/app"
-"$EST" new chorus smoke-chorus --id org.test.smokechorus --name SmokeChorus
+"$EST" new chorus smoke-chorus --id org.test.smokechorus --name SmokeChorus --no-install
 cd smoke-chorus
+for f in AGENTS.md CLAUDE.md .cursor/rules/est.mdc llms.txt package.json; do [ -f "$f" ] || { echo "sdk-smoke: est new chorus made no $f" >&2; exit 1; }; done
 "$EST" validate --json > ../validate-chorus.out || { echo "sdk-smoke: est validate failed on the chorus recipe" >&2; cat ../validate-chorus.out >&2; exit 1; }
 node -e "const v = JSON.parse(require('node:fs').readFileSync('../validate-chorus.out', 'utf8')); if (!v.ok) { console.error('sdk-smoke: the chorus recipe did not validate'); process.exit(1); } console.log('chorus recipe validated from the package: ' + v.plugin.id);"
 cd "$WORK/app/smoke"
@@ -121,7 +125,7 @@ say "est compare on the bundle against itself (identical: exit 0)"
 if node -e "process.exit(require('$WORK/app/doctor.json').ready.cpp ? 0 : 1)"; then
   say "est new cpp-clap && est validate --json (the C++ build from the package)"
   cd "$WORK/app"
-  "$EST" new cpp-clap cppsmoke --id org.test.cppsmoke --name "Cpp Smoke"
+  "$EST" new cpp-clap cppsmoke --id org.test.cppsmoke --name "Cpp Smoke" --no-install
   cd cppsmoke
   "$EST" validate --json > ../validate-cpp.out || { echo "sdk-smoke: est validate failed on cpp-clap" >&2; cat ../validate-cpp.out >&2; exit 1; }
   node - <<'EOF2'

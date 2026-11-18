@@ -30,12 +30,13 @@ How the packages are built, checked, mirrored and (by the owner, from the public
 
 | Part | Where | What it does |
 |---|---|---|
-| The `est` command (`@cyber-est/cli`) | `sdk/packages/cli` | `est new`, `est validate`, `est pack`, `est test`, `est doctor`, `est inspect`, `est dev`, `est compare` |
+| The `est` command (`@cyber-est/cli`) | `sdk/packages/cli` | `est new`, `est validate`, `est pack`, `est test`, `est doctor`, `est inspect`, `est dev`, `est compare`, `est port` |
 | The validator | `sdk/packages/tools` (`@cyber-est/tools`) | the same code as Cyber's install check, with a stable id for every rule |
 | The templates | `sdk/templates/` | `effect-rust`, `instrument-rust` (the default), `effect-as`, `instrument-as` (AssemblyScript: no native toolchain), `cpp-clap` (a CLAP plugin in C++, for porting); since 1.321 `sampler-*`, `midi-effect-*` and `visualiser-*` in both languages ([which to start from](docs/templates.md)) |
 | The cookbook | `sdk/cookbook/` | eleven short tested AssemblyScript plugins, one idea each, with a prompt to take it further ([the cookbook](docs/cookbook.md)); `est new <recipe> <dir>` starts from one |
 | The C and C++ kit | `sdk/cpp` | the build `est` runs for C and C++ (clang to wasm32), the CLAP 1.2.2 headers and the freestanding runtime `<est/runtime.hpp>` |
 | The porting kits | `sdk/kits/` | `juce-shared-dsp`: one source tree building a JUCE plugin and an EST plugin from one DSP header |
+| A worked port | `sdk/examples/port-overdrive/` | a small C++ overdrive taken to a validated EST plugin with `est port`: the original, the finished folder with its port plan, and the prompt that did it ([Port your plugin](docs/PORT_YOUR_VST.md)) |
 | `llms.txt` | `sdk/llms.txt` | the kit's index for a coding agent: the docs, the templates and the recipes |
 | The DSP library | `sdk/rust/est`, `sdk/as/est` | smoothers, oscillators, filters, envelopes, LFOs, voices, delay lines, biquads, in both languages |
 | `@cyber-est/ui` | `sdk/packages/ui` | the library for a plugin's own UI: the frame protocol, `bind()`, `<est-knob>`, `<est-slider>` |
@@ -71,7 +72,7 @@ est pack           # dist/org.example.my-chorus-1.0.0.est
 est compare old.est dist/org.example.my-chorus-1.0.0.est   # what changed in the sound
 ```
 
-Then, in Cyber: **Settings → Plugins**, turn on **Developer mode**, then **Load a bundle file…** and pick the `.est`. Developer mode is an admin's and a verified developer's while developer accounts are open (1.325); every signed-in account installs Cyber's curated plugins. Cyber runs the same checks; a refusal names the same rule id (`EST-…`) as `validation.json`. Developer mode's **Follow `est dev`** (1.287, with `est dev --cyber`) plays the plugin `est dev` is building in your own project and swaps each rebuild in while it plays ([the dev host](docs/dev-host.md#following-from-cyber-est-dev---cyber)).
+Then, in Cyber, signed in: on Home, **EST PLUGINS → Add a plugin**, and drop the `.est` on it (no developer account, no key). Developer mode (Settings → Plugins) is an admin's and a verified developer's while developer accounts are open (1.325). Cyber runs the same checks; a refusal names the same rule id (`EST-…`) as `validation.json`. Developer mode's **Follow `est dev`** (1.287, with `est dev --cyber`) plays the plugin `est dev` is building in your own project and swaps each rebuild in while it plays ([the dev host](docs/dev-host.md#following-from-cyber-est-dev---cyber)).
 
 `est help` lists the commands you run; `keygen`, `sign` without `--developer` and `publish` without a file are Cyber's own registry's (the owner's key, from a clone), listed apart.
 

@@ -53,7 +53,8 @@ export function thinMpe(dim: MpeDim, samples: readonly { t: number; v: number }[
 
 const round = (d: MpeDim, v: number) => (d === 'bend' ? Math.round(v * 1000) / 1000 : Math.round(v * 10000) / 10000);
 
-function rdp(pts: readonly [number, number][], tol: number): [number, number][] {
+/** Ramer–Douglas–Peucker on (t, v) points within `tol` (the ends always kept). Shared with `mpeDraw.ts`. */
+export function rdp(pts: readonly [number, number][], tol: number): [number, number][] {
   if (pts.length <= 2) return [...pts];
   const keep = new Uint8Array(pts.length);
   keep[0] = 1; keep[pts.length - 1] = 1;

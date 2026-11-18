@@ -1,0 +1,17 @@
+{
+  "what": "A plugin/preset display string (est.json name, vendor, description, license, feature, parameter name, preset name) carrying an invisible or format character. EST-M018 claims to refuse zero-width and direction characters; the original ranges (U+200B-200F, U+202A-202E, U+2066-2069) missed these, so a name could carry hidden text or read identically to another in the store card, Home, the Browser and the admin review queue.",
+  "harm": "Name impersonation / hidden text in Cyber's own surfaces (not code execution: names render as text).",
+  "severity": "low",
+  "status": "fixed (install/bundle.ts isHiddenChar; EST-M018)",
+  "missedCodePoints": [
+    "U+00AD soft hyphen",
+    "U+061C Arabic letter mark",
+    "U+180E Mongolian vowel separator",
+    "U+2028 line separator",
+    "U+2029 paragraph separator",
+    "U+2060 word joiner",
+    "U+2061..U+2064 invisible math operators",
+    "U+FEFF zero-width no-break space / BOM",
+    "U+E0000..U+E007F Tags block (encodes an invisible ASCII string)"
+  ]
+}

@@ -46,10 +46,11 @@
 // checkedAt, nonce }` signed with its own key (`est-check/1 result`); `cyber-audio` pins its public
 // key (`EST_CHECK_PUBLIC_KEY`) and countersigns only a result that verifies, names the same hash and
 // the nonce it sent, and is fresh (`checkResultRefusal`).
+import { HIDDEN_OR_BLANK_RE } from './estHiddenText.mjs';
 import { canonicalJson, fromBase64, keyIdOf, publicKeyBytes, REGISTRY_TIERS, REGISTRY_VERSION, sha256Hex, signedBytes } from './estRegistry.mjs';
 
-/** Display text never carries these (EST-14): zero-width, bidirectional embeddings, overrides and isolates, the BOM. */
-const INVISIBLE = /[\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff]/;
+/** Display text never carries these (EST-14): the one rule, shared/estHiddenText.mjs, with order P's blank letters (P4-1). */
+const INVISIBLE = HIDDEN_OR_BLANK_RE;
 /** Other control characters (C0 and C1, but not a space). */
 const CONTROL = /\p{Cc}/u;
 const ID_RE = /^[a-z0-9](?:[a-z0-9.-]{1,118})[a-z0-9]$/;
@@ -98,15 +99,176 @@ export function displayRefusal(s, what, max = 120) {
   return null;
 }
 
-/** A name folded for comparison: NFKC, lower case, letters and digits only ("C y-b_e r", "ＣＹＢＥＲ" → "cyber"). @param {string} s */
-export function foldName(s) {
-  return String(s ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+/**
+ * The sandbox attack order (streams D and E, D-2 and E-6, one rule at the integration): letters of other
+ * scripts that are drawn as a Latin letter (Cyrillic and Greek, upper and lower case, and the Latin
+ * letters NFKD leaves alone), each to the Latin letter it reads as. NFKC folds widths and styles, never
+ * another script's look-alike, so the vendor "Cybеr" (a Cyrillic е) was published and drawn as
+ * "Cyber", and "Nоcturne" sat beside "Nocturne". An upper-case letter is read as it is drawn (a
+ * Greek Η is an H, its lower case η an n), so the map is applied before and after the lower-casing.
+ * Only what is drawn the same in the common fonts: not a transliteration.
+ */
+const LOOKALIKES = new Map(Object.entries({
+  // Cyrillic, upper case (read before lower-casing)
+  'А': 'a', 'В': 'b', 'Е': 'e', 'К': 'k', 'М': 'm', 'Н': 'h', 'О': 'o', 'Р': 'p', 'С': 'c', 'Т': 't', 'У': 'y', 'Х': 'x',
+  'Ѕ': 's', 'І': 'i', 'Ј': 'j', 'Ү': 'y', 'Ь': 'b',
+  // Cyrillic, lower case
+  'а': 'a', 'в': 'b', 'е': 'e', 'ё': 'e', 'к': 'k', 'м': 'm', 'н': 'h', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't', 'у': 'y', 'х': 'x',
+  'ѕ': 's', 'і': 'i', 'ї': 'i', 'ј': 'j', 'һ': 'h', 'ԁ': 'd', 'ԛ': 'q', 'ԝ': 'w', 'г': 'r', 'ь': 'b', 'ӏ': 'l', 'ү': 'y',
+  // Greek, upper case
+  'Α': 'a', 'Β': 'b', 'Ε': 'e', 'Ζ': 'z', 'Η': 'h', 'Ι': 'i', 'Κ': 'k', 'Μ': 'm', 'Ν': 'n', 'Ο': 'o', 'Ρ': 'p', 'Τ': 't', 'Υ': 'y', 'Χ': 'x',
+  // Greek, lower case
+  'α': 'a', 'β': 'b', 'ε': 'e', 'η': 'n', 'ι': 'i', 'κ': 'k', 'ν': 'v', 'ο': 'o', 'ρ': 'p', 'τ': 't', 'υ': 'u', 'χ': 'x', 'γ': 'y', 'ϲ': 'c', 'ω': 'w',
+  // Latin letters NFKD leaves alone
+  'ı': 'i', 'ȷ': 'j', 'ɑ': 'a', 'ɡ': 'g', 'ł': 'l', 'ø': 'o', 'đ': 'd',
+  // Order P (stream P4, P4-1): Latin small capitals ("\u1d04\u028f\u0299\u1d07\u0280" was drawn as CYBER), which NFKC leaves alone
+  '\u1d00': 'a', '\u0299': 'b', '\u1d04': 'c', '\u1d05': 'd', '\u1d07': 'e', '\ua730': 'f', '\u0262': 'g', '\u029c': 'h', '\u026a': 'i', '\u1d0a': 'j',
+  '\u1d0b': 'k', '\u029f': 'l', '\u1d0d': 'm', '\u0274': 'n', '\u1d0f': 'o', '\u1d18': 'p', '\u0280': 'r', '\ua731': 's', '\u1d1b': 't', '\u1d1c': 'u',
+  '\u1d20': 'v', '\u1d21': 'w', '\u028f': 'y', '\u1d22': 'z', '\u0269': 'i', '\u028b': 'u',
+  // Armenian, Georgian (lower case: the fold lower-cases first)
+  '\u0585': 'o', '\u057d': 'u', '\u0581': 'g', '\u0570': 'h', '\u0578': 'n', '\u0566': 'q', '\u056c': 'l', '\u10e7': 'y',
+  ...cherokee(),
+}));
+const mapLookalikes = (s) => { let out = ''; for (const ch of s) out += LOOKALIKES.get(ch) ?? ch; return out; };
+
+/**
+ * Cherokee capitals drawn as Latin letters ("\u13df\u13a9\u13f4\u13ac\u13a1" is drawn as CYBER), keyed by their lower
+ * case too (the fold lower-cases first, and Cherokee capitals have lower-case forms). Order P, stream P4 (P4-1).
+ */
+function cherokee() {
+  const pairs = { '\u13a0': 'd', '\u13a1': 'r', '\u13a2': 't', '\u13a5': 'i', '\u13a9': 'y', '\u13aa': 'a', '\u13ab': 'j', '\u13ac': 'e', '\u13b3': 'w', '\u13b7': 'm',
+    '\u13bb': 'h', '\u13c0': 'g', '\u13c2': 'h', '\u13c3': 'z', '\u13cf': 'b', '\u13d2': 'r', '\u13d9': 'v', '\u13da': 's', '\u13de': 'l', '\u13df': 'c', '\u13e2': 'p', '\u13e6': 'k', '\u13f4': 'b' };
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const [k, v] of Object.entries(pairs)) { out[k] = v; out[k.toLowerCase()] = v; }
+  return out;
 }
 
-/** Whether a vendor or display name is the owner's ("Cyber", any case, width or spacing; "Cyber Audio" too). @param {string} s */
-export function reservedVendor(s) {
+/** Letters NFKC would turn into another letter, read first (U+03F9 is drawn as C; NFKC makes it \u03a3). */
+const BEFORE_NFKC = /[\u03f9]/g;
+
+/**
+ * Digits and signs drawn for a letter ("CYB3R", "Cyb\u20acr", "\u00a9yber"): read only where Cyber's own name is asked
+ * for (`reservedName`, `reservedVendor`, `claimsCyber`), never in `foldName`, so "Synth 1" and "Synth l" stay two names.
+ * Order P, stream P4 (P4-1).
+ */
+const LEET = Object.freeze({ '0': 'o', '1': 'i', '3': 'e', '6': 'b', '8': 'b', '\u20ac': 'e', '\u00a2': 'c', '\u00a9': 'c', '\u00ae': 'r', '|': 'l' });
+const leet = (s) => s.replace(/[01368\u20ac\u00a2\u00a9\u00ae|]/g, (ch) => LEET[/** @type {keyof typeof LEET} */ (ch)]);
+/**
+ * A name's words as they read, Cyber's own name in mind: folded, digits read as letters, and a run of single
+ * letters read as one word ("C.Y.B.E.R Official", "C y b e r" → "cyber", "official"). @param {unknown} s
+ */
+function cyberWords(s) {
+  const words = leet(lookalikeFold(s).replace(/[\u20ac\u00a2\u00a9\u00ae]/g, (ch) => LEET[/** @type {keyof typeof LEET} */ (ch)])).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const out = [];
+  let run = '';
+  for (const w of words) {
+    if ([...w].length === 1) { run += w; continue; }
+    if (run) out.push(run);
+    run = '';
+    out.push(w);
+  }
+  if (run) out.push(run);
+  return out;
+}
+
+/**
+ * `s` as it reads: widths, styles and accents folded, lower case, look-alike letters as their Latin
+ * letter, a trade mark sign dropped; spacing and punctuation kept. The one fold: `foldName`, the
+ * reserved-name rules and the review queue's name check (shared/estNameCheck.mjs) all read it.
+ * @param {unknown} s
+ */
+export function lookalikeFold(s) {
+  const plain = String(s ?? '').replace(/[℠™]/g, ' ').replace(BEFORE_NFKC, 'c').normalize('NFKC').normalize('NFKD').replace(/\p{M}/gu, '');
+  return mapLookalikes(mapLookalikes(plain).toLowerCase());
+}
+
+/**
+ * A name folded for comparison: `lookalikeFold`, letters and digits only
+ * ("C y-b_e r", "ＣＹＢＥＲ", "Cybеr", "Сyber", "Cybér" → "cyber"). @param {string} s
+ */
+export function foldName(s) {
+  return lookalikeFold(s).replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+/** Whether a name is the owner's own, exactly ("Cyber", any case, width, spacing, accents or look-alike letters; "Cyber Audio…", "Cyber EST"). Asked of a plugin's name and a namespace's label, which may hold the word. @param {string} s */
+export function reservedName(s) {
   const f = foldName(s);
-  return f === 'cyber' || f.startsWith('cyberaudio') || f === 'cyberest';
+  // Order P (stream P4, P4-1): and with digits and signs read as letters ("CYB3R", "Cyb\u20acr").
+  const l = cyberWords(s).join('');
+  return [f, l].some((x) => x === 'cyber' || x.startsWith('cyberaudio') || x === 'cyberest');
+}
+
+/**
+ * Whether a vendor, a developer's name or a reviewer's display name **reads as Cyber's own**:
+ * `reservedName`, or "Cyber" as a word of its own in it ("Cyber Official", "Cyber Inc", "by Cyber",
+ * "Сyber Team" with a Cyrillic С), which read as Cyber's and were published; a word that only holds it
+ * ("Cyberdyne", "Cyberpunk", "Hypercyber") is anyone's. A plugin's **name** may still hold the word
+ * ("CYBER Delay": `reservedName` alone is asked of it, and the review queue's name check weighs it), and
+ * so may a namespace's label (`cyber-tools.com` is someone's domain).
+ * @param {string} s
+ */
+export function reservedVendor(s) {
+  // Order P (stream P4, P4-1): words read through `cyberWords` (digits as letters, spaced letters as one word).
+  return reservedName(s) || cyberWords(s).includes('cyber');
+}
+
+/**
+ * Order P (stream P4, P4-2): whether display text **claims to be Cyber's** ("by Cyber", "Official Cyber plugin",
+ * "made by the Cyber team", "from Cyber's catalogue"), read as `reservedVendor` reads (look-alike letters, digits,
+ * spaced letters). Asked of a Community plugin's name, description, store summaries, tags and changelog and a
+ * developer's bio, which no rule read: a summary "The official Cyber reverb, by Cyber" was listed. Saying what
+ * it is for ("a reverb for Cyber", "works in Cyber", "Cyberpunk") is anyone's. @param {unknown} s
+ */
+export function claimsCyber(s) {
+  const t = ` ${cyberWords(s).join(' ')} `;
+  return / (?:by|from|official|offical|officially|authentic|genuine|endorsed|approved|certified|verified) (?:the )?cyber /.test(t)
+    || / cyber(?: audio)?(?: s)? (?:own|official|team|staff|approved|endorsed|verified|certified|original|catalogue|catalog|inhouse|firstparty|in house|first party) /.test(t);
+}
+
+/** Stream E's name for the same rule (`reservedVendor`): one function, two call sites' words. */
+export const readsAsCyber = reservedVendor;
+
+/** Words a copy adds to a name it borrows ("ACIDZ 303 Pro", "Official ACIDZ 303", "ACIDZ 303 MK2", "ACIDZ 404"). */
+const EDITION_WORD = /^(?:pro|plus|ii|iii|iv|mk|mkii|mkiii|mk\d+|deluxe|lite|light|x|xl|xp|max|ultra|hd|se|le|free|studio|official|edition|new|next|classic|original|legacy|remaster|remastered|reloaded|redux|the|cyber|v\d+|\d+)$/;
+/** Letters a copy swaps for a digit drawn like them, both sides read the same ("ACIDZ 3O3", "AC1DZ"). */
+const SKELETON = Object.freeze({ o: '0', i: '1', l: '1', e: '3', s: '5', b: '8', z: '2', g: '9', a: '4', t: '7' });
+const skeleton = (words) => words.join('').replace(/[oilesbzgat]/g, (ch) => SKELETON[/** @type {keyof typeof SKELETON} */ (ch)]);
+const coreWords = (s) => {
+  const w = lookalikeFold(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const core = w.filter((x) => !EDITION_WORD.test(x));
+  return core.length ? core : w;
+};
+
+/**
+ * Order P (stream P4, P4-3): whether `name` reads as `known`, a name it may not take (a plugin in Cyber's
+ * catalogue): the same name folded (stream D's rule), or with a copy's edition words added or the numbers
+ * changed ("ACIDZ 303 Pro", "ACIDZ 404", "Official ACIDZ 303", "Cyber ACIDZ 303"), or digits drawn for its
+ * letters ("ACIDZ 3O3"). A name that only holds it among words of its own ("Toast Rack Reverb") is anyone's.
+ * @param {unknown} name @param {unknown} known
+ */
+export function readsAsName(name, known) {
+  const a = foldName(String(name ?? ''));
+  const b = foldName(String(known ?? ''));
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const all = (s) => lookalikeFold(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return skeleton(all(name)) === skeleton(all(known)) || skeleton(coreWords(name)) === skeleton(coreWords(known));
+}
+
+/**
+ * Order P (stream P4, P4-3): whether a vendor or developer name reads as `known` (a curated vendor): the same
+ * folded, or `known` then words of a company's ("Nick K Harrison Audio", "NickKHarrison Official", "N1ck K Harr1son").
+ * Only for a `known` of 6 letters or more. @param {unknown} vendor @param {unknown} known
+ */
+export function readsAsVendor(vendor, known) {
+  const a = foldName(String(vendor ?? ''));
+  const b = foldName(String(known ?? ''));
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (b.length < 6) return false;
+  const sk = (x) => skeleton([x]);
+  return sk(a).startsWith(sk(b));
 }
 
 /** The namespace an id lives under (`com.acme.delay` → `com.acme`), or null. @param {string} id */
@@ -128,7 +290,7 @@ export function namespaceValue(raw) {
   if (typeof raw !== 'string') return null;
   const ns = raw.trim().toLowerCase();
   if (!NAMESPACE_RE.test(ns)) return null;
-  if (`${ns}.` === RESERVED_ID_PREFIX || reservedVendor(ns.split('.')[1] ?? '')) return null;
+  if (`${ns}.` === RESERVED_ID_PREFIX || reservedName(ns.split('.')[1] ?? '')) return null;
   if (ASSIGNED_NS_RE.test(ns)) return null;
   return ns;
 }
@@ -169,7 +331,7 @@ export const proofRecordOf = (token) => `cyber-est-verify=${token}`;
  * Why a developer may not publish `manifest` (its id, name, vendor and description), or null.
  * `namespaces`: the namespaces this developer has proved. `owner`: signed with the owner key (the
  * owner's own publish, never the publishing service).
- * @param {{ id?: unknown, name?: unknown, vendor?: unknown, description?: unknown }} manifest
+ * @param {{ id?: unknown, name?: unknown, vendor?: unknown, description?: unknown, license?: unknown, parameters?: unknown }} manifest
  * @param {{ namespaces: readonly string[], owner?: boolean }} who
  * @returns {{ code: string, error: string } | null}
  */
@@ -184,9 +346,23 @@ export function publishNameRefusal(manifest, { namespaces, owner = false }) {
     const why = displayRefusal(manifest.description, 'The description', 2000);
     if (why) return { code: 'display', error: `${why}.` };
   }
+  // The sandbox attack order (stream E): the rest of est.json's text the public pages show (the licence, each
+  // parameter's name and unit) takes no invisible or direction character either; est.json's own rule
+  // (EST-M018) refuses a shorter set (U+061C, U+00AD, U+2060, U+180E and the BOM passed it).
+  {
+    const hidden = (v) => typeof v === 'string' && (INVISIBLE.test(v) || CONTROL.test(v));
+    const params = Array.isArray(manifest.parameters) ? manifest.parameters : [];
+    if (hidden(manifest.license) || params.some((p) => isObj(p) && (hidden(p.name) || hidden(p.unit)))) {
+      return { code: 'display', error: 'The licence or a parameter\'s name or unit has an invisible, right-to-left or control character, which Cyber refuses.' };
+    }
+  }
   if (owner) return null;
   if (id.startsWith(RESERVED_ID_PREFIX)) return { code: 'reserved', error: `${RESERVED_ID_PREFIX}* ids are Cyber's own: publish under your own namespace.` };
-  if (reservedVendor(String(manifest.vendor)) || reservedVendor(String(manifest.name))) return { code: 'reserved', error: 'The name "Cyber" is Cyber\'s own: use your own name as the vendor and in the plugin\'s name.' };
+  // The vendor may not read as Cyber's at all (`reservedVendor`); a plugin's name may hold the word ("Cyber Delay" is
+  // a name; the review queue's name check weighs it) but is never Cyber's own name, in any letters that look like it.
+  if (reservedVendor(String(manifest.vendor)) || reservedName(String(manifest.name))) return { code: 'reserved', error: 'The name "Cyber" is Cyber\'s own: use your own name as the vendor and in the plugin\'s name.' };
+  // Order P (stream P4, P4-2): a name or description that claims to be Cyber's ("Official Cyber Reverb", "by Cyber").
+  if (claimsCyber(manifest.name) || (typeof manifest.description === 'string' && claimsCyber(manifest.description))) return { code: 'reserved', error: 'The plugin\'s name or description reads as Cyber\'s own ("by Cyber", "official Cyber"): a Community plugin is its developer\'s. Say what it is for instead ("a reverb for Cyber").' };
   const ns = namespaceOf(id);
   if (!ns) return { code: 'namespace', error: `${id} is not under a namespace (your assigned dev.<ten characters>.plugin, or com.yourname.plugin).` };
   if (!namespaces.includes(ns)) {

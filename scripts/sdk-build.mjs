@@ -68,6 +68,12 @@ export const CLI_ASSETS = Object.freeze([
   'sdk/packages/ui/est-ui.d.ts',
   'sdk/templates',
   'sdk/cookbook',
+  // 1.789 (order V), 1.800: the assistant files `est new` gives a recipe's folder (AGENTS.md, its two pointers, llms.txt).
+  'sdk/cookbook-agents',
+  // 1.800: the window sections `est new --ui` and `--app` put in a folder's AGENTS.md (sdk/agents/generate.mjs writes them).
+  'sdk/agents/sections',
+  // 1.800: the one prompt `est prompt` prints, read at run time (bundled, its example code's `from "est"` read as an import by the pack check).
+  'sdk/docs/ONE_PROMPT.md',
   'sdk/as/est',
   'sdk/rust/est',
   'est-plugins/LICENSE',
@@ -79,7 +85,7 @@ export const CLI_GUIDE = 'sdk/docs/BUILD_AN_EST_PLUGIN.md';
  * 1.434: every doc @cyber-est/cli carries at its root, each named in its `files`: the guide, the
  * prompt kit and the sharing guide (`scripts/sdk-pack.test.mjs` holds the two lists together).
  */
-export const CLI_DOCS = Object.freeze([CLI_GUIDE, 'sdk/docs/PROMPT_KIT.md', 'sdk/docs/SHARING.md']);
+export const CLI_DOCS = Object.freeze([CLI_GUIDE, 'sdk/docs/PROMPT_KIT.md', 'sdk/docs/SHARING.md', 'sdk/docs/PORT_YOUR_VST.md']);
 
 /**
  * 1.440 (rc-est 17): the kit's docs in its public repository (`PUBLIC_REPO` in sdk-publish.mjs; the

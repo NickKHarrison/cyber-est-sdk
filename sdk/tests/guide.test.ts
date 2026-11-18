@@ -2,7 +2,8 @@
  * 1.400 (P3): `sdk/docs/BUILD_AN_EST_PLUGIN.md`, the first-plugin guide. Its code is tested code:
  * the effect-as template, scaffolded as the guide's step 1 does, with the guide's `assembly/index.ts`,
  * its est.json parameters and its golden events, builds with asc (a dev dependency), passes every
- * check Cyber's install runs and renders the same twice. The guide stays under 1500 words, the
+ * check Cyber's install runs and renders the same twice. The guide stays under 1200 words (1.807: rewritten
+ * around the shortest path: make the folder, build it, hear it, drop it into Cyber; publish later), the
  * kit's llms.txt points at it first, the README links it, and its rules name what the validator
  * says (EST-W004's `env.seed`, EST-C013's allocating in render()).
  */
@@ -21,8 +22,14 @@ const tmp = mkdtempSync(join(tmpdir(), 'est-guide-'));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 describe('the first-plugin guide', () => {
-  it('is under 1500 words, first in llms.txt, linked from the README, with the assistant block', () => {
-    expect(GUIDE.split(/\s+/).filter(Boolean).length).toBeLessThan(1500);
+  it('is under 1200 words, first in llms.txt, linked from the README, with the assistant block', () => {
+    expect(GUIDE.split(/\s+/).filter(Boolean).length).toBeLessThan(1200);
+    // 1.807: the four steps in their order, the drop into Cyber before any word about publishing.
+    const at = (t: string) => { const i = GUIDE.indexOf(t); expect(i, t).toBeGreaterThan(-1); return i; };
+    const steps = ['## 1. Make the folder', '## 2. Build it', '## 3. Hear it', '## 4. Drop it into Cyber'].map(at);
+    expect([...steps].sort((a, b) => a - b)).toEqual(steps);
+    expect(at('EST PLUGINS → Add a plugin')).toBeLessThan(at('PUBLISH_ON_THE_EST_STORE.md'));
+    expect(GUIDE).toContain('npx @cyber-est/cli new\n');
     const llms = readFileSync(repo('sdk/llms.txt'), 'utf8');
     const firstLink = /\]\(([^)]+)\)/.exec(llms.slice(llms.indexOf('## Docs')))?.[1];
     expect(firstLink).toBe('docs/BUILD_AN_EST_PLUGIN.md');

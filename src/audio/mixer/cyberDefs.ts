@@ -254,9 +254,16 @@ const MAXIMIZER_DEFS: FxParamDef[] = [
   { key: 'linkTransients', label: 'Link transients', min: 0, max: 100, default: max.linkTransients!, unit: 'pct' },
   { key: 'linkRelease', label: 'Link release', min: 0, max: 100, default: max.linkRelease!, unit: 'pct' },
   { key: 'stereoMode', label: 'Channels', min: 0, max: 1, default: max.stereoMode!, choices: ['Stereo', 'Mid/Side'] },
-  { key: 'audition', label: 'Audition', min: 0, max: 1, default: max.audition!, choices: ['Off', 'On'] },
+  // 1.756: no `audition`: Δ Audition is local monitoring (listenState.ts); a stored one is kept, unread (`LIMITER_KEPT_KEYS`).
   { key: 'target', label: 'Target', min: 0, max: LIMITER_TARGETS.length - 1, default: max.target!, choices: LIMITER_TARGETS.map(t => t.label) },
 ];
+
+/**
+ * 1.756: a Cyber Limiter slot's retired keys, kept as stored (a finite number, its range) so an older
+ * client reads what it wrote (forwardFields' rule for a field this build no longer knows): `audition`,
+ * which 1.715–1.755 saved and played, and which is now local monitoring and never read.
+ */
+export const LIMITER_KEPT_KEYS: Readonly<Record<string, { min: number; max: number }>> = Object.freeze({ audition: { min: 0, max: 1 } });
 
 /**
  * 1.715: what a newly made slot of a type has over its parameters' defaults (`defaultFx`, a

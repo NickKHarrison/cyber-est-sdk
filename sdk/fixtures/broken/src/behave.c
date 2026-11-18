@@ -11,6 +11,8 @@
  *   FAULT_TAIL       the tail is the echo's at 120 BPM, whatever the tempo (EST-C028)
  *   FAULT_SEED       a step's pitch is seeded by the count of hits, not the step (EST-C029)
  *   FAULT_JUMP       a forward transport jump fires every skipped step (EST-C030)
+ *   FAULT_COUNT      the pattern stops after 32 hits counted since activate (EST-C029: a render from a
+ *                    bar against playing through it; R, 2026-11-18)
  *
  * Four sine voices (the oldest is stolen with a 3 ms fade, the new note waiting), and, while the
  * transport plays, a pattern of sixteenth blips on sixteen blip voices (Pattern on by default) with
@@ -146,6 +148,9 @@ static double step_at(behave_t *s, double beat) {
 static uint32_t hash32(uint32_t x) { x ^= x >> 16; x *= 0x7feb352d; x ^= x >> 15; x *= 0x846ca68b; x ^= x >> 16; return x; }
 
 static void fire(behave_t *s, double step) {
+#if defined(FAULT_COUNT)
+   if (s->hits >= 32) return;
+#endif
    s->hits++;
 #if defined(FAULT_SEED)
    (void)step;

@@ -180,12 +180,22 @@ pub struct Io {
     pub(crate) values: *mut f64,
     pub(crate) params: &'static [Param],
     pub(crate) out_events: *const ClapOutputEvents,
+    pub(crate) side: [*const f32; 2],
+    /// Sidechain channels the host passed (0 when the plugin has none or the host sent none).
+    pub side_channels: usize,
+    /// Whether the host feeds the sidechain (a key is chosen: its constant_mask is not all set).
+    pub side_live: bool,
 }
 
 impl Io {
+    /// Sidechain sample `n` of channel `c` (EST 1.1, 1.786: `Effect::SIDECHAIN_CHANNELS`; 0 when absent or no key is chosen).
+    #[inline(always)]
+    pub fn sidechain(&self, c: usize, n: usize) -> f32 {
+        if c < self.side_channels && n < self.frames && !self.side[c].is_null() { unsafe { *self.side[c].add(n) } } else { 0.0 }
+    }
     /// An Io with no audio and no host (a plugin's own tests, and probes): reads 0, writes nothing.
     pub const fn detached(frames: usize) -> Io {
-        Io { ins: [null(); 2], outs: [null_mut(); 2], channels: 0, frames, transport: Transport::DEFAULT, values: null_mut(), params: &[], out_events: null() }
+        Io { ins: [null(); 2], outs: [null_mut(); 2], channels: 0, frames, transport: Transport::DEFAULT, values: null_mut(), params: &[], out_events: null(), side: [null(); 2], side_channels: 0, side_live: false }
     }
 
     /// Input sample `n` of channel `c` (0 outside the block, and for an instrument).

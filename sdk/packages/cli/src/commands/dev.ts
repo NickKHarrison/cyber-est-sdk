@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 import type { EstCommand, ParsedArgs } from '../command';
 
 /** The flags of `est dev` that take a value (the rest are switches). */
-const VALUE_FLAGS = ['port', 'files-port', 'seconds', 'play', 'ui-preview'];
+const VALUE_FLAGS = ['port', 'files-port', 'seconds', 'play', 'ui-preview', 'key'];
 
 /** The devhost's own subcommand module, from this file's place in the repository. */
 const DEV_MODULE = new URL('../../../../devhost/cli/dev.mjs', import.meta.url);
@@ -46,7 +46,7 @@ const command: EstCommand = {
   summary: 'Play a plugin in the dev host while you build it (http://localhost:4430; --json headless)',
   usage: [
     'est dev [dir | file.est] [--port 4430] [--files-port 4431] [--no-watch] [--open]',
-    'est dev [dir | file.est] --json [--seconds N] [--play 60,64,67]',
+    'est dev [dir | file.est] --json [--seconds N] [--play 60,64,67] [--key off|kick|sine]',
     'est dev <folder with ui/> --ui-preview params.json',
     '',
     '  Builds the plugin on every change, serves the dev host on http://localhost:4430 and the',
@@ -63,6 +63,12 @@ const command: EstCommand = {
     '  --play <keys>        with --json: play these MIDI notes one after another, then stop 1 s after',
     '                       the last (without either flag: 1 s after stdin closes and its commands ran)',
     '',
+    "  --key <kind>         with --json: what feeds an effect's sidechain: off, kick (the test loop's",
+    '                       drums) or sine',
+    '',
+    '  The page shows the generated panel beside the plugin\'s own window, and a rebuild hands over',
+    '  without stopping the sound (held notes, values and the state go with it). Each build ends with',
+    '  one line that starts "Next:". EST_CHROMIUM names a Chromium already on the machine for --json.',
     '  A port in use stops it (EADDRINUSE): pass free ones, or --port 0 --files-port 0 for any.',
     '  --ui-preview <file>  the custom UI against the parameters in <file> (no DSP)',
   ].join('\n'),

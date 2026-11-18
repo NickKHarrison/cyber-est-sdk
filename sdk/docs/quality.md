@@ -6,11 +6,11 @@ too much. It runs in Node on Cyber's own `est-plugin` processor (the same code t
 in the app, metered as at install), block by block, so the numbers are the same on every run.
 
 ```sh
-npm run est -- quality path/to/plugin.est                         # one bundle
-npm run est -- quality est-plugins/catalogue-src/org.example.synth  # a plugin folder (built and packed first)
-npm run est -- quality a.est b.est --profile profiles.json --md report.md --json report.json
-npm run est -- quality a.est --preset "Warm Pad"                  # one preset
-npm run est -- quality a.est --preset "Warm Pad" --values try.json  # try other values before writing them
+npx est quality path/to/plugin.est                # one bundle
+npx est quality .                                 # this plugin folder (built and packed first)
+npx est quality a.est b.est --profile profiles.json --md report.md --json report.json
+npx est quality a.est --preset "Warm Pad"                  # one preset
+npx est quality a.est --preset "Warm Pad" --values try.json  # try other values before writing them
 ```
 
 It prints a Markdown table, one row a preset, and exits 1 when a preset has a finding other than its

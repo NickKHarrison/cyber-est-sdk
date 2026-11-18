@@ -1,0 +1,73 @@
+{
+  "$schema": "../../../../src/audio/est/abi/est-manifest-1.schema.json",
+  "est": 1,
+  "id": "org.example.port-overdrive",
+  "version": "1.0.0",
+  "name": "Overdrive",
+  "vendor": "Example",
+  "description": "An asymmetric soft-clip overdrive with a tone filter: the kit's worked example of a C++ port (the original class, unchanged, behind an adapter).",
+  "license": "MIT",
+  "kind": "effect",
+  "features": [
+    "audio-effect",
+    "distortion",
+    "stereo"
+  ],
+  "abi": {
+    "est": "1.0",
+    "clap": "1.2"
+  },
+  "module": {
+    "path": "module.wasm"
+  },
+  "assets": [],
+  "audio": {
+    "inputs": [
+      {
+        "channels": 2
+      }
+    ],
+    "outputs": [
+      {
+        "channels": 2
+      }
+    ],
+    "sampleRates": "any"
+  },
+  "notes": {
+    "inputs": 0,
+    "outputs": 0
+  },
+  "limits": {
+    "maxLatencyFrames": 0,
+    "memoryPagesMax": 16,
+    "tailSeconds": 0
+  },
+  "parameters": [
+    {
+      "id": 0,
+      "name": "Drive",
+      "unit": "dB"
+    },
+    {
+      "id": 1,
+      "name": "Tone",
+      "unit": "Hz",
+      "scale": "log"
+    },
+    {
+      "id": 2,
+      "name": "Level",
+      "unit": "dB"
+    },
+    {
+      "id": 3,
+      "name": "Mix"
+    }
+  ],
+  "stateVersion": 1,
+  "permissions": [],
+  "compat": {
+    "host": ">=1.0.0 <2"
+  }
+}

@@ -13,9 +13,9 @@ gives you the bookkeeping around them that is easy to get wrong:
 Cyber's own catalogue plugins use it. Every rule in it answers a fault a code review found in a plugin that did
 the same thing by hand.
 
-It is AssemblyScript, in the Cyber clone (and the kit's public repository) at
-[est-plugins/catalogue-src/tools/dsp/](../../est-plugins/catalogue-src/tools/dsp/README.md). Its README
-documents every piece. It imports only this kit's `est` library.
+It is AssemblyScript, in the kit's public repository, https://github.com/NickKHarrison/cyber-est-sdk, at
+[est-plugins/catalogue-src/tools/dsp/](../../est-plugins/catalogue-src/tools/dsp/README.md). It is not inside
+the npm packages: copy it from there. Its README documents every piece. It imports only this kit's `est` library.
 
 ## Use it in a plugin made by `est new`
 

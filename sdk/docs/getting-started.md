@@ -9,17 +9,21 @@ Both make the same kind of bundle, and the plugin interface has the same names i
 
 ## 0. Check your tools
 
-The kit is the npm package `@cyber-est/cli` (decision D-50). From npm (Node 20 or newer; the kit's first release, 0.1.0, is built and checked but not yet published):
+The kit is the npm package `@cyber-est/cli` (decision D-50). Install it from npm (Node 20 or newer):
 
 ```
 npx @cyber-est/cli new effect-as my-gain --id com.example.my-gain --name "My Gain"
 cd my-gain
-npm install --save-dev --save-exact @cyber-est/cli@0.1.0   # est and asc in this folder
+npm install --save-dev --save-exact @cyber-est/cli   # est and asc in this folder
 ```
+
+(`est new` also writes a `package.json` that pins the kit, with `npm run validate`, `test`, `dev` and `pack`, and runs `npm install` itself unless you pass `--no-install`; the line above is then already done. With no arguments at all, `npx @cyber-est/cli new` asks three questions instead: what the plugin should do, instrument or effect, and a name.)
 
 From then on `npx est <command>` works in that folder. **Only there:** in a folder without `@cyber-est/cli` installed, write `npx @cyber-est/cli <command>`, because a bare `npx est` would fetch npm's unrelated package called `est`. Nothing else is fetched at run time; the package brings AssemblyScript's `asc` and Binaryen (the meter) with it.
 
-From a clone instead (until the first release, and for work on the kit itself), once, in the clone of the kit's public repository or of Cyber's:
+The commands below are written `est <command>`: in your plugin's folder that is `npx est <command>`.
+
+Only to work on the kit itself, run it from a clone of the kit's public repository instead:
 
 ```
 git clone https://github.com/NickKHarrison/cyber-est-sdk && cd cyber-est-sdk
@@ -27,13 +31,30 @@ npm ci
 alias est="node $PWD/sdk/packages/cli/bin/est.mjs"
 ```
 
-Then `est` works in any folder, your plugin's included (put the alias in your shell's profile to keep it; on Windows, `node <clone>\sdk\packages\cli\bin\est.mjs` is the same command). At the clone's root, `npm run est -- <command>` is the same again.
+Then `est` works in any folder (put the alias in your shell's profile to keep it; on Windows, `node <folder>\sdk\packages\cli\bin\est.mjs` is the same command).
 
 ```
 est doctor
 ```
 
-It checks Node, and for Rust `rustup`, `cargo` and the `wasm32-unknown-unknown` target, and for AssemblyScript `asc` (it comes with `@cyber-est/cli`, or the clone's `npm ci`); it also reports Playwright's Chromium, which only `est dev --json` needs. For anything missing it prints the exact command to run; it never installs anything itself. For Rust the usual one is:
+It checks Node, and for Rust `rustup`, `cargo` and the `wasm32-unknown-unknown` target, and for AssemblyScript `asc` (it comes with `@cyber-est/cli`); it also reports Playwright's Chromium, which only `est dev --json` needs. For anything missing it prints the exact command to run; it never installs anything itself.
+
+**In a plugin folder, `est doctor` also says what is wrong with that folder** (or `est doctor <folder>` from outside it). Each line is `ok`, `fix` or `note`, and a `fix` line gives the exact command to run or the edit to make:
+
+```
+ok    est.json: org.example.my-gain 1.0.0 (effect)
+ok    AssemblyScript: its build tools are here
+note  not needed by this folder: Rust not set up; C or C++ ready
+fix   the code says the id is "org.example.other" (assembly/index.ts:30) and est.json says "org.example.my-gain": edit assembly/index.ts:30: make the id "org.example.my-gain" (or change est.json's "id"; they must be the same)
+ok    the code and est.json list the same 4 parameters
+fix   dist/org.example.my-gain-1.0.0.est is older than your last change: run npx est validate
+
+Next: edit assembly/index.ts:30: make the id "org.example.my-gain" (or change est.json's "id"; they must be the same)
+```
+
+It looks at `est.json`, the kit installed in the folder, the build tools **this** folder needs (another language's missing tools are only a note), the id and the parameters the code declares against `est.json`, the memory limit in `asconfig.json` against `est.json`, the golden spec's parameters, and what the last `est validate` left in `dist/`. These are hints, worked out without building: `est validate` is still the check that decides, and where the code cannot be read simply (parameters made in a loop) a check is skipped, not guessed. The last line starts `Next:` and is the one thing to do now. It exits 1 only when the folder cannot build. `--json` prints the same as data (`folder.checks`, `next`).
+
+For Rust the usual missing tool is:
 
 ```
 rustup target add wasm32-unknown-unknown
@@ -60,9 +81,10 @@ The folder holds:
 | `est-validator-rules.json` | every validator rule: id, title, explanation, fix ([as a page](validator-rules.md)) |
 | `est-abi-1.0.json`, `est-abi-1.1.json` | the ABI: every CLAP struct's layout on wasm32, for EST 1.0 and 1.1 (only for code written without the SDK's runtime) |
 | `est-ui.d.ts` | the UI library's types, for a custom UI in TypeScript |
-| `AGENTS.md`, `CLAUDE.md`, `llms.txt` | the same instructions for a coding agent |
+| `AGENTS.md`, `llms.txt` | what to build (your `--idea` sentence), the loop, the rules and the library on one page, for a coding agent; `CLAUDE.md` and `.cursor/rules/est.mdc` are one-line pointers to it |
+| `package.json` | the kit, pinned, and the scripts `validate`, `test`, `dev`, `pack` |
 
-`est new` names the plugin from `--id`: its name and id everywhere, the Rust crate (`my-gain`, so the module is `target/wasm32-unknown-unknown/release/my_gain.wasm`) and the plugin's type (`MyGain`). Add `--ui` for a custom UI to start from ([the UI library](ui.md)).
+`est new` names the plugin from `--name` (without it, from `--id`'s last part) and, without `--id`, gives it the id `com.example.<name>`: its name and id everywhere, the Rust crate (`my-gain`, so the module is `target/wasm32-unknown-unknown/release/my_gain.wasm`) and the plugin's type (`MyGain`). Add `--ui` for a custom UI to start from ([the UI library](ui.md)).
 
 The template is already a working plugin: a smoothed gain and a filter.
 
@@ -73,7 +95,7 @@ cd ~/plugins/my-gain
 est dev
 ```
 
-Open <http://localhost:4430>. The dev host builds the plugin, checks it exactly as Cyber's install does (the reader, the meter, the conformance run), and shows **Start audio**. Press it: a 220 Hz sine goes through your effect, and the meters show its level. Turn the generated knob, or type a value in the parameter list. Save a file in the folder and the dev host rebuilds and reloads the instance, keeping its state. More in [the dev host](dev-host.md).
+Open <http://localhost:4430>. The dev host builds the plugin, checks it exactly as Cyber's install does (the reader, the meter, the conformance run), and shows **Start audio**. Press it: a 220 Hz sine goes through your effect, and the meters show its level. Turn the generated knob, or type a value in the parameter list. Save a file in the folder and the dev host rebuilds and hands over to the new build without stopping the sound: held notes, the values and the state go with it ([a rebuild hands over](dev-host.md#a-rebuild-hands-over)). More in [the dev host](dev-host.md).
 
 ## 3. Change it
 
@@ -103,13 +125,17 @@ After the conformance run come the **behaviour checks** (`EST-C024` to `EST-C030
 
 Then `est test` plays the golden render and compares it with the stored one, and runs the conformance checks again. `test/golden.json` says what to play: an input (`noise` for an effect, `none` for an instrument), a length, and **events that name parameters by their id** (`{ "type": "param", "time": 0.04, "id": 2, "value": 0.6 }`, a value in the parameter's plain units) and notes. `test/golden.f32` is what came out. So **when you change the parameters, change the events to match**: an event for an id you removed does nothing, one for a renumbered id moves another parameter, and a value outside a new range is clamped, so the render no longer tests what it did. After any change to the sound you made on purpose, `est test --update` writes the new render; listen to it first, then keep both files. `est test` exits 1 when anything fails, the golden comparison or any conformance check, and 0 only when all pass.
 
+**A sidechain's key.** An effect with a sidechain (EST 1.1, [concepts](concepts.md)) hears silence there unless the spec gives it a key: `"key": { "kind": "bursts", "level": 0.9 }` beside `"input"`. The key takes the input's own kinds: `noise`, `none`, and `bursts`, a 110 Hz square that is on for the first quarter of each period and silent for the rest (`"rate"` periods a second, default 2), so a ducker or a gate is seen to move when the key starts and stops. `est test` prints `. golden key: bursts into the sidechain`; a plugin with no sidechain ignores the key and `est test` says so. A spec without `key` renders exactly as before.
+
+`est validate` and `est test` end with one line that starts `Next:`: the first compiler error with its file and line, the first failed check with its rule id and fix, or the next step ([the dev host](dev-host.md#the-next-thing-to-do)).
+
 ## 5. Pack and install
 
 ```
 est pack
 ```
 
-builds the plugin and writes `dist/org.example.my-gain-1.0.0.est` (`est validate` does the same first, so after a green validate the bundle is already there). In Cyber, signed in as an admin: **Settings → Plugins**, turn on **Developer mode**, then **Load a bundle file…** and pick the `.est`. Add it to a track from the track's **+ Add effect** menu, under the plugins. Cyber runs the same checks as `est validate`; a refusal names the same rule id.
+builds the plugin and writes `dist/org.example.my-gain-1.0.0.est` (`est validate` does the same first, so after a green validate the bundle is already there). In Cyber, signed in: on Home, **EST PLUGINS → Add a plugin**, and drop the `.est` on it. Add it to a track from the track's **+ Add effect** menu, under the plugins. Cyber runs the same checks as `est validate`; a refusal names the same rule id.
 
 Every change you ship is a new version: a project pins a plugin by its bundle's content hash, so a bundle never changes once anyone uses it.
 

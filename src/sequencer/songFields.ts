@@ -24,7 +24,7 @@ export const SONG_FIELDS = fieldsOf<SequencerState>()([
 export const TRACK_FIELDS = fieldsOf<Track>()([
   'id', 'name', 'color', 'mute', 'solo', 'volume', 'swing', 'pan', 'sends', 'fx', 'output', 'groupId', 'height',
   'delayMs', 'xfadeAssign', 'kind', 'folded', 'monitor', 'resample', 'estOut', 'frozen', 'midiFx', 'presetId',
-  'modified', 'arp', 'engine', 'patch',
+  'modified', 'arp', 'engine', 'patch', 'auditionTake',
 ] as const);
 
 export const FX_SLOT_FIELDS = fieldsOf<FxSlot>()(['id', 'type', 'on', 'params', 'keyTrackId', 'mod', 'est', 'rack'] as const);
@@ -56,4 +56,4 @@ export const RETURN_FIELDS = fieldsOf<ReturnBus>()([
 ] as const);
 export const MASTER_FIELDS = fieldsOf<MasterBus>()(['fx', 'xfade'] as const);
 export const SESSION_FIELDS = fieldsOf<SessionState>()(['scenes', 'clips', 'audioClips', 'quantize', 'overdubMode', 'noStop'] as const);
-export const SCENE_FIELDS = fieldsOf<Scene>()(['id', 'name', 'tempo', 'sig', 'color'] as const);
+export const SCENE_FIELDS = fieldsOf<Scene>()(['id', 'name', 'tempo', 'sig', 'color', 'follow'] as const);

@@ -32,9 +32,11 @@ export function help(commands: EstCommand[]): string {
     ...commands.filter(c => !c.ownerOnly).map(c => `  ${c.name.padEnd(w)}  ${c.summary}`),
     ...(owner.length ? ['', 'Cyber\'s own registry (the owner\'s key, from a clone of Cyber\'s repository; not for your plugins):', ...owner.map(c => `  ${c.name.padEnd(w)}  ${c.owner}`)] : []),
     '',
-    'est help <command> shows a command\'s options. The loop: est new, est validate, read validation.json, fix, est test, est dev.',
+    'est help <command> shows a command\'s options. Start with est new (no arguments: three questions). The loop: est validate, read validation.json, fix, est test, est dev.',
     'New to this? BUILD_AN_EST_PLUGIN.md (beside est in @cyber-est/cli, and in the kit\'s docs) walks through a first plugin;',
-    'PROMPT_KIT.md beside it has a prompt for an AI assistant for every template and recipe, and SHARING.md says how to share what you made.',
+    'PROMPT_KIT.md beside it has a prompt for an AI assistant for every template and recipe, SHARING.md says how to share what you made,',
+    'and PORT_YOUR_VST.md (Port your plugin) takes a C or C++ plugin into EST: est port <your source folder> starts it.',
+    'To publish: STORE → My plugins → Publish a version; est demo makes the demo clip.',
   ].join('\n');
 }
 
@@ -44,6 +46,7 @@ export async function main(commands: EstCommand[], argv: string[], ctx?: Partial
     cwd: ctx?.cwd ?? process.cwd(),
     out: ctx?.out ?? (t => process.stdout.write(`${t}\n`)),
     err: ctx?.err ?? (t => process.stderr.write(`${t}\n`)),
+    input: ctx?.input,
   };
   const sorted = [...commands].sort((a, b) => a.name.localeCompare(b.name));
   const [name, ...rest] = argv;

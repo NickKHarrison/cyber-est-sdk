@@ -1,0 +1,7 @@
+{
+  "$comment": "The maths probe (sdk/tests/cppKit.test.ts): one C++ source through <cmath>, one C source through <math.h>.",
+  "sources": ["src/probe.cpp", "src/probe_c.c"],
+  "include": ["src"],
+  "std": "c++17",
+  "module": "build/module.wasm"
+}

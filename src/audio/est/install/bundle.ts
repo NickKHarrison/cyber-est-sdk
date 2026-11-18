@@ -21,6 +21,8 @@ import { encodeBase64 } from '../base64';
 import type { EstManifestInfo, EstPreset } from '../library';
 import { EST_HASH_RE, EST_ID_RE, EST_MIGRATE_MAX, EST_STATE_INLINE_MAX, EST_VERSION_RE, type EstMigrateEntry } from '../slot';
 import { parseEstRange } from '../migrate';
+import { isHiddenCodePoint } from '../../../../shared/estHiddenText.mjs';
+import { crc32, pathRefusal, readStrictZip } from '../../../../shared/estStrictZip.mjs';
 
 export const BUNDLE_MAX_BYTES = 64 * 1024 * 1024;
 export const BUNDLE_MAX_ENTRIES = 512;
@@ -70,132 +72,16 @@ const refuse = (code: EstBundleRefusal, message: string, rule: string, where: st
 
 export interface ZipEntry { name: string; data: Uint8Array }
 
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    t[n] = c >>> 0;
-  }
-  return t;
-})();
+/**
+ * 1.792 (Cyber_EST_Shared_Plugins_Work_Order.md §3.3): the archive's strict rules are one shared file,
+ * `shared/estStrictZip.mjs`, read here and by the server's stored bundles (server/workspace.mjs), so the
+ * two never drift (the sandbox attack report's B2). Its refusals are this file's `EstBundleError`s.
+ */
+export { crc32, pathRefusal };
 
-export function crc32(b: Uint8Array): number {
-  let c = 0xffffffff;
-  for (let i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]!) & 0xff]! ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-const SEGMENT = /^[A-Za-z0-9._-]+$/;
-
-/** Why a path inside a bundle is not allowed, or null. */
-export function pathRefusal(name: string): string | null {
-  if (!name || name.length > 255) return 'an empty or over-long path';
-  if (name.startsWith('/') || /^[A-Za-z]:/.test(name)) return `an absolute path (${name})`;
-  if (name.includes('\\')) return `a backslash in a path (${name})`;
-  const segs = name.split('/');
-  for (const s of segs) {
-    if (s === '..' || s === '.') return `a relative step in a path (${name})`;
-    if (!SEGMENT.test(s)) return `a path with characters EST does not allow (${JSON.stringify(name)})`;
-  }
-  return null;
-}
-
-/** The entries of a stored ZIP, under the strict rules above (directories left out). */
+/** The entries of a stored ZIP, under the strict rules (directories left out). */
 export function readStoredZip(bytes: Uint8Array): ZipEntry[] {
-  if (bytes.length > BUNDLE_MAX_BYTES) refuse('size', `the bundle is ${bytes.length} bytes, over the limit of ${BUNDLE_MAX_BYTES}`, 'EST-B004');
-  if (bytes.length < 22) refuse('zip', 'not a ZIP archive (too short)', 'EST-B001');
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const eocd = bytes.length - 22;
-  if (dv.getUint32(eocd, true) !== 0x06054b50) refuse('zip', 'not a canonical ZIP archive (no end record at the end: a comment or trailing bytes)', 'EST-B001');
-  const disk = dv.getUint16(eocd + 4, true);
-  const cdDisk = dv.getUint16(eocd + 6, true);
-  const onDisk = dv.getUint16(eocd + 8, true);
-  const total = dv.getUint16(eocd + 10, true);
-  const cdSize = dv.getUint32(eocd + 12, true);
-  const cdOffset = dv.getUint32(eocd + 16, true);
-  const commentLen = dv.getUint16(eocd + 20, true);
-  if (disk !== 0 || cdDisk !== 0 || onDisk !== total) refuse('zip', 'a multi-disk ZIP archive', 'EST-B001');
-  if (total === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) refuse('zip', 'a ZIP64 archive', 'EST-B001');
-  if (commentLen !== 0) refuse('zip', 'an archive comment', 'EST-B001');
-  if (total > BUNDLE_MAX_ENTRIES) refuse('size', `${total} entries, over the limit of ${BUNDLE_MAX_ENTRIES}`, 'EST-B004');
-  if (cdOffset + cdSize !== eocd) refuse('zip', 'bytes between the central directory and its end record', 'EST-B001');
-  const dec = new TextDecoder('utf-8', { fatal: true });
-  const out: ZipEntry[] = [];
-  const seen = new Set<string>();
-  let at = cdOffset;
-  let expect = 0;
-  for (let i = 0; i < total; i++) {
-    if (at + 46 > eocd || dv.getUint32(at, true) !== 0x02014b50) refuse('zip', 'a damaged central directory', 'EST-B003');
-    const madeBy = dv.getUint16(at + 4, true);
-    const flags = dv.getUint16(at + 8, true);
-    const method = dv.getUint16(at + 10, true);
-    const crc = dv.getUint32(at + 16, true);
-    const csize = dv.getUint32(at + 20, true);
-    const usize = dv.getUint32(at + 24, true);
-    const nameLen = dv.getUint16(at + 28, true);
-    const extraLen = dv.getUint16(at + 30, true);
-    const commentLen2 = dv.getUint16(at + 32, true);
-    const external = dv.getUint32(at + 38, true);
-    const offset = dv.getUint32(at + 42, true);
-    if (at + 46 + nameLen + extraLen + commentLen2 > eocd) refuse('zip', 'a damaged central directory', 'EST-B003');
-    const nameBytes = bytes.subarray(at + 46, at + 46 + nameLen);
-    let name: string;
-    try { name = dec.decode(nameBytes); } catch { name = refuse('path', 'a path that is not UTF-8', 'EST-B005'); }
-    at += 46 + nameLen + extraLen + commentLen2;
-    if (flags & 0x0001) refuse('zip', `${name} is encrypted`, 'EST-B002', name);
-    if (flags & 0x0008) refuse('zip', `${name} has a data descriptor (sizes must be in its header)`, 'EST-B002', name);
-    if (method !== 0) refuse('zip', `${name} is compressed (EST bundles store every entry uncompressed)`, 'EST-B002', name);
-    if (csize !== usize) refuse('zip', `${name}'s sizes disagree`, 'EST-B002', name);
-    const host = madeBy >>> 8;
-    const mode = external >>> 16;
-    if (host === 3 && (mode & 0o170000) === 0o120000) refuse('symlink', `${name} is a symbolic link`, 'EST-B006', name);
-    // The local record: exactly where the previous one ended (no gaps, no overlaps, nothing before).
-    if (offset !== expect) refuse('zip', `${name} is not where the archive's layout puts it`, 'EST-B001', name);
-    if (offset + 30 > cdOffset || dv.getUint32(offset, true) !== 0x04034b50) refuse('zip', `${name}'s local header is damaged`, 'EST-B003', name);
-    const lFlags = dv.getUint16(offset + 6, true);
-    const lMethod = dv.getUint16(offset + 8, true);
-    const lCrc = dv.getUint32(offset + 14, true);
-    const lCsize = dv.getUint32(offset + 18, true);
-    const lUsize = dv.getUint32(offset + 22, true);
-    const lNameLen = dv.getUint16(offset + 26, true);
-    const lExtraLen = dv.getUint16(offset + 28, true);
-    const lName = bytes.subarray(offset + 30, offset + 30 + lNameLen);
-    if (lFlags !== flags || lMethod !== method || lCrc !== crc || lCsize !== csize || lUsize !== usize
-      || lNameLen !== nameLen || !sameBytes(lName, nameBytes)) {
-      refuse('zip', `${name}'s local header disagrees with the central directory`, 'EST-B003', name);
-    }
-    const start = offset + 30 + lNameLen + lExtraLen;
-    const end = start + csize;
-    if (end > cdOffset) refuse('zip', `${name} runs past the archive's data`, 'EST-B003', name);
-    expect = end;
-    const data = bytes.subarray(start, end);
-    if (crc32(data) !== crc) refuse('hash', `${name} does not match its CRC-32 (a damaged or altered bundle)`, 'EST-B009', name);
-    if (name.endsWith('/')) {
-      if (csize !== 0) refuse('zip', `the directory ${name} has data`, 'EST-B002', name);
-      if (i === 0) refuse('manifest', 'est.json is not the first entry', 'EST-B008', name);
-      const dir = name.slice(0, -1);
-      const why = pathRefusal(dir);
-      if (why) refuse('path', why, 'EST-B005', name);
-      continue;
-    }
-    const why = pathRefusal(name);
-    if (why) refuse('path', why, 'EST-B005', name);
-    const key = name.toLowerCase();
-    if (seen.has(key)) refuse('path', `${name} is in the archive twice`, 'EST-B007', name);
-    seen.add(key);
-    if (i === 0 && name !== 'est.json') refuse('manifest', 'est.json is not the first entry', 'EST-B008', name);
-    out.push({ name, data });
-  }
-  if (expect !== cdOffset) refuse('zip', 'bytes between the entries and the central directory', 'EST-B001');
-  if (at !== eocd) refuse('zip', 'a damaged central directory', 'EST-B003');
-  return out;
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
+  return readStrictZip(bytes, { maxBytes: BUNDLE_MAX_BYTES, maxEntries: BUNDLE_MAX_ENTRIES, refuse: (code, message, rule, where) => refuse(code, message, rule, where ?? null) });
 }
 
 // --- The manifest -----------------------------------------------------------------------------
@@ -273,6 +159,13 @@ const fieldOf = (what: string): string | null => {
 };
 const bad = (what: string): never => refuse('manifest', `est.json: ${what}`, manifestRuleOf(what), fieldOf(what));
 
+/**
+ * 1.314 (EST-14) + the sandbox attack review (stream B, 2026-11-18): whether a code point is a
+ * zero-width, bidirectional, or otherwise invisible/format character that EST-M018 refuses in any
+ * display string. The one rule, shared/estHiddenText.mjs (the publish route's and the public pages' too).
+ */
+export const isHiddenChar: (c: number) => boolean = isHiddenCodePoint;
+
 function plainText(v: unknown, field: string, max: number, required = true): string {
   if (v === undefined && !required) return '';
   if (typeof v !== 'string') return bad(`${field} is not text`);
@@ -282,7 +175,12 @@ function plainText(v: unknown, field: string, max: number, required = true): str
     const c = ch.codePointAt(0)!;
     if (c < 0x20 || c === 0x7f) bad(`${field} has a control character`);
     // 1.314 (EST-14): zero-width and bidirectional controls, which could make one name look like another.
-    if ((c >= 0x200b && c <= 0x200f) || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069)) bad(`${field} has a zero-width or direction character (U+${c.toString(16).toUpperCase().padStart(4, '0')})`);
+    // The sandbox attack review (stream B, 2026-11-18): the original ranges left several invisible and
+    // format characters through (U+00AD soft hyphen, U+061C ALM, U+180E, U+2060–2064 word joiner and the
+    // invisible math operators, U+2028/U+2029 line and paragraph separators, U+FEFF BOM/ZWNBSP, and the
+    // whole Tags block U+E0000–U+E007F, which encodes an invisible ASCII string), so a name could still
+    // carry hidden text or read identically to another. EST-M018 refuses them all.
+    if (isHiddenChar(c)) bad(`${field} has a zero-width or direction character (U+${c.toString(16).toUpperCase().padStart(4, '0')})`);
   }
   return v;
 }

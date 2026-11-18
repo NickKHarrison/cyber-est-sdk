@@ -19,11 +19,13 @@ import { readProject } from './project';
 
 export { validate, reportOf, formatReport, TOOL_NAME, TOOL_VERSION } from './validate';
 export type { ValidationReport, ValidationCheck, ValidateOptions, CheckStatus } from './validate';
+export { nextLine, firstCompilerError, fewWords, NEXT_PREFIX, DROP_WORDS } from './next';
+export type { NextInput, CompilerError } from './next';
 export { inspect } from './inspect';
 export type { Inspection } from './inspect';
 export { render, renderGoldenBundle, renderGoldenBundleFull, inputSamples } from './render';
-export { compareGolden, compareNotes, goldenBytes, notesJson, goldenFromBytes, goldenInput } from '../../../testing/golden';
-export type { GoldenNote, GoldenSpec } from '../../../testing/golden';
+export { compareGolden, compareNotes, goldenBytes, notesJson, goldenFromBytes, goldenInput, goldenSignal, goldenKeyOf } from '../../../testing/golden';
+export type { GoldenNote, GoldenSpec, GoldenSignal, GoldenKey } from '../../../testing/golden';
 export type { RenderSpec, RenderInput, RenderEvent, Rendered } from './render';
 export { compareRenders, compareWarnings, formatCompare, htmlReport, readWav, writeWav, bandPower, dbOf, BANDS } from './compare';
 export type { CompareResult, CompareOptions, ChannelCompare, Stereo } from './compare';

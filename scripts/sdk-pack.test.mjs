@@ -211,10 +211,10 @@ describe('the source manifests', () => {
     }
   });
 
-  it("carry the CLI's docs at its root: the guide, the prompt kit and the sharing guide, each named in its files (1.400, 1.434)", () => {
+  it("carry the CLI's docs at its root: the guide, the prompt kit, the sharing guide and (1.789) Port your VST, each named in its files (1.400, 1.434)", () => {
     const cli = JSON.parse(readFileSync(join(REPO, PACKAGES.cli.dir, 'package.json'), 'utf8'));
     expect(CLI_DOCS[0]).toBe(CLI_GUIDE);
-    expect(CLI_DOCS).toEqual(['sdk/docs/BUILD_AN_EST_PLUGIN.md', 'sdk/docs/PROMPT_KIT.md', 'sdk/docs/SHARING.md']);
+    expect(CLI_DOCS).toEqual(['sdk/docs/BUILD_AN_EST_PLUGIN.md', 'sdk/docs/PROMPT_KIT.md', 'sdk/docs/SHARING.md', 'sdk/docs/PORT_YOUR_VST.md']);
     const named = cli.files.filter((f) => f.endsWith('.md') && !['README.md', 'THIRD_PARTY_LICENSES.md'].includes(f));
     expect(named.sort()).toEqual(CLI_DOCS.map((d) => d.split('/').pop()).sort());
     for (const d of CLI_DOCS) expect(existsSync(join(REPO, d)), d).toBe(true);

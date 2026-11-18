@@ -17,7 +17,7 @@
 import { readBundle } from '../../../../src/audio/est/install/bundle';
 import { standInInstance } from '../../../../src/audio/est/install/conformance';
 import { isMetered } from '../../../../src/audio/est/install/fuel';
-import { renderGoldenFull, type GoldenNote, type GoldenSpec } from '../../../testing/golden';
+import { renderGoldenFull, type GoldenKey, type GoldenNote, type GoldenSpec } from '../../../testing/golden';
 import { hostShim, loadMeter } from './host';
 
 const FRAMES = 128;
@@ -36,6 +36,11 @@ export interface RenderSpec {
   seconds?: number;
   sampleRate?: number;
   input?: RenderInput;
+  /**
+   * 1.803: what feeds the plugin's sidechain (EST 1.1's `{ "role": "sidechain" }` input), any of the
+   * inputs above. Absent: silence. A plugin with no sidechain ignores it (`Rendered.key` says which).
+   */
+  key?: RenderInput;
   events?: RenderEvent[];
   tolerance?: number;
 }
@@ -52,6 +57,8 @@ export interface Rendered {
    * the heaviest block's and the mean (the store's automatic review flags a plugin over 75 %).
    */
   fuel: { peak: number; mean: number };
+  /** 1.803: what became of `spec.key`: fed to the sidechain, ignored (the plugin has none), or none asked. */
+  key: GoldenKey;
 }
 
 function fill(input: RenderInput, l: Float32Array, r: Float32Array, start: number, sr: number, rng: () => number) {
@@ -99,7 +106,9 @@ export async function render(bytes: Uint8Array, spec: RenderSpec = {}): Promise<
   const inst = standInInstance({ module, shim, manifest: bundle.manifest }, sr);
   const left = new Float32Array(frames), right = new Float32Array(frames);
   const err = inst.boot.find(m => m.type === 'error');
-  if (!inst.boot.some(m => m.type === 'ready')) return { sampleRate: sr, frames, left, right, error: err ? `${String(err.phase)}: ${String(err.message)}` : 'it did not start', fuel: { peak: 0, mean: 0 } };
+  const sidechain = bundle.manifest.edition === '1.1' ? bundle.manifest.sidechain : 0;
+  const keyed: GoldenKey = !spec.key || spec.key.kind === 'silence' ? 'none' : sidechain > 0 ? 'fed' : 'ignored';
+  if (!inst.boot.some(m => m.type === 'ready')) return { sampleRate: sr, frames, left, right, error: err ? `${String(err.phase)}: ${String(err.message)}` : 'it did not start', fuel: { peak: 0, mean: 0 }, key: keyed };
   // The processor's own budget and fuel left (a metered module), read after each block.
   const proc = inst.proc as unknown as { blockFuel?: number; fuelLeft?: (() => number) | null };
   let fuelPeak = 0, fuelSum = 0, fuelBlocks = 0;
@@ -107,10 +116,14 @@ export async function render(bytes: Uint8Array, spec: RenderSpec = {}): Promise<
   const rng = rngOf(spec.input ?? { kind: 'silence' });
   const inL = new Float32Array(FRAMES), inR = new Float32Array(FRAMES);
   const input = spec.input ?? { kind: 'silence' };
+  // The key (1.803): its own generator, its own noise sequence, into the sidechain's one or two channels.
+  const keyRng = rngOf(spec.key ?? { kind: 'silence' });
+  const keyL = new Float32Array(FRAMES), keyR = new Float32Array(FRAMES);
   let error: string | null = null;
   for (let at = 0; at < frames; at += FRAMES) {
     fill(input, inL, inR, at, sr, rng);
-    const { out, posted } = inst.block(inL, inR, at);
+    if (keyed === 'fed') fill(spec.key!, keyL, keyR, at, sr, keyRng);
+    const { out, posted } = inst.block(inL, inR, at, keyed === 'fed' ? { key: sidechain > 1 ? [keyL, keyR] : [keyL] } : undefined);
     const e = posted.find(m => m.type === 'error');
     if (e) { error = `frame ${at}: ${String(e.phase)}: ${String(e.message)}`; break; }
     if (proc.fuelLeft && proc.blockFuel) {
@@ -124,7 +137,7 @@ export async function render(bytes: Uint8Array, spec: RenderSpec = {}): Promise<
     right.set(out[1].subarray(0, n), at);
   }
   inst.send({ type: 'dispose' });
-  return { sampleRate: sr, frames, left, right, error, fuel: { peak: fuelPeak, mean: fuelBlocks ? fuelSum / fuelBlocks : 0 } };
+  return { sampleRate: sr, frames, left, right, error, fuel: { peak: fuelPeak, mean: fuelBlocks ? fuelSum / fuelBlocks : 0 }, key: keyed };
 }
 
 /**
@@ -137,7 +150,7 @@ export async function renderGoldenBundle(bytes: Uint8Array, spec: GoldenSpec): P
 }
 
 /** The golden render and (DEV-F, 1.321) the notes a note effect sent. */
-export async function renderGoldenBundleFull(bytes: Uint8Array, spec: GoldenSpec): Promise<{ audio: Float32Array; notes: GoldenNote[] }> {
+export async function renderGoldenBundleFull(bytes: Uint8Array, spec: GoldenSpec): Promise<{ audio: Float32Array; notes: GoldenNote[]; key: GoldenKey }> {
   const bundle = await readBundle(bytes);
   const meter = await loadMeter();
   const module = await WebAssembly.compile(meter(bundle.module, { mode: 'local' }).bytes as Uint8Array<ArrayBuffer>);

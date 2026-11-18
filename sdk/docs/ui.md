@@ -139,7 +139,7 @@ A plugin can be a whole instrument with its own sequencer, pages and sound libra
 
 A Vite config for the window needs only: `base: './'`, `publicDir: false`, the engine swap as a `resolveId` plugin, `build.rollupOptions.output: { format: 'iife', inlineDynamicImports: true }`, and a `transformIndexHtml` step that turns the module script tag into a classic one and drops `crossorigin`. Then `est validate` (it checks `EST-U002` and `EST-U003` on the built files, and since 1.335 `EST-U005`: a page with a `type="module"` script, a `crossorigin` attribute or a `<link rel="modulepreload">`, which shows a blank frame) and `est dev`.
 
-**Start from the scaffold: `est new <instrument-*|effect-*> <dir> --app`** (1.335) makes all of this: `ui-app/` with that Vite config (and on Vite 8, Rolldown's `codeSplitting: false` for Rollup's `inlineDynamicImports: true`), the font loader (`fonts.ts`, an import with `?base64`), the external-host strip, a `bridge.ts` skeleton (connect, `applyHost`, `pushStore`, the readout decode), the engine stand-in it swaps for (`engine.ts`), `bits.ts` for packing hidden parameters, and a small example app without a framework; `package.json` at the folder's root, whose `npm run build:ui` writes `ui/`; and est.json's `"ui"` entry. `npm install` once (or build with a Cyber clone's Vite: `<cyber>/node_modules/.bin/vite build --config ui-app/vite.config.ts`), then `npm run build:ui && est validate`. The template's `AGENTS.md` ("The window as an app") has the details.
+**Start from the scaffold: `est new <instrument-*|effect-*> <dir> --app`** (1.335) makes all of this: `ui-app/` with that Vite config (and on Vite 8, Rolldown's `codeSplitting: false` for Rollup's `inlineDynamicImports: true`), the font loader (`fonts.ts`, an import with `?base64`), the external-host strip, a `bridge.ts` skeleton (connect, `applyHost`, `pushStore`, the readout decode), the engine stand-in it swaps for (`engine.ts`), `bits.ts` for packing hidden parameters, and a small example app without a framework; `package.json` at the folder's root, whose `npm run build:ui` writes `ui/`; and est.json's `"ui"` entry. `npm install` once (it brings Vite; or `npx vite build --config ui-app/vite.config.ts` with a Vite 8 installed in the folder), then `npm run build:ui && est validate`. The template's `AGENTS.md` ("The window as an app") has the details.
 
 ## Writing the UI in TypeScript
 
@@ -153,10 +153,10 @@ est.subscribe((id, source) => { /* redraw */ });
 ```
 
 ```
-<cyber>/node_modules/.bin/esbuild ui-src/main.ts --bundle --format=iife --minify --outfile=ui/ui.js
+npx esbuild ui-src/main.ts --bundle --format=iife --minify --outfile=ui/ui.js
 ```
 
-(`<cyber>` is the Cyber clone the kit runs from: its esbuild is a dev dependency, so nothing is fetched. Plain JavaScript in `ui/` needs no build at all.)
+(Install esbuild in the plugin's folder first: `npm install --save-dev esbuild`. Plain JavaScript in `ui/` needs no build at all.)
 
 ## `connect(options?)`
 

@@ -1,3 +1,4 @@
+import { fieldsOf, keepExtras } from '../lib/forwardFields';
 import { mulberry32 } from './humanise';
 import { noteSeed } from './noteChance';
 import { TICKS_PER_BEAT, tk, type Note } from './sequencerTypes';
@@ -15,6 +16,9 @@ import { TICKS_PER_BEAT, tk, type Note } from './sequencerTypes';
  * seeded draw in ±base/4 (`noteSeed(clip, note, GROOVE_PASS)`: the same every pass, so Commit
  * equals playback), its end with it (its length kept); its velocity moves by step.v × 64 ×
  * Velocity × Amount. Absent groove or Amount 0: no change.
+ *
+ * 1.745: **Quantize** (Live's), optional (absent: 0, so a groove from before plays as it did): the
+ * note is first pulled toward its nearest step by Quantize % × Amount, then moved by the template.
  */
 
 export const MAX_GROOVES = 32;
@@ -44,6 +48,8 @@ export interface Groove {
   random: number;
   /** Percent −100…100 of the template's velocity. */
   velocity: number;
+  /** 1.745: percent 0…100 the notes are pulled to the Base grid before the template moves them (Live's Quantize). Absent: 0. */
+  quantize?: number;
 }
 
 /** The pool's settings and grooves, as a song holds them (`SequencerState.grooves`, `grooveAmount`). */
@@ -147,6 +153,8 @@ export function grooveForRow(pool: readonly Groove[] | undefined, row: { templat
 // --- Sanitising ------------------------------------------------------------------------------
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+/** 1.661: a groove's own fields (a newer build's beside them are kept). */
+const GROOVE_FIELDS = fieldsOf<Groove>()(['id', 'name', 'base', 'steps', 'timing', 'random', 'velocity', 'quantize'] as const);
 /** A groove in range, or null. */
 export function sanitiseGroove(raw: unknown): Groove | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -160,12 +168,19 @@ export function sanitiseGroove(raw: unknown): Groove | null {
     return { t: clamp(fin(o.t, 0), -0.5, 0.5), v: clamp(fin(o.v, 0), -1, 1) };
   }) : [];
   if (!steps.length) steps.push({ t: 0, v: 0 });
-  return {
+  // 1.661: a newer build's fields kept beside these (`keepExtras`).
+  return keepExtras(r, {
     id: r.id, name: name || 'Groove', base, steps,
     timing: Math.round(clamp(fin(r.timing, 100), 0, 100)),
     random: Math.round(clamp(fin(r.random, 0), 0, 100)),
     velocity: Math.round(clamp(fin(r.velocity, 100), -100, 100)),
-  };
+    ...quantizeField(r.quantize),
+  }, GROOVE_FIELDS);
+}
+/** 1.745: a groove's Quantize, whole percent 1…100, or nothing (0 is absent, so an older groove is unchanged). */
+function quantizeField(raw: unknown): { quantize?: number } {
+  const q = Math.round(clamp(fin(raw, 0), 0, 100));
+  return q > 0 ? { quantize: q } : {};
 }
 /** The pool: up to MAX_GROOVES, ids unique, or undefined for none. */
 export function sanitiseGrooves(raw: unknown): Groove[] | undefined {
@@ -203,7 +218,8 @@ export function resolveGroove(pool: GroovePool, id: string | undefined): Resolve
 /** The most a resolved groove moves a note, in beats (either way): the window's margin. */
 export function grooveReach(r: ResolvedGroove): number {
   const maxT = Math.max(...r.g.steps.map(s => Math.abs(s.t)));
-  return r.g.base * r.amount * ((maxT * r.g.timing) / 100 + (0.25 * r.g.random) / 100) + 1 / TICKS_PER_BEAT;
+  // 1.745: Quantize pulls a note at most half a step.
+  return r.g.base * r.amount * ((maxT * r.g.timing) / 100 + (0.25 * r.g.random) / 100 + (0.5 * (r.g.quantize ?? 0)) / 100) + 1 / TICKS_PER_BEAT;
 }
 
 /**
@@ -215,6 +231,8 @@ export function grooveShift(start: number, clipId: string, noteId: string, r: Re
   const step = Math.round(start / g.base + EPS);
   const s = g.steps[((step % g.steps.length) + g.steps.length) % g.steps.length]!;
   let dt = s.t * g.base * (g.timing / 100) * amount;
+  // 1.745: Quantize first pulls the note toward its step (Live's order: quantise, then the template).
+  if (g.quantize) dt += (step * g.base - start) * (g.quantize / 100) * amount;
   if (g.random > 0) dt += (mulberry32(noteSeed(clipId, noteId, GROOVE_PASS))() * 2 - 1) * 0.25 * g.base * (g.random / 100) * amount;
   const dv = Math.round(s.v * 64 * (g.velocity / 100) * amount) || 0;
   return { dt, dv };

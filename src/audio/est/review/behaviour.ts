@@ -398,15 +398,18 @@ export function behaviourChecks(input: BehaviourInput, opts: BehaviourOptions = 
     const b = patternRun(s, 8, skip + span, false);
     if (a.error || b.error) return `it stopped (${a.error ?? b.error})`;
     const off4 = sec(4), from = sec(4 + skip), to = sec(4 + skip + span);
-    let diff = 0, ref = 0;
+    let diff = 0, ref = 0, refB = 0;
     for (let i = from; i < to; i++) {
       const dl = a.L[i]! - b.L[i - off4]!, dr = a.R[i]! - b.R[i - off4]!;
       diff += dl * dl + dr * dr;
       ref += a.L[i]! * a.L[i]! + a.R[i]! * a.R[i]!;
+      refB += b.L[i - off4]! * b.L[i - off4]! + b.R[i - off4]! * b.R[i - off4]!;
     }
-    const rms = Math.sqrt(ref / (2 * (to - from)));
+    // Quiet only when both are: a pattern that stops after a count of hits is quiet in the long run alone.
+    const louder = Math.max(ref, refB);
+    const rms = Math.sqrt(louder / (2 * (to - from)));
     if (rms < QUIET) return null;
-    const rel = Math.sqrt(diff / ref);
+    const rel = Math.sqrt(diff / louder);
     if (rel > FROM_BAR_RMS) return `a render started at beat 8 differs from the render from beat 0 by ${(rel * 100).toFixed(1)} % RMS, ${skip.toFixed(1)} s and more after beat 8: seed randomness and modulation from the song position, not from a count of notes or hits or the time since it started`;
     return null;
   });

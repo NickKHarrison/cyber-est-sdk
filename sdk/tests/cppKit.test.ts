@@ -313,3 +313,107 @@ describe('est compare\'s measuring (compareRenders, readWav, writeWav, htmlRepor
     expect(page.match(/<svg /g)).toHaveLength(4); // two channels, each the waveforms and the difference
   });
 });
+
+/*
+ * 1.805 ("Bring your plugin"): est/runtime.hpp's fast_exp, tanh and atan, and the freestanding
+ * <cmath> and <math.h> a port's source names. The probe (sdk/tests/fixtures/libm-probe, committed as
+ * sdk/fixtures/cpp/libm-probe.wasm by scripts/est-cpp-fixtures.sh) exports each function; here each
+ * is held to JavaScript's Math over a sweep.
+ *
+ * The bounds, relative to Math's value: 2e-15 for the functions built on the new polynomial and on
+ * the old log (measured worst 6.6e-16, cbrt; the bound leaves room for another libm's last bits);
+ * sin and cos 1e-10 (they are the runtime's own since 1.326, unchanged: near a zero crossing the
+ * reduction by one constant for pi/2 leaves 1.7e-11 relative, which is 1e-16 absolute); the old
+ * est::exp 2e-13 (unchanged: 8e-14 at the ends of its range). The one-instruction functions are exact.
+ */
+describe('the C and C++ maths (est/runtime.hpp, the freestanding <cmath> and <math.h>)', () => {
+  type Fn1 = (x: number) => number;
+  type Fn2 = (x: number, y: number) => number;
+  const probe = () => new WebAssembly.Instance(new WebAssembly.Module(bytes('sdk/fixtures/cpp/libm-probe.wasm'))).exports as unknown as Record<string, Fn1 & Fn2>;
+  const rel = (a: number, b: number) => (a === b || (Number.isNaN(a) && Number.isNaN(b)) ? 0 : Math.abs(a - b) / Math.max(Math.abs(b), 1e-300));
+  const sweep = (lo: number, hi: number, n = 4001) => Array.from({ length: n }, (_, i) => lo + ((hi - lo) * i) / (n - 1));
+  const cRound: Fn1 = x => (x < 0 ? -Math.round(-x) : Math.round(x)); // C's round: halves away from zero
+
+  it('the probe imports nothing and is built from the sources as they are now', () => {
+    const m = new WebAssembly.Module(bytes('sdk/fixtures/cpp/libm-probe.wasm'));
+    expect(WebAssembly.Module.imports(m)).toEqual([]);
+    expect(sourcesDigest(repo('sdk/tests/fixtures/libm-probe')), 'the maths changed since the probe was built: run bash scripts/est-cpp-fixtures.sh').toEqual(json('sdk/fixtures/cpp/libm-probe.sources.json'));
+  });
+
+  it('every <cmath> function agrees with Math, in double and (correctly rounded) in float', () => {
+    const x = probe();
+    const one: [string, Fn1, number, number, number][] = [
+      ['sin', Math.sin, -20, 20, 1e-10], ['cos', Math.cos, -20, 20, 1e-10], ['tan', Math.tan, -1.5, 1.5, 2e-15],
+      ['asin', Math.asin, -1, 1, 2e-15], ['acos', Math.acos, -1, 1, 2e-15], ['atan', Math.atan, -50, 50, 2e-15],
+      ['sinh', Math.sinh, -20, 20, 2e-15], ['cosh', Math.cosh, -20, 20, 2e-15], ['tanh', Math.tanh, -25, 25, 2e-15],
+      ['exp', Math.exp, -700, 700, 2e-15], ['exp2', v => 2 ** v, -1000, 1000, 2e-15],
+      ['log', Math.log, 1e-9, 1e6, 2e-15], ['log2', Math.log2, 1e-9, 1e6, 2e-15], ['log10', Math.log10, 1e-9, 1e6, 2e-15],
+      ['sqrt', Math.sqrt, 0, 1e6, 0], ['cbrt', Math.cbrt, -1e3, 1e3, 2e-15], ['fabs', Math.abs, -5, 5, 0], ['abs', Math.abs, -5, 5, 0],
+      ['floor', Math.floor, -5, 5, 0], ['ceil', Math.ceil, -5, 5, 0], ['trunc', Math.trunc, -5, 5, 0], ['round', cRound, -5, 5, 0],
+    ];
+    for (const [name, want, lo, hi, bound] of one) {
+      let worst = 0, worstF = 0;
+      for (const v of sweep(lo, hi)) {
+        worst = Math.max(worst, rel(x[`d_${name}`]!(v), want(v)));
+        // The float function is the double one rounded: within one float step (6e-8 relative) of Math's, rounded.
+        const fv = Math.fround(v), wf = Math.fround(want(fv));
+        if (Math.abs(wf) > 1e-30) worstF = Math.max(worstF, rel(x[`f_${name}`]!(fv), wf));
+      }
+      expect(worst, `${name} (double)`).toBeLessThanOrEqual(bound);
+      expect(worstF, `${name} (float)`).toBeLessThanOrEqual(Math.max(1.2e-7, bound));
+    }
+    const two: [string, Fn2, [number, number][]][] = [
+      ['atan2', Math.atan2, [[1, 1], [1, -1], [-1, -1], [-1, 1], [0, 1], [0, -1], [2, 0], [-2, 0], [0.3, 7], [1e-9, 1e9]]],
+      ['pow', Math.pow, [[2, 10], [10, 0.3], [0.5, -3.5], [7, 0], [0, 2], [-2, 3], [-2, 4], [1.0001, 5000], [100, -2.5]]],
+      ['fmod', (a, b) => a % b, [[5.5, 2], [-5.5, 2], [5.5, -2], [1, 0.3], [7, 7], [0.25, 1]]],
+      ['fmin', Math.min, [[1, 2], [-1, -2], [0, 5]]], ['fmax', Math.max, [[1, 2], [-1, -2], [0, 5]]],
+      ['hypot', Math.hypot, [[3, 4], [1e-3, 1e3], [-5, 12]]], ['copysign', (a, b) => (b < 0 || Object.is(b, -0) ? -Math.abs(a) : Math.abs(a)), [[3, -1], [-3, 1], [2, -0]]],
+    ];
+    for (const [name, want, cases] of two) for (const [a, b] of cases) {
+      expect(rel(x[`d_${name}`]!(a, b), want(a, b)), `${name}(${a}, ${b})`).toBeLessThanOrEqual(2e-15);
+      expect(rel(x[`f_${name}`]!(a, b), Math.fround(want(Math.fround(a), Math.fround(b)))), `${name}f(${a}, ${b})`).toBeLessThanOrEqual(1.2e-7);
+    }
+    // The edges C defines.
+    expect(x.d_pow!(-2, 0.5)).toBeNaN();
+    expect(x.d_pow!(0, -1)).toBe(Infinity);
+    expect(x.d_pow!(Number.NaN, 0)).toBe(1);
+    expect(x.d_atan2!(0, 0)).toBe(0);
+    expect(x.d_fmin!(Number.NaN, 1)).toBe(1);
+    expect(x.d_fmax!(1, Number.NaN)).toBe(1);
+    expect(x.d_fmod!(1, 0)).toBeNaN();
+    expect([x.d_round!(2.5), x.d_round!(-2.5), x.d_round!(0.49999999999999994), x.d_round!(-0.4)]).toEqual([3, -3, 0, -0]);
+    expect(x.d_asin!(1.5)).toBeNaN();
+    expect(x.d_exp2!(-1074)).toBe(5e-324);
+    expect(x.d_exp!(-800)).toBe(0);
+    // Whole numbers and mixed arguments choose the double function; isnan, isinf, isfinite; <cstring>.
+    expect(x.mixed!(2, 3)).toBeCloseTo(8 + Math.sqrt(3) + Math.SQRT2, 12);
+    expect(x.mixed!(Number.NaN, 1)).toBeNaN();
+    // C: tanhf, powf, exp; isnan = 1, isinf = 2, isfinite = 4, M_PI = 8.
+    expect([x.c_isnan!(Number.NaN), x.c_isnan!(Infinity), x.c_isnan!(1)]).toEqual([9, 10, 12]);
+    expect(x.c_tanhf!(0.5)).toBe(Math.fround(Math.tanh(0.5)));
+    expect(x.c_powf!(2, 0.5)).toBe(Math.fround(Math.SQRT2));
+    expect(rel(x.c_exp!(1), Math.E)).toBeLessThan(2e-15);
+  });
+
+  it('est::fast_exp and est::tanh: accurate, exact near zero, and est::exp is what it was', () => {
+    const x = probe();
+    let fast = 0, old = 0, t = 0, small = 0;
+    for (const v of sweep(-700, 700)) { fast = Math.max(fast, rel(x.est_fast_exp!(v), Math.exp(v))); old = Math.max(old, rel(x.est_exp!(v), Math.exp(v))); }
+    for (const v of sweep(-25, 25)) t = Math.max(t, rel(x.est_tanh!(v), Math.tanh(v)));
+    // A quiet signal stays itself: tanh(x) is x to the last bits near 0 (no cancellation).
+    for (const v of sweep(-1e-3, 1e-3)) small = Math.max(small, rel(x.est_tanh!(v), Math.tanh(v)));
+    expect(fast).toBeLessThanOrEqual(2e-15);
+    expect(t).toBeLessThanOrEqual(2e-15);
+    expect(small).toBeLessThanOrEqual(1e-15);
+    expect(old).toBeLessThanOrEqual(2e-13);
+    expect([x.est_tanh!(1e-12), x.est_tanh!(-1e-300), x.est_tanh!(1e300), x.est_tanh!(-40), x.est_tanh!(0)]).toEqual([1e-12, -1e-300, 1, -1, 0]);
+    expect(x.est_tanh!(Number.NaN)).toBeNaN();
+    expect(x.est_fast_exp!(Number.NaN)).toBeNaN();
+    expect([x.est_fast_exp!(0), x.est_fast_exp!(-800), x.est_fast_exp!(-745.2)]).toEqual([1, 0, 0]);
+    expect(rel(x.est_atan!(1), Math.PI / 4)).toBeLessThan(1e-15);
+    // est::exp's bits never change (shipped renders depend on them): the template's module, which
+    // calls it, is byte for byte the one committed before 1.805 (the rebuild test above), and its
+    // values here are the same numbers as ever.
+    expect([x.est_exp!(1), x.est_exp!(-3.5), x.est_exp!(10), x.est_exp!(0.1151292546497023)]).toEqual([2.7182818284590446, 0.0301973834223185, 22026.465794806725, 1.1220184543019636]);
+  });
+});

@@ -17,6 +17,8 @@ export interface CommandContext {
   out(text: string): void;
   /** Standard error (progress, build output, problems). */
   err(text: string): void;
+  /** 1.800: where `est new` reads its three answers from (default: standard input); it asks only when this is a terminal (`isTTY`). */
+  input?: NodeJS.ReadableStream & { isTTY?: boolean };
 }
 
 export interface EstCommand {
