@@ -1219,6 +1219,25 @@ export function defaultSequencerState(): SequencerState {
 }
 
 /**
+ * 1.826: a brand-new DAW project's song (the owner's request): Audio 1, Audio 2, MIDI 1 and MIDI 2
+ * (no instrument), no pads track and no clips; the returns, master, tempo and loop are
+ * `defaultSequencerState()`'s, and the first track is selected. Only `openProject`'s new-project
+ * path uses it: `defaultSequencerState()` stays the sanitiser's, the store's and every other
+ * internal fallback, and a saved song loads as it was saved.
+ */
+export function newProjectSequencerState(): SequencerState {
+  const base = defaultSequencerState();
+  const sends = () => base.returns.map(() => 0);
+  const tracks: Track[] = [
+    { ...defaultAudioTrack(1, 'audio-1'), sends: sends() },
+    { ...defaultAudioTrack(2, 'audio-2'), sends: sends() },
+    { ...defaultMidiTrack(1, 'midi-1', 2), sends: sends() },
+    { ...defaultMidiTrack(2, 'midi-2', 3), sends: sends() },
+  ];
+  return { ...base, tracks, selectedTrackId: tracks[0]!.id };
+}
+
+/**
  * The next free "Analog n" (or "Wave n", "Audio n", "Group n") number. An ANALOG track's number is
  * also taken by an older project's "Synth n" (its name before 1.17), so no two tracks share one.
  */

@@ -36,8 +36,11 @@ export const DEMO_MAX_FILE_BYTES = 600 * 1024;
  * The granular suite (1.711 FOURFOLD, 1.712 CLOUDLOOM, 1.713 SHARDBEAT) passed it, each stream alone at 80 demos.
  * Together at the n710 integration (with 1.714's new versions): 82 demos and the index, 34,751,816 bytes (about
  * 423,800 each). 40 MB (41,943,040 bytes) holds them with 7,191,224 bytes free, about 16 more of that average.
+ * The n826 integration (1.832 GOLDLEAF, 1.833 NACHTZUG, 1.834 MUTINEER, 1.835 STOWAWAY and 1.836's eggs, each stream
+ * alone within 40 MB): 99 demos, 42,817,434 bytes (about 432,500 each), 874,394 past it. 48 MB (50,331,648 bytes)
+ * holds them with 7,514,214 bytes free, about 17 more of that average.
  */
-export const DEMO_BUDGET_BYTES = 40 * 1024 * 1024;
+export const DEMO_BUDGET_BYTES = 48 * 1024 * 1024;
 
 const ID_RE = /^[a-z0-9](?:[a-z0-9.-]{1,118})[a-z0-9]$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
