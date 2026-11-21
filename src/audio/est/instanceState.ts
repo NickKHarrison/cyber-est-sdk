@@ -90,11 +90,11 @@ export type EstInstanceCause = typeof EST_INSTANCE_CAUSES[number];
 
 /** What a cause means, in words (Diagnostics and the development log). */
 export const EST_CAUSE_WORDS: Readonly<Record<EstInstanceCause, string>> = {
-  resolved: 'its installed record was found and its claim held',
+  resolved: 'its record in your Cyber was found and its claim held',
   ready: 'the processor said it was ready',
   skip: 'an offline render left the slot off',
-  'not-installed': 'the plugin is not installed on this device',
-  'other-version': 'another version is installed here',
+  'not-installed': 'the plugin is not in your Cyber on this device',
+  'other-version': 'another version is in your Cyber',
   block: 'the registry blocked the version, or the account may not run plugins',
   refuse: 'it failed the safety check',
   budget: 'the tab\'s live pool was full',
@@ -281,8 +281,8 @@ export function estStateSentence(s: EstInstanceState, it: string, blockedBecause
     case 'needs-sign-in': return `${it} plays once you sign in. ${EST_SIGN_IN_TO_HEAR}`;
     case 'shared-refused': return blockedBecause ? `${it} could not be loaded from the project: ${blockedBecause.replace(/\.$/, '')}.` : `${it} could not be loaded from the project.`;
     case 'running': return `${it} is running.`;
-    case 'missing': return `${it} isn't installed on this device.`;
-    case 'other-version': return `${it} isn't installed here (another version is).`;
+    case 'missing': return `${it} isn't in your Cyber.`;
+    case 'other-version': return `${it} isn't in your Cyber (another version is).`;
     case 'blocked': return blockedBecause ? `${it} was blocked by the registry (${blockedBecause}).` : `${it} was blocked and is off.`;
     case 'refused': return `${it} failed the safety check and is off.`;
     case 'over-budget': return `${it} didn't start: too many plugins in this tab.`;
@@ -314,7 +314,7 @@ export function estStateLine(s: EstInstanceState, blockedBecause?: string | null
     case 'over-budget': return 'Too many plugins are running in this tab.';
     case 'needs-sign-in': return EST_SIGN_IN_TO_HEAR;
     case 'shared-refused': return blockedBecause ? `It could not be loaded from the project: ${blockedBecause.replace(/\.$/, '')}.` : 'It could not be loaded from the project.';
-    case 'missing': case 'other-version': return 'Not installed on this device.';
+    case 'missing': case 'other-version': return 'Not in your Cyber.';
     default: return null;
   }
 }

@@ -45,7 +45,7 @@ How the packages are built, checked, mirrored and (by the owner, from the public
 
 ## Start here
 
-New to plugins, or working with a chat assistant? **[Build an EST plugin](docs/BUILD_AN_EST_PLUGIN.md)** goes from nothing to a working effect with npm alone, the code inline, and a block to paste into your assistant. Then the **[prompt kit](docs/PROMPT_KIT.md)** has a ready-to-paste prompt for every template and recipe and the usual follow-ups, and **[Sharing](docs/SHARING.md)** says how to hear your plugin in Cyber, put it in a song and post a listen link.
+New to plugins, or working with a chat assistant? **[Build an EST plugin](docs/BUILD_AN_EST_PLUGIN.md)** goes from nothing to a working effect with npm alone, the code inline, and a block to paste into your assistant. Then the **[prompt kit](docs/PROMPT_KIT.md)** has a ready-to-paste prompt for every template and recipe and the usual follow-ups, and **[Sharing](docs/SHARING.md)** says how to hear your plugin in Cyber, put it in a song and post a listen link. Working with an AI coding agent that runs commands? Give it one file, **[the EST agent guide](docs/EST_AGENT_GUIDE.md)** (generated from these docs and the published kit), and say what plugin you want.
 
 1. [Getting started](docs/getting-started.md): ten minutes to a running gain, in Rust or AssemblyScript.
 2. [Which template to start from](docs/templates.md), and [the cookbook](docs/cookbook.md): ten tested recipes.

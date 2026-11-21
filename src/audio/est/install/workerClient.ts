@@ -77,7 +77,7 @@ function ask(worker: WorkerLike, req: Request, transfer: Transferable[], timeout
       timeouts++;
       coolUntil = Date.now() + TERMINATE_GRACE_MS;
       onTimeout();
-      reject(new EstWorkerError('timeout', `the install Worker did not answer within ${Math.round(timeoutMs / 1000)} s and was stopped`));
+      reject(new EstWorkerError('timeout', `the plugin checking Worker did not answer within ${Math.round(timeoutMs / 1000)} s and was stopped`));
     }, timeoutMs);
     worker.onmessage = (e: MessageEvent) => {
       const r = e.data as WorkerReply;
@@ -90,14 +90,14 @@ function ask(worker: WorkerLike, req: Request, transfer: Transferable[], timeout
       clearTimeout(timer);
       // A bare Event (no message) is a module Worker whose script or one of its imports did not
       // load (a refused import, ET-C), never a plugin's fault.
-      const msg = 'message' in e && e.message ? String(e.message) : 'the install Worker could not start';
+      const msg = 'message' in e && e.message ? String(e.message) : 'the plugin checking Worker could not start';
       reject(new EstWorkerError('worker', msg));
     };
     // 1.286 (ET-C, D-32): a reply this browser could not deserialise (a `WebAssembly.Module` it will
     // not take from a Worker) arrives as `messageerror`, never as a message: say so at once.
     worker.onmessageerror = () => {
       clearTimeout(timer);
-      reject(new EstWorkerError('worker', "this browser could not read the install Worker's reply (a compiled module it will not take from a Worker)"));
+      reject(new EstWorkerError('worker', "this browser could not read the plugin checking Worker's reply (a compiled module it will not take from a Worker)"));
     };
     worker.postMessage({ ...req, id }, transfer);
   });

@@ -1,0 +1,210 @@
+{
+  "note": "What the published @cyber-est/cli holds, read from its npm tarball by `node scripts/est-agent-guide.mjs --snapshot`. Never edit by hand.",
+  "package": "@cyber-est/cli",
+  "version": "0.1.0",
+  "node": ">=20",
+  "nextLines": false,
+  "goldenInputs": [
+    "noise"
+  ],
+  "filterFlushes": false,
+  "commands": {
+    "compare": {
+      "summary": "Render the same input through two bundles (or a bundle and a desktop WAV) and report how they differ",
+      "usage": [
+        "est compare <a> <b> [--input <kind|file.wav>] [--events <json>] [--events-a <json>] [--events-b <json>] [--seconds <n>] [--sample-rate <hz>] [--tolerance <dB>] [--threshold <dB>] [--report <file.html>] [--write-input <file.wav>] [--write-a <file.wav>] [--write-b <file.wav>] [--no-build] [--json]"
+      ]
+    },
+    "dev": {
+      "summary": "Play a plugin in the dev host while you build it (http://localhost:4430; --json headless)",
+      "usage": [
+        "est dev [dir | file.est] [--port 4430] [--files-port 4431] [--no-watch] [--open]",
+        "est dev [dir | file.est] --json [--seconds N] [--play 60,64,67]",
+        "est dev <folder with ui/> --ui-preview params.json"
+      ]
+    },
+    "doctor": {
+      "summary": "Check Node, the meter, rustup with wasm32-unknown-unknown, cargo, asc and clang for wasm32; print the command for anything missing",
+      "usage": [
+        "est doctor [--json]"
+      ]
+    },
+    "inspect": {
+      "summary": "Show a .est bundle's manifest, files and module (imports, exports, memory, metering)",
+      "usage": [
+        "est inspect <file.est> [--json] [--no-meter]"
+      ]
+    },
+    "keygen": {
+      "summary": "Make your developer signing key (outside any repository); paste its public key into Cyber",
+      "usage": [
+        "est keygen [--out <file>] [--json]"
+      ]
+    },
+    "login": {
+      "summary": "Log in to Cyber to publish (a code you approve in the browser; the token lasts an hour)",
+      "usage": [
+        "est login [--to <url>] [--logout] [--json]"
+      ]
+    },
+    "new": {
+      "summary": "Make a plugin folder from a template (effect, instrument, sampler, midi-effect, visualiser: -rust or -as, cpp-clap) or a cookbook recipe",
+      "usage": [
+        "est new <template> <dir> [--id <reverse-dns id>] [--name <name>] [--ui | --app]"
+      ]
+    },
+    "pack": {
+      "summary": "Build a plugin folder and pack it to dist/<id>-<version>.est",
+      "usage": [
+        "est pack [dir] [--no-build] [--json]"
+      ]
+    },
+    "profile": {
+      "summary": "Show where a block's fuel goes, function by function (the functions by fuel, share and calls)",
+      "usage": [
+        "est profile [dir|bundle] [--debug] [--seconds <n>] [--notes] [--golden] [--top <n>] [--no-build] [--json]"
+      ]
+    },
+    "publish": {
+      "summary": "Publish your .est bundle to Cyber (est login first; est validate it first)",
+      "usage": [
+        "est publish <file.est> [--screenshots a.png b.png …] [--changelog <file>] [--homepage <url>] [--source-url <url>] [--support <url>] [--key <your developer key>] [--early-only] [--to <url>] [--json]"
+      ]
+    },
+    "sign": {
+      "summary": "Sign a .est bundle as its developer (writes <file>.developer.json for est publish)",
+      "usage": [
+        "est sign <file.est> --developer [--key <file>] [--json]"
+      ]
+    },
+    "test": {
+      "summary": "Run the plugin's golden render (test/golden.json) and the conformance run",
+      "usage": [
+        "est test [dir] [--update] [--no-build] [--seconds <n>]"
+      ]
+    },
+    "validate": {
+      "summary": "Validate a plugin folder (built and packed first) or a .est; writes validation.json",
+      "usage": [
+        "est validate [dir | file.est] [--json] [--no-build] [--seconds <n>] [--verbose]"
+      ]
+    },
+    "yank": {
+      "summary": "Hide one of your published versions (still installable by exact pin); --undo unhides it",
+      "usage": [
+        "est yank <id>@<version> [--undo] [--to <url>] [--json]"
+      ]
+    }
+  },
+  "templates": [
+    "cpp-clap",
+    "effect-as",
+    "effect-rust",
+    "instrument-as",
+    "instrument-rust",
+    "midi-effect-as",
+    "midi-effect-rust",
+    "sampler-as",
+    "sampler-rust",
+    "visualiser-as",
+    "visualiser-rust"
+  ],
+  "recipes": [
+    "auto-wah",
+    "bitcrusher",
+    "chorus",
+    "compressor",
+    "drum-synth",
+    "ring-mod",
+    "schroeder-reverb",
+    "step-sequencer",
+    "wavetable",
+    "widener"
+  ],
+  "rules": [
+    "EST-B001",
+    "EST-B002",
+    "EST-B003",
+    "EST-B004",
+    "EST-B005",
+    "EST-B006",
+    "EST-B007",
+    "EST-B008",
+    "EST-B009",
+    "EST-B010",
+    "EST-B011",
+    "EST-B012",
+    "EST-B013",
+    "EST-B014",
+    "EST-B015",
+    "EST-B016",
+    "EST-M001",
+    "EST-M002",
+    "EST-M003",
+    "EST-M004",
+    "EST-M005",
+    "EST-M006",
+    "EST-M007",
+    "EST-M008",
+    "EST-M009",
+    "EST-M010",
+    "EST-M011",
+    "EST-M012",
+    "EST-M013",
+    "EST-M014",
+    "EST-M015",
+    "EST-M016",
+    "EST-M017",
+    "EST-M018",
+    "EST-M019",
+    "EST-M020",
+    "EST-M021",
+    "EST-M022",
+    "EST-W001",
+    "EST-W002",
+    "EST-W003",
+    "EST-W004",
+    "EST-W005",
+    "EST-W006",
+    "EST-W007",
+    "EST-W008",
+    "EST-W009",
+    "EST-W010",
+    "EST-W011",
+    "EST-W012",
+    "EST-W013",
+    "EST-W014",
+    "EST-W015",
+    "EST-W016",
+    "EST-W017",
+    "EST-C001",
+    "EST-C002",
+    "EST-C003",
+    "EST-C004",
+    "EST-C005",
+    "EST-C006",
+    "EST-C007",
+    "EST-C008",
+    "EST-C009",
+    "EST-C010",
+    "EST-C011",
+    "EST-C012",
+    "EST-C013",
+    "EST-C014",
+    "EST-C015",
+    "EST-C016",
+    "EST-C017",
+    "EST-C018",
+    "EST-C019",
+    "EST-C020",
+    "EST-C021",
+    "EST-C022",
+    "EST-C023",
+    "EST-U001",
+    "EST-U002",
+    "EST-U003",
+    "EST-U004",
+    "EST-U005",
+    "EST-P001"
+  ]
+}

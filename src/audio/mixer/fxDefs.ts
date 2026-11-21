@@ -359,7 +359,7 @@ export const FX_DEFS: Readonly<Record<FxType, FxDef>> = Object.freeze({
     ...defaultCrossovers(FX_RACK_MAX_BANDS).map((d, k): FxParamDef => ({ key: `x${k}`, label: `Crossover ${k + 1}`, min: FX_RACK_XOVER_MIN, max: FX_RACK_XOVER_MAX, default: d, log: true, unit: 'Hz' })),
   ] },
   // EST Phase 2: an installed plugin's parameters are its own (CLAP ids, `FxSlot.est.params`), none here.
-  est: { type: 'est', name: 'EST plugin', blurb: 'An installed EST plugin.', params: [] },
+  est: { type: 'est', name: 'EST plugin', blurb: 'An EST plugin in your Cyber.', params: [] },
 });
 
 // --- The EQ's bands (1.19), for the builder (eq.ts), the display and the card ----------------------

@@ -1,6 +1,6 @@
 # For coding agents
 
-You can make an EST plugin from start to finish with the `est` command; nothing needs a screen and nothing needs Cyber's source. A first plugin from npm alone, with the code inline: [Build an EST plugin](BUILD_AN_EST_PLUGIN.md). A chat assistant with no folder: [the one prompt](ONE_PROMPT.md).
+You can make an EST plugin from start to finish with the `est` command; nothing needs a screen and nothing needs Cyber's source. A first plugin from npm alone, with the code inline: [Build an EST plugin](BUILD_AN_EST_PLUGIN.md). A chat assistant with no folder: [the one prompt](ONE_PROMPT.md). A person handing everything to an AI coding agent in one file: [the EST agent guide](EST_AGENT_GUIDE.md), generated from this page's sections, the rules, the schema and the published kit (`node scripts/est-agent-guide.mjs`), so change the words here, never there.
 
 **This page is the one source of every assistant file the kit hands out.** `node sdk/agents/generate.mjs` cuts it into the marked sections below and writes, from them and each template's short part in `sdk/agents/parts/`:
 
