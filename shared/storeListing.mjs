@@ -321,6 +321,12 @@ export function weeklyPick(list, now) {
 
 /** 1.530: a plugin's shelves at most, by default (shared/storeFront.mjs: an admin's 1–4). */
 export const MAX_SHELF_REPEATS = 2;
+/**
+ * 1.887: the front page's repeats under the collection grid: a plugin on at most one row below it (the grid
+ * already shows every plugin once). Spread `strict` (`spreadShelves`): no floor is topped up with a repeat and
+ * a row with too few plugins left is left out. `/store/charts` and a category page keep their rows whole.
+ */
+export const FRONT_MAX_REPEATS = 1;
 /** 1.530: a shelf is never cut below this many (or all its candidates, if fewer) by spreading. */
 export const SHELF_MIN = 4;
 /** 1.530: the largest shelf an admin may set (shared/storeFront.mjs). */
@@ -361,11 +367,14 @@ export function shelfCandidatesOf(list, now) {
  * candidates instead, or is left out (returned empty) when it has none. 1.531 spreads every plugin row
  * the front draws through this one function (shared/storeFront.mjs `applyFront`: the charts' rows too).
  * Pure and deterministic (ties: the shelf's order, then its rank).
- * @param {{ id: string, title: string, ids: string[], size?: number, pinned?: string[] }[]} shelves
- * @param {{ maxRepeats?: number, featured?: string[], min?: number }} [o]
+ * 1.887: `strict` (the front under the collection grid): no floor topped up with a repeat, an admin's pinned
+ * plugins counted as their row's, and a row left under its floor left out unless it is pinned or `keep`
+ * (a campaign's own row, an admin's choice).
+ * @param {{ id: string, title: string, ids: string[], size?: number, pinned?: string[], keep?: boolean }[]} shelves
+ * @param {{ maxRepeats?: number, featured?: string[], min?: number, strict?: boolean }} [o]
  * @returns {{ id: string, title: string, ids: string[] }[]}
  */
-export function spreadShelves(shelves, { maxRepeats = MAX_SHELF_REPEATS, featured = [], min = SHELF_MIN } = {}) {
+export function spreadShelves(shelves, { maxRepeats = MAX_SHELF_REPEATS, featured = [], min = SHELF_MIN, strict = false } = {}) {
   /** @type {Map<string, number>} */
   const uses = new Map();
   for (const id of featured) uses.set(id, 1);
@@ -374,6 +383,8 @@ export function spreadShelves(shelves, { maxRepeats = MAX_SHELF_REPEATS, feature
     const pinned = (s.pinned ?? []).filter((id, i, a) => a.indexOf(id) === i).slice(0, size);
     return { s, size, pinned, room: size - pinned.length, rest: s.ids.filter((id, i, a) => !pinned.includes(id) && a.indexOf(id) === i), took: /** @type {Set<string>} */ (new Set()), dropped: false };
   });
+  // 1.887: strict, an admin's pinned plugins (the Staff picks) count as their row's, so no other row repeats them.
+  if (strict) for (const st of state) for (const id of st.pinned) uses.set(id, (uses.get(id) ?? 0) + 1);
   const entries = [];
   state.forEach((st, si) => {
     const scale = Math.max(1, Math.min(st.rest.length, st.room));
@@ -392,7 +403,18 @@ export function spreadShelves(shelves, { maxRepeats = MAX_SHELF_REPEATS, feature
     const floor = Math.min(Math.max(0, Math.min(min, st.size) - st.pinned.length), st.rest.length, st.room);
     // 1.531: topped up with the candidates on the fewest rows so far (then by rank), so a floor repeats as little as it can.
     const order = st.rest.filter((id) => !st.took.has(id)).map((id, rank) => ({ id, rank })).sort((a, b) => (uses.get(a.id) ?? 0) - (uses.get(b.id) ?? 0) || a.rank - b.rank);
-    for (const { id } of order) { if (st.took.size >= floor) break; st.took.add(id); uses.set(id, (uses.get(id) ?? 0) + 1); }
+    for (const { id } of order) {
+      if (st.took.size >= floor) break;
+      // 1.887: strict (the front below the collection grid) tops up only with plugins on no row yet.
+      if (strict && (uses.get(id) ?? 0) >= maxRepeats) continue;
+      st.took.add(id); uses.set(id, (uses.get(id) ?? 0) + 1);
+    }
+    // 1.887: strict, a row left under its floor (and not an admin's pinned row) is left out, its plugins freed.
+    if (strict && !st.pinned.length && !st.s.keep && st.took.size < Math.min(min, st.size)) {
+      for (const id of st.took) uses.set(id, (uses.get(id) ?? 1) - 1);
+      st.took.clear();
+      st.dropped = true;
+    }
   }
   distinctRows(state, featured, maxRepeats);
   return state.map((st) => ({ id: st.s.id, title: st.s.title, ids: st.dropped ? [] : [...st.pinned, ...st.rest.filter((id) => st.took.has(id))] }));
