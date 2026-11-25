@@ -62,6 +62,16 @@ export const EST_INSTANCE_STATES = [
   'shared-refused',
   /** It failed the safety check (an instrument where an effect was asked for; the validator). */
   'refused',
+  /**
+   * 1.895: the browser refused to let the plugin's code run where Cyber runs it (the audio thread):
+   * Safari applies the page's content security policy inside the AudioWorklet and refuses
+   * `new WebAssembly.Instance` there without 'wasm-unsafe-eval' (Chromium does not). Not the plugin's
+   * fault, so never `crashed`; the browser's own refusal text is the evidence (`browserRefusedWasm`).
+   * 1.899 (D-65): the documents that host the plugin worklet now carry 'wasm-unsafe-eval', so current
+   * Safari and Firefox run plugins; the state stays for a browser that refuses all the same (one that
+   * does not know the keyword and ignores it).
+   */
+  'browser-refused',
   /** The tab's live pool was full (`claimEst`). */
   'over-budget',
   /** Marked on this device: it never got well the last time it ran here (running.ts, on evidence), until Start. */
@@ -85,6 +95,8 @@ export const EST_INSTANCE_CAUSES = [
   'stopped-mark', 'stall', 'overrun', 'slow', 'fault', 'start', 'handover-lost', 'dispose',
   /** 1.794: shared plugins. */
   'fetch-shared', 'sign-in', 'shared-refuse',
+  /** 1.895: the browser refused to run the plugin's code in the audio thread. */
+  'browser-refuse',
 ] as const;
 export type EstInstanceCause = typeof EST_INSTANCE_CAUSES[number];
 
@@ -109,10 +121,11 @@ export const EST_CAUSE_WORDS: Readonly<Record<EstInstanceCause, string>> = {
   'fetch-shared': 'the project offers the plugin, so its bundle is being fetched and checked',
   'sign-in': 'the project offers the plugin, but nobody is signed in',
   'shared-refuse': 'the bundle the project offered could not be fetched or failed its check',
+  'browser-refuse': 'the browser refused to run the plugin\'s code in the audio thread',
 };
 
 /** States where no instance runs and the slot is a placeholder (the card's words say why). */
-export const EST_STOPPED_STATES: readonly EstInstanceState[] = ['missing', 'other-version', 'blocked', 'needs-sign-in', 'shared-refused', 'refused', 'over-budget', 'stopped-after-problem', 'stalled', 'slow-stopped', 'crashed', 'bypassed'];
+export const EST_STOPPED_STATES: readonly EstInstanceState[] = ['missing', 'other-version', 'blocked', 'needs-sign-in', 'shared-refused', 'refused', 'browser-refused', 'over-budget', 'stopped-after-problem', 'stalled', 'slow-stopped', 'crashed', 'bypassed'];
 const STOPPED = new Set<EstInstanceState>(EST_STOPPED_STATES);
 /** Whether the state is a placeholder's (nothing runs). */
 export const isEstStoppedState = (s: EstInstanceState): boolean => STOPPED.has(s);
@@ -121,7 +134,7 @@ export const isEstStoppedState = (s: EstInstanceState): boolean => STOPPED.has(s
 const REFUSALS: Readonly<Partial<Record<EstInstanceCause, EstInstanceState>>> = {
   'not-installed': 'missing', 'other-version': 'other-version', block: 'blocked', refuse: 'refused',
   budget: 'over-budget', 'stopped-mark': 'stopped-after-problem', fault: 'crashed',
-  'sign-in': 'needs-sign-in', 'shared-refuse': 'shared-refused',
+  'sign-in': 'needs-sign-in', 'shared-refuse': 'shared-refused', 'browser-refuse': 'browser-refused',
 };
 
 /**
@@ -150,6 +163,7 @@ export const EST_TRANSITIONS: Readonly<Record<EstInstanceState, Readonly<Partial
     'needs-sign-in': { ...fromStopped },
     'shared-refused': { ...fromStopped },
     refused: { ...fromStopped },
+    'browser-refused': { ...fromStopped },
     'over-budget': { ...fromStopped },
     'stopped-after-problem': { ...fromStopped },
     stalled: { ...fromStopped },
@@ -192,7 +206,7 @@ export type EstReason = EstUnavailable;
 
 /** The placeholder reason each stopped state is (the status's `reason`), undefined where none. */
 export const EST_STATE_REASON: Readonly<Partial<Record<EstInstanceState, EstReason>>> = {
-  missing: 'not-installed', 'other-version': 'other-version', blocked: 'blocked', refused: 'refused',
+  missing: 'not-installed', 'other-version': 'other-version', blocked: 'blocked', refused: 'refused', 'browser-refused': 'browser',
   'needs-sign-in': 'sign-in', 'shared-refused': 'shared-refused',
   'over-budget': 'budget', 'stopped-after-problem': 'stopped', stalled: 'stalled', 'slow-stopped': 'slow', crashed: 'crashed',
 };
@@ -204,6 +218,7 @@ export function stateOfReason(r: EstReason | undefined): EstInstanceState {
     case 'other-version': return 'other-version';
     case 'blocked': return 'blocked';
     case 'refused': return 'refused';
+    case 'browser': return 'browser-refused';
     case 'budget': return 'over-budget';
     case 'crashed': return 'crashed';
     case 'stopped': return 'stopped-after-problem';
@@ -222,6 +237,7 @@ export function causeOfReason(r: EstReason): EstInstanceCause {
     case 'other-version': return 'other-version';
     case 'blocked': return 'block';
     case 'refused': return 'refuse';
+    case 'browser': return 'browser-refuse';
     case 'budget': return 'budget';
     case 'stopped': return 'stopped-mark';
     case 'stalled': return 'stall';
@@ -249,18 +265,18 @@ export const estReasonHasStopWhy = (r: EstReason | undefined): boolean => r === 
 // ---------------------------------------------------------------- words
 
 /** The status chip each state shows (a word always beside its colour). */
-export type EstChipKey = 'ready' | 'loading' | 'missing' | 'budget' | 'crashed' | 'blocked' | 'stopped' | 'stalled' | 'slow' | 'sign-in';
+export type EstChipKey = 'ready' | 'loading' | 'missing' | 'budget' | 'crashed' | 'blocked' | 'stopped' | 'stalled' | 'slow' | 'sign-in' | 'browser';
 export const EST_CHIP_WORDS: Readonly<Record<EstChipKey, string>> = {
   ready: 'Ready', loading: 'Loading', missing: 'Missing', budget: 'Over budget', crashed: 'Crashed', blocked: 'Blocked',
-  stopped: 'Stopped', stalled: 'Stalled', slow: 'Too slow', 'sign-in': 'Sign in',
+  stopped: 'Stopped', stalled: 'Stalled', slow: 'Too slow', 'sign-in': 'Sign in', browser: 'Not in this browser',
 };
 export const EST_CHIP_TONE: Readonly<Record<EstChipKey, 'ok' | 'warn' | 'alert' | 'none'>> = {
   ready: 'ok', loading: 'none', missing: 'warn', budget: 'warn', crashed: 'alert', blocked: 'alert',
-  stopped: 'warn', stalled: 'alert', slow: 'alert', 'sign-in': 'warn',
+  stopped: 'warn', stalled: 'alert', slow: 'alert', 'sign-in': 'warn', browser: 'warn',
 };
 export const EST_STATE_CHIP: Readonly<Record<EstInstanceState, EstChipKey>> = {
   resolving: 'loading', loading: 'loading', 'handing-over': 'loading', 'loading-shared': 'loading', running: 'ready',
-  missing: 'missing', 'other-version': 'missing', blocked: 'blocked', 'needs-sign-in': 'sign-in', 'shared-refused': 'blocked', refused: 'blocked', 'over-budget': 'budget',
+  missing: 'missing', 'other-version': 'missing', blocked: 'blocked', 'needs-sign-in': 'sign-in', 'shared-refused': 'blocked', refused: 'blocked', 'browser-refused': 'browser', 'over-budget': 'budget',
   'stopped-after-problem': 'stopped', stalled: 'stalled', 'slow-stopped': 'slow', crashed: 'crashed',
   bypassed: 'missing', disposed: 'missing',
 };
@@ -285,6 +301,7 @@ export function estStateSentence(s: EstInstanceState, it: string, blockedBecause
     case 'other-version': return `${it} isn't in your Cyber (another version is).`;
     case 'blocked': return blockedBecause ? `${it} was blocked by the registry (${blockedBecause}).` : `${it} was blocked and is off.`;
     case 'refused': return `${it} failed the safety check and is off.`;
+    case 'browser-refused': return `${it} can't run in this browser: it does not let Cyber's plugins run their code here.`;
     case 'over-budget': return `${it} didn't start: too many plugins in this tab.`;
     case 'stopped-after-problem': return `${it} stopped after a problem the last time it ran on this device, so it is off until you press Start.`;
     case 'stalled': return `${it} stalled the audio and was stopped, so it is off until you press Start.`;
@@ -307,6 +324,7 @@ export function estStateLine(s: EstInstanceState, blockedBecause?: string | null
   switch (s) {
     case 'blocked': return blockedBecause ? `Blocked by the registry (${blockedBecause}).` : 'Blocked: it is off everywhere.';
     case 'refused': return 'It failed the safety check and is off.';
+    case 'browser-refused': return 'This browser does not let Cyber\'s plugins run their code here.';
     case 'stopped-after-problem': return 'Stopped after a problem the last time it ran on this device: open it to start it again.';
     case 'stalled': return 'It stalled the audio and was stopped: open it to start it again.';
     case 'slow-stopped': return 'It was too slow for the audio and was stopped: open it to start it again.';
@@ -450,3 +468,25 @@ export function resetEstInstancesForTests(now?: () => number): void {
   nextId = 0;
   clock = now ?? (() => Date.now());
 }
+
+/** 1.896: what the page says when the compiling Worker's reply (a compiled `WebAssembly.Module`) is refused by the browser (`messageerror`). */
+export const EST_WORKER_MODULE_REFUSED = "this browser would not take the compiled plugin from Cyber's checking Worker (it does not let Cyber's plugins run their code here)";
+
+/**
+ * 1.895: whether a failure is the browser refusing to make a plugin's WebAssembly where Cyber runs it,
+ * never the plugin's fault. Until 1.899 the page's `script-src` had no 'wasm-unsafe-eval' (only the
+ * compiling Workers had it), and two engines apply the page's policy beyond the page; since 1.899 (D-65,
+ * server/estPolicy.mjs `withEstWasm`) the documents that host the plugin worklet carry it, so these are
+ * what a browser that ignores the keyword still says:
+ * - Safari inside the AudioWorklet: "CompileError: Refused to create a WebAssembly object because
+ *   'unsafe-eval' or 'wasm-unsafe-eval' is not an allowed source of script…" (macOS WebKit 27.2, 1.895).
+ * - 1.896: Firefox inside the AudioWorklet ("CompileError: call to WebAssembly.Module() blocked by CSP")
+ *   and, first, on the page itself when the compiling Worker's reply carries a compiled module: the
+ *   page cannot deserialise it ("Content-Security-Policy: The page's settings blocked WebAssembly
+ *   (script-src)…" in its console), so the Worker's reply arrives as `messageerror`, said as
+ *   `EST_WORKER_MODULE_REFUSED` (Firefox 157 on CI, 1.896's probes; Chromium takes both).
+ * The browser's own words (or that `messageerror`) are the signal, so nothing is sniffed.
+ */
+export const browserRefusedWasm = (message: string): boolean =>
+  /wasm-unsafe-eval|Refused to create a WebAssembly object|WebAssembly[^\n]*blocked by CSP/i.test(message)
+  || message.includes(EST_WORKER_MODULE_REFUSED);

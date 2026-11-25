@@ -8,9 +8,12 @@
  * (2026-10-28): a document whose CSP lacks `'wasm-unsafe-eval'` refuses compilation everywhere
  * its policy reaches: the page, a Worker made from a blob: URL, and the AudioWorklet (a blob:
  * module inherits the document's policy). Instantiating a `WebAssembly.Module` compiled where it
- * was allowed is not refused**, in the page or in the worklet. So under Cyber's CSP today
- * (`server/collab.mjs`, unchanged in Phase 1) both paths fail and `createEstNode` reports
- * `phase: 'compile'`; the browser spec runs with the policy bypassed and records the refusals.
+ * was allowed is not refused**, in the page or in the worklet (WebKit and Firefox do refuse it:
+ * docs/est/EST_SECURITY_ARCHITECTURE.md §11). Until 1.899 both paths therefore failed under Cyber's
+ * own policy and this file's `compileEst` worked only with the policy bypassed; since 1.899 (D-65)
+ * the app's page carries `'wasm-unsafe-eval'`, so the lab's fixtures compile here. `compileEst` is
+ * the EST lab's only (an admin's, Cyber's own fixtures): every plugin path takes its module from the
+ * compiling Worker (src/audio/est/wasmCompileSites.test.ts holds that).
  */
 
 import { importWithRetry } from '@/lib/lazyWithRetry';

@@ -1,6 +1,6 @@
 # Build an EST plugin
 
-From an idea to your own plugin playing in Cyber, in four steps. You need Node 20 or newer and a terminal. No install at all? Use [the playground](playground.md) with [the one prompt](ONE_PROMPT.md) instead.
+From an idea to your own plugin playing in Cyber, in four steps. You need Node 20 or newer and a terminal. No tools at all? Copy [the one prompt](ONE_PROMPT.md) in Cyber (Home → EST PLUGINS → Make your own), paste it into your AI, and paste its answer into **Add a plugin file**: Cyber builds it, window included. [The playground](playground.md) takes the same answer.
 
 An EST plugin is one file, a `.est` bundle: your sound code compiled to WebAssembly, plus a manifest (`est.json`). Cyber runs it in a sandbox: it cannot reach the network, your files or the page.
 

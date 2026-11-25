@@ -10,6 +10,8 @@
  *   `package.json` with the kit pinned, the default id, the name, the three questions, and the install.
  * - The one prompt: its two example programs compile and pass `est validate`.
  */
+import { readVibeText, textOf } from '../../src/components/est/vibe/vibeFiles';
+import { repairManifest } from '../../src/components/est/vibe/vibeRepair';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -465,23 +467,32 @@ describe('the one prompt', () => {
   });
 
   it('shows an instrument as well as an effect, a note\'s real fields, and the library', () => {
-    expect(EST_ONE_PROMPT).toContain('A whole working effect');
-    expect(EST_ONE_PROMPT).toContain('A whole working instrument');
+    expect(EST_ONE_PROMPT).toContain('A WHOLE WORKING EXAMPLE');
+    expect(EST_ONE_PROMPT).toContain('THE SAME FOR AN INSTRUMENT');
     expect(EST_ONE_PROMPT).toContain('There is no `note.id`');
     expect(EST_ONE_PROMPT).toContain('`noteId: i32`');
     expect(EST_ONE_PROMPT).toContain('**`DelayLine`**');
     expect(EST_ONE_PROMPT).toContain('com.example.<name-in-kebab-case>');
+    // 1.898: one answer, with the plugin's own window: the marker lines Cyber's reader looks for, the window's rules and its example.
+    for (const must of ['ONE code block', '=== file: est.json ===', '=== file: assembly/index.ts ===', '=== file: ui/index.html ===', '=== file: ui/style.css ===', '=== file: ui/ui.js ===', 'THE WINDOW', '<script src="est-ui.js"></script>', 'EstUI.connect()', 'est.subscribe', 'est.onMeter']) expect(EST_ONE_PROMPT, must).toContain(must);
     // Nothing a chat with no folder cannot use.
     for (const no of ['AGENTS.md', '$schema', 'est/`', 'npx est', '<!--']) expect(EST_ONE_PROMPT, no).not.toContain(no);
   });
 
-  /** The two files of an example in the prompt. */
+  /**
+   * The two files of an example in the prompt, est.json made whole as Cyber's builder makes it (the
+   * prompt's est.json is the few facts an assistant decides: `repairManifest`, the app's own tidy-up).
+   */
   function example(which: 'effect' | 'instrument'): { source: string; manifest: string } {
-    const from = EST_ONE_PROMPT.indexOf(`A whole working ${which}`);
-    const rest = EST_ONE_PROMPT.slice(from);
-    const m = /--- assembly\/index\.ts ---\n([\s\S]*?)\n\n--- est\.json ---\n(\{[\s\S]*?\n\})\n/.exec(rest);
-    if (!m) throw new Error(`no ${which} example in the prompt`);
-    return { source: m[1]!, manifest: m[2]! };
+    const from = EST_ONE_PROMPT.indexOf(which === 'effect' ? 'A WHOLE WORKING EXAMPLE' : 'THE SAME FOR AN INSTRUMENT');
+    const to = which === 'effect' ? EST_ONE_PROMPT.indexOf('THE SAME FOR AN INSTRUMENT') : EST_ONE_PROMPT.indexOf('THE "est" LIBRARY');
+    const src = readVibeText(EST_ONE_PROMPT.slice(from, to));
+    // The kit's folder has no window here: the two files alone, as before.
+    for (const p of [...src.files.keys()]) if (p.startsWith('ui/')) src.files.delete(p);
+    const problems = repairManifest(src);
+    if (problems.length || !src.files.has('assembly/index.ts')) throw new Error(`no ${which} example in the prompt`);
+    const m = [textOf(src, 'assembly/index.ts'), textOf(src, 'est.json')];
+    return { source: m[0]!, manifest: m[1]! };
   }
 
   it.each(['effect', 'instrument'] as const)('its %s example compiles and passes est validate as it stands (two files over a new folder, as the playground takes them)', async (which) => {

@@ -9,7 +9,7 @@ import { fieldsOf } from '../lib/forwardFields';
 import type { FxSlot } from '../audio/mixer/fxDefs';
 import type { MidiFx } from './midiFx';
 import type {
-  AudioClip, AutomationLane, Clip, Locator, MasterBus, Note, ReturnBus, Scene, SequencerState,
+  AudioClip, AutomationLane, AutomationPoint, AutomationTarget, Clip, Locator, MasterBus, Note, ReturnBus, Scene, SequencerState,
   SessionAudioClip, SessionClip, SessionState, Track,
 } from './sequencerTypes';
 
@@ -50,6 +50,11 @@ export const AUDIO_CLIP_FIELDS = fieldsOf<AudioClip | SessionAudioClip>()([
 ] as const);
 
 export const LANE_FIELDS = fieldsOf<AutomationLane>()(['id', 'target', 'points', 'on'] as const);
+/** 1.901: a lane's target (every kind's fields) and a point (a lane's or a clip envelope's). */
+export const LANE_TARGET_FIELDS = fieldsOf<AutomationTarget>()(['kind', 'trackId', 'param', 'index', 'fxId', 'control', 'returnId', 'key'] as const);
+export const POINT_FIELDS = fieldsOf<AutomationPoint>()(['beat', 'value', 'curve'] as const);
+/** 1.901: the song's loop brace. */
+export const SONG_LOOP_FIELDS = fieldsOf<SequencerState['loop']>()(['on', 'start', 'end'] as const);
 export const LOCATOR_FIELDS = fieldsOf<Locator>()(['id', 'beat', 'name'] as const);
 export const RETURN_FIELDS = fieldsOf<ReturnBus>()([
   'id', 'name', 'volume', 'pan', 'mute', 'fx', 'height', 'color', 'xfadeAssign', 'output', 'sends',

@@ -297,6 +297,28 @@ export function estProcessorMain() {
   const LABEL_CHARS = 32;
   const LABEL_FUEL = BLOCK_FUEL;
   const LABEL_MS = 20;
+  /**
+   * 1.902 (the sandbox review, R-1 to R-4): what a plugin reports at start-up, and the work it does outside
+   * `process()`, held to bounds here too (the install's conformance run checks them once, on one rate and
+   * no state; a plugin can answer otherwise later).
+   * - `MAX_PARAMS` 512 (EST-C007's number) and `MAX_FACTORY` 64 plugins a factory: past either the instance
+   *   fails at boot. `params.count()` answering 2³¹ made this constructor build an object a parameter on
+   *   the audio thread until the worklet ran out of memory (2 000 000 measured: 1.3 s and 254 MB).
+   * - `PARAM_FUEL` one call's fuel for **all** of the parameter list's calls (a metered module): an honest
+   *   `get_info` or `get_value` is a table read, a few hundred points, so 2 × 512 of them are under a
+   *   thousandth of it; before, each of the up to 1 024 calls had a whole `CALL_FUEL` of its own
+   *   (16 blocks of work each: seconds to minutes of a frozen audio thread at boot).
+   * - `MAX_LATENCY` 192 000 frames, the most est.json's `limits.maxLatencyFrames` may say: a reported
+   *   latency past it is read as it (the host adds a strip's latency to an export's length).
+   * - `RESTART_FRAMES` one second of audio between two restarts the plugin asks for: a restart is four
+   *   lifecycle calls of `CALL_FUEL` each, outside the block's fuel and the slow-block rule, so a plugin
+   *   asking for one every block had 64 blocks' fuel a block. A request inside the second waits.
+   */
+  const MAX_PARAMS = 512;
+  const MAX_FACTORY = 64;
+  const PARAM_FUEL = CALL_FUEL;
+  const MAX_LATENCY = 192000;
+  const RESTART_FRAMES_S = 1;
 
   type Fn = (...args: number[]) => number;
   interface ParamInfo { id: number; name: string; module: string; min: number; max: number; def: number; flags: number; value: number; scale?: string; labels?: string[] }
@@ -416,6 +438,8 @@ export function estProcessorMain() {
     declare trDirty: boolean;
     declare steady: number;
     declare restart: boolean;
+    declare restartAt: number;
+    declare paramFuel: number;
     declare callback: boolean;
     declare statSum: number;
     declare statMax: number;
@@ -531,6 +555,8 @@ export function estProcessorMain() {
       this.trDirty = false;
       this.steady = 0;
       this.restart = false;
+      this.restartAt = -Infinity;
+      this.paramFuel = -1;
       this.callback = false;
       this.statSum = 0;
       this.statMax = 0;
@@ -655,7 +681,8 @@ export function estProcessorMain() {
       if (!this.call(entry + A.clap_plugin_entry.init, this.cstr('/'))) throw new Error('clap_entry.init returned false');
       const factory = this.call(entry + A.clap_plugin_entry.get_factory, this.cstr(STR.CLAP_PLUGIN_FACTORY_ID));
       if (!factory) throw new Error('the module has no clap.plugin-factory');
-      const count = this.call(factory + A.clap_plugin_factory.get_plugin_count, factory);
+      const count = this.call(factory + A.clap_plugin_factory.get_plugin_count, factory) >>> 0;
+      if (count > MAX_FACTORY) throw new Error(`the factory reports ${count} plugins (at most ${MAX_FACTORY})`);
       let descId = 0;
       for (let i = 0; i < count && !descId; i++) {
         const desc = this.call(factory + A.clap_plugin_factory.get_plugin_descriptor, factory, i);
@@ -938,10 +965,13 @@ export function estProcessorMain() {
       const pe = this.ext[STR.CLAP_EXT_PARAMS] ?? 0;
       this.params = [];
       if (!pe) return;
-      const n = this.call(pe + A.clap_plugin_params.count, this.plugin);
+      const n = this.call(pe + A.clap_plugin_params.count, this.plugin) >>> 0;
+      if (n > MAX_PARAMS) throw new Error(`the plugin reports ${n} parameters (at most ${MAX_PARAMS})`);
       const info = this.scratch, I = A.clap_param_info;
+      // 1.902 (R-1): one fuel budget for the whole list's calls (`PARAM_FUEL`), as the labels have.
+      this.paramFuel = PARAM_FUEL;
       for (let i = 0; i < n; i++) {
-        if (!this.call(pe + A.clap_plugin_params.get_info, this.plugin, i, info)) continue;
+        if (!this.paramCall(pe + A.clap_plugin_params.get_info, this.plugin, i, info)) continue;
         const id = this.dv.getUint32(info + I.id, true);
         const p: ParamInfo = {
           id,
@@ -957,7 +987,21 @@ export function estProcessorMain() {
         if (this.logIds.indexOf(id) >= 0 && p.min > 0 && p.max > p.min && !(p.flags & C.CLAP_PARAM_IS_STEPPED)) p.scale = 'log';
         this.params.push(p);
       }
-      for (const p of this.params) p.value = this.paramValue(p.id);
+      for (const p of this.params) p.value = this.paramValue(p.id, true);
+      this.paramFuel = -1;
+    }
+
+    /** 1.902 (R-1): a call of the parameter list at boot, on what is left of its one budget (`PARAM_FUEL`). */
+    paramCall(ptr: number, ...args: number[]): number {
+      if (!this.fuelLeft || this.paramFuel < 0) return this.call(ptr, ...args);
+      if (this.paramFuel === 0) throw new Error('the plugin\'s parameter list ran out of fuel');
+      const f = this.fnAt(ptr);
+      const give = Math.min(this.paramFuel, this.callFuel);
+      this.fuelUp(give);
+      const r = f(...args);
+      this.paramFuel -= give - this.fuelLeft();
+      this.refreshIfGrown();
+      return r;
     }
 
     /**
@@ -1039,17 +1083,18 @@ export function estProcessorMain() {
       return s;
     }
 
-    paramValue(id: number): number {
+    paramValue(id: number, boot = false): number {
       const pe = this.ext[STR.CLAP_EXT_PARAMS] ?? 0;
       if (!pe) return NaN;
       const out = this.scratch;
-      if (!this.call(pe + A.clap_plugin_params.get_value, this.plugin, id, out)) return NaN;
+      if (!(boot ? this.paramCall(pe + A.clap_plugin_params.get_value, this.plugin, id, out) : this.call(pe + A.clap_plugin_params.get_value, this.plugin, id, out))) return NaN;
       return this.dv.getFloat64(out, true);
     }
 
     latency(): number {
       const e = this.ext[STR.CLAP_EXT_LATENCY] ?? 0;
-      return e ? this.call(e + A.clap_plugin_latency.get, this.plugin) >>> 0 : 0;
+      // 1.902 (R-4): never more than est.json may declare (`MAX_LATENCY`).
+      return e ? Math.min(MAX_LATENCY, this.call(e + A.clap_plugin_latency.get, this.plugin) >>> 0) : 0;
     }
 
     tail(): number {
@@ -1082,9 +1127,13 @@ export function estProcessorMain() {
 
     zalloc(n: number): number {
       this.fuelUp(this.callFuel);
-      const p = this.malloc(n);
+      const p = this.malloc(n) >>> 0;
       if (!p) throw new Error(`the plugin's malloc(${n}) returned NULL`);
       this.refreshIfGrown();
+      // 1.902 (R-3): the pointer is the plugin's word. One past its memory booted fine (`fill` clamps
+      // silently) and then threw out of `process()` at the first event the host wrote there: the node
+      // went silent with no error told. Refused here, so the instance fails at boot, in words.
+      if (!this.inMem(p, n)) throw new Error(`the plugin's malloc(${n}) returned memory outside its own`);
       this.u8.fill(0, p, p + n);
       return p;
     }
@@ -1707,8 +1756,10 @@ export function estProcessorMain() {
         return true;
       }
       if (this.capN) this.capBegin(frames);
-      if (this.restart) {
+      // 1.902 (R-2): at most one restart a second of audio (`RESTART_FRAMES_S`); a request inside it waits.
+      if (this.restart && currentFrame - this.restartAt >= sampleRate * RESTART_FRAMES_S) {
         this.restart = false;
+        this.restartAt = currentFrame;
         try {
           this.pcall(A.clap_plugin.stop_processing);
           this.pcall(A.clap_plugin.deactivate);
@@ -1771,9 +1822,14 @@ export function estProcessorMain() {
       if (this.callback) {
         this.callback = false;
         try {
-          this.fuelUp(this.callFuel);
+          // 1.902 (R-2): a metered plugin's `on_main_thread` runs on what its block left, inside the one
+          // budget, and counts toward a heavy block. It used to get a fresh `CALL_FUEL` (16 blocks' worth)
+          // here, after the block was judged: a plugin asking for the callback every block did its work
+          // there, 16 times a block's fuel a block, and the slow-block rule never saw it.
+          if (!this.fuelLeft) this.fuelUp(this.callFuel);
           this.fnMainThread(this.plugin);
         } catch (err) { this.die('on_main_thread', err, out); return true; }
+        if (this.fuelLeft) heavy = this.blockFuel - this.fuelLeft() >= this.slowAt;
       }
       if (this.outParamLen) this.postParams();
       if ((this.noteOutLen || this.noteOutDrop) && (this.noteOutLen >= NOTE_OUT * 0.75

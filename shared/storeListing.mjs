@@ -156,6 +156,16 @@ const shown = (n) => n >= 32 && n !== 127 && !(n >= 0x200b && n <= 0x200f) && !(
 const text = (v, max) => (typeof v === 'string' ? [...v].filter((c) => shown(/** @type {number} */ (c.codePointAt(0)))).join('').slice(0, max) : '');
 const count = (v) => Math.max(0, Math.floor(Number(v) || 0));
 
+
+/**
+ * A listing's `counts` from the raw counts (1.903: its own function, so the server can refresh a held
+ * listing's counts alone, by the builder's own rule, when only a count moved).
+ * @param {{ installs?: number, plays?: number, wishlists?: number } | null | undefined} c
+ * @returns {{ installs: number, plays: number, wishlists: number }}
+ */
+export function listingCounts(c) {
+  return { installs: shownCount(c?.installs), plays: count(c?.plays), wishlists: shownCount(c?.wishlists) };
+}
 /**
  * One listing, from what the server knows (it builds them; the app checks what it reads with
  * `sanitiseStoreListing`, the same rules).
@@ -191,7 +201,7 @@ export function buildStoreListing(p) {
       sizeBytes: count(p.latest.sizeBytes),
       publishedAt: Number.isFinite(Date.parse(String(p.latest.publishedAt ?? ''))) ? new Date(Date.parse(String(p.latest.publishedAt))).toISOString() : '',
     },
-    counts: { installs: shownCount(p.counts?.installs), plays: count(p.counts?.plays), wishlists: shownCount(p.counts?.wishlists) },
+    counts: listingCounts(p.counts),
     price: licence === 'paid' && p.price && typeof p.price.display === 'string' && p.price.display ? { display: text(p.price.display, 40) } : null,
     licence,
     hasOwnUi: p.hasOwnUi === true,

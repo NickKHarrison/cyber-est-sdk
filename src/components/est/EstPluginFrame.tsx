@@ -1,4 +1,4 @@
-import { frameAttended, frameCommitBudget, writeCost } from './frameCommitBudget';
+import { frameAttended, frameCommitBudget, frameKeyGate, writeCost } from './frameCommitBudget';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { SHARED_SHIELD_WORDS, armShared, isSharedRecord, sharedArmed, shieldDrops, shieldKeyNow, subscribeSharedShield } from './sharedShield';
 import { noteEstInstanceFrame } from '../../audio/est/instanceState';
@@ -10,6 +10,7 @@ import {
   spectrumMessage, themeMessage, themeOf, tokenHex, withFragment, type EstUiTheme, type EstUiVersion, type FrameKey,
 } from './estFrameProtocol';
 import { postFrom } from '../../lib/realmPost';
+import { markFrameKey } from '../../lib/frameKeyEvents';
 import { noteEstOriginBlocked, noteEstOriginOk, probeEstOrigin, type EstProbeCode } from '../../audio/est/originReach';
 
 /**
@@ -63,10 +64,38 @@ export function playFrameKey(el: HTMLIFrameElement | null, k: FrameKey): boolean
   // is in another tab, window or app (or the page's other window), and a plugin's script can post
   // what the guard posts (the nonce is in its own address): no key then.
   if (typeof el.ownerDocument.hasFocus === 'function' && !el.ownerDocument.hasFocus()) return false;
-  el.dispatchEvent(new KeyboardEvent(k.down ? 'keydown' : 'keyup', {
+  const ev = new KeyboardEvent(k.down ? 'keydown' : 'keyup', {
     key: k.key, code: k.code, shiftKey: k.shift, repeat: k.repeat, bubbles: true, cancelable: true, composed: true,
-  }));
+  });
+  // 1.902 (U-1): marked, so the shortcut registry runs only the transport for it (`frameKeyEvents.ts`).
+  markFrameKey(ev);
+  el.dispatchEvent(ev);
   return true;
+}
+
+/**
+ * 1.902 (the sandbox review, U-2): a count the frame's own messages drive (`data-rejected`,
+ * `data-dropped`), shown at once while it moves slowly and at most `COUNT_RENDERS_PER_SECOND` times a
+ * second under a flood. Every refused message used to be a state change of its own, so a plugin's page
+ * posting tens of thousands of messages a second (each refused by the rate gate) made the app render
+ * that often: its window froze the page it sits in. The count itself is exact (kept in a ref); only how
+ * often it is drawn is bounded, and the last value always lands.
+ */
+export const COUNT_RENDERS_PER_SECOND = 30;
+function useFloodCount(): [number, () => void] {
+  const [shown, setShown] = useState(0);
+  const st = useRef({ n: 0, times: [] as number[], timer: null as ReturnType<typeof setTimeout> | null });
+  useEffect(() => () => { const t = st.current.timer; if (t) clearTimeout(t); st.current.timer = null; }, []);
+  const bump = useRef(() => {
+    const c = st.current;
+    c.n++;
+    if (c.timer) return; // a draw is already on its way: it shows this one too
+    const now = Date.now();
+    while (c.times.length && now - c.times[0]! >= 1000) c.times.shift();
+    if (c.times.length < COUNT_RENDERS_PER_SECOND) { c.times.push(now); setShown(c.n); return; }
+    c.timer = setTimeout(() => { c.timer = null; c.times.push(Date.now()); setShown(c.n); }, Math.max(1, 1000 - (now - c.times[0]!)));
+  }).current;
+  return [shown, bump];
 }
 
 /** A burst of the frame's parameter messages outside a gesture is written once it has been quiet this long. */
@@ -171,11 +200,11 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
   const shielded = !!shieldKey && !armedNow;
   const shieldedRef = useRef(shielded);
   shieldedRef.current = shielded;
-  const [dropped, setDropped] = useState(0);
+  const [dropped, drop] = useFloodCount();
   const [nonce] = useState(newNonce);
   const frame = useRef<HTMLIFrameElement>(null);
   const hostEl = useRef<HTMLDivElement>(null);
-  const [rejected, setRejected] = useState(0);
+  const [rejected, refuseOne] = useFloodCount();
   const [version, setVersion] = useState<EstUiVersion>(1);
   const [size, setSize] = useState({ w: ui.w, h: ui.h });
   const page = uiUrl ?? bundleUiUrl(origin, installed.ref.hash, ui.path);
@@ -223,6 +252,7 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
 
   useEffect(() => {
     const gate = rateGate();
+    const keyGate = frameKeyGate();
     let batch: Record<string, number> = {};
     let raf = 0;
     let quiet: ReturnType<typeof setTimeout> | null = null;
@@ -271,7 +301,7 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
       if (quiet) clearTimeout(quiet);
       if (!gestures.size) quiet = setTimeout(commit, QUIET_MS);
     };
-    const refuse = () => setRejected(n => n + 1);
+    const refuse = refuseOne;
     /** `est:init` with every shown parameter at the slot's values: on the frame's load, and again when it asks (`est:ready`). */
     const sendInit = () => {
       const values = live.current.params.map(p => ({ ...p, value: live.current.edit.values[String(p.id)] ?? p.value }));
@@ -290,21 +320,26 @@ export function EstPluginFrame({ installed, params, edit, origin, title, uiUrl, 
       if (!win || e.source !== win) return; // not this frame's: not ours to count
       if (!frameOriginRef.current || e.origin !== frameOriginRef.current) { refuse(); return; }
       // 1.630: anything from the wrapper, on the plugin origin, is the handshake; its hello is only that.
+      // 1.902 (U-2): the hello is taken once, before the handshake; after it a message of its shape is the
+      // plugin's own (the wrapper relays what the page posts) and goes through the rate gate as any other.
+      const first = !handshaken.current;
       handshakeRef.current();
-      if (isWrapHello(e.data)) return;
+      if (first && isWrapHello(e.data)) return;
       if (!gate()) { refuse(); return; }
       // 1.346: a key the frame guard hands back: played as the page's own key, only while the frame
       // has the focus (so a plugin cannot press keys while the person is elsewhere).
       const key = checkKeyMessage(e.data, nonce);
       if (key) {
-        if (shieldedRef.current) { setDropped(n => n + 1); return; } // 1.795: a shielded window plays nothing
+        if (shieldedRef.current) { drop(); return; } // 1.795: a shielded window plays nothing
+        // 1.902 (U-1): a key down only with a real input behind it, and at a keyboard's rate (`frameKeyGate`).
+        if (!keyGate(key, frameAttended(frame.current?.ownerDocument.defaultView))) { refuse(); return; }
         playFrameKey(frame.current, key);
         return;
       }
       const m = checkFrameMessage(e.data, nonce, live.current.params, live.current.resizable, live.current.audioOk);
       if (!m) { refuse(); return; }
       // 1.795 (D-64): before the first press a shared plugin's window writes nothing (its values, gestures).
-      if (shieldedRef.current && shieldDrops(m.type)) { setDropped(n => n + 1); return; }
+      if (shieldedRef.current && shieldDrops(m.type)) { drop(); return; }
       if (ver.current !== m.v) { ver.current = m.v; setVersion(m.v); }
       if (m.type === 'est:ready') { sendInit(); return; }
       if (m.type === 'est:resize') { setSize({ w: m.w, h: m.h }); return; }

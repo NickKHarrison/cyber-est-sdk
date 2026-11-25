@@ -119,6 +119,11 @@ export function readStrictZip(bytes, o) {
     let name = '';
     try { name = dec.decode(nameBytes); } catch { refuse('path', 'a path that is not UTF-8', 'EST-B005'); }
     at += 46 + nameLen + extraLen + commentLen2;
+    // 1.902 (the sandbox review, Z-1): no extra field and no comment on an entry. Up to 65 535 bytes each
+    // (and as many again in the local header) rode in an archive that passed every rule, unlisted and
+    // unhashed (EST-B011 asks that every file be listed and hashed; "nothing hides in it"), and let one
+    // set of files have any number of archives, each a new content hash. The kit's packer writes none.
+    if (extraLen !== 0 || commentLen2 !== 0) refuse('zip', `${name} carries bytes outside its file (an extra field or a comment)`, 'EST-B002', name);
     if (flags & 0x0001) refuse('zip', `${name} is encrypted`, 'EST-B002', name);
     if (flags & 0x0008) refuse('zip', `${name} has a data descriptor (sizes must be in its header)`, 'EST-B002', name);
     if (method !== 0) refuse('zip', `${name} is compressed (EST bundles store every entry uncompressed)`, 'EST-B002', name);
@@ -136,6 +141,7 @@ export function readStrictZip(bytes, o) {
     const lUsize = dv.getUint32(offset + 22, true);
     const lNameLen = dv.getUint16(offset + 26, true);
     const lExtraLen = dv.getUint16(offset + 28, true);
+    if (lExtraLen !== 0) refuse('zip', `${name} carries bytes outside its file (an extra field in its local header)`, 'EST-B002', name);
     const lName = bytes.subarray(offset + 30, offset + 30 + lNameLen);
     if (lFlags !== flags || lMethod !== method || lCrc !== crcWant || lCsize !== csize || lUsize !== usize
       || lNameLen !== nameLen || !sameBytes(lName, nameBytes)) {

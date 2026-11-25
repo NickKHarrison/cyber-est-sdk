@@ -80,7 +80,8 @@ export interface EstInstalled {
 /** Why a slot cannot run its plugin; the placeholder card words each. 1.314 (EST-06): 'stopped', marked after a problem on this device until the card's Start (`running.ts`). */
 /** 1.663: each a stopped state of instanceState.ts' machine (its `EstReason`); 'stalled' and 'slow' no longer read as 'crashed'. Kept here, not imported, so the SDK's mirror carries no new file. */
 /** 1.794: `'sign-in'` (a project offers the plugin; nobody signed in) and `'shared-refused'` (its bundle could not be fetched or failed its check), shared plugins (D-64). */
-export type EstUnavailable = 'not-installed' | 'other-version' | 'blocked' | 'refused' | 'budget' | 'crashed' | 'stopped' | 'stalled' | 'slow' | 'sign-in' | 'shared-refused';
+/** 1.895: `browser`, the browser refused to run the plugin's code in the audio thread (Safari's CSP in the AudioWorklet). */
+export type EstUnavailable = 'not-installed' | 'other-version' | 'blocked' | 'refused' | 'budget' | 'crashed' | 'stopped' | 'stalled' | 'slow' | 'sign-in' | 'shared-refused' | 'browser';
 
 export interface EstLibrary {
   /** Every installed plugin version, newest first. */

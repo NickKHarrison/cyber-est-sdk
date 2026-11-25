@@ -24,8 +24,8 @@ import { defaultRackPatch, rackHashes, sanitiseRackPatch, type RackPatch } from 
 import { findFxDeep } from '../audio/rack/fxRackTypes';
 import { holdNewer, keepExtras, NEWER_WORDS, unwrapNewer, withExtrasBudget } from '../lib/forwardFields';
 import {
-  AUDIO_CLIP_FIELDS, CLIP_FIELDS, LANE_FIELDS, LOCATOR_FIELDS, MASTER_FIELDS, NOTE_FIELDS, RETURN_FIELDS, SCENE_FIELDS,
-  SESSION_FIELDS, SONG_FIELDS, TRACK_FIELDS,
+  AUDIO_CLIP_FIELDS, CLIP_FIELDS, LANE_FIELDS, LANE_TARGET_FIELDS, LOCATOR_FIELDS, MASTER_FIELDS, NOTE_FIELDS,
+  POINT_FIELDS, RETURN_FIELDS, SCENE_FIELDS, SESSION_FIELDS, SONG_FIELDS, SONG_LOOP_FIELDS, TRACK_FIELDS,
 } from './songFields';
 import type { ChainModule, DynamicsParams, EQParams, MaximizerParams, ModuleId, SaturationParams } from '../audio/types';
 import {
@@ -1749,6 +1749,12 @@ const param = (v: unknown): string | null => (typeof v === 'string' && PARAM_RE.
 
 /** A lane's target, checked against the tracks and returns (the parameter's existence is the engine's to check). */
 export function sanitiseAutomationTarget(raw: unknown, tracks: readonly Track[]): AutomationTarget | null {
+  const target = sanitiseAutomationTargetKnown(raw, tracks);
+  // 1.901: a newer build's fields kept beside these (forwardFields.ts).
+  return target && keepExtras(raw, target, LANE_TARGET_FIELDS);
+}
+
+function sanitiseAutomationTargetKnown(raw: unknown, tracks: readonly Track[]): AutomationTarget | null {
   if (!isObj(raw)) return null;
   const track = typeof raw.trackId === 'string' ? tracks.find(t => t.id === raw.trackId) : undefined;
   switch (raw.kind) {
@@ -1829,7 +1835,8 @@ export function sanitisePoints(raw: unknown): AutomationPoint[] {
   const pts: AutomationPoint[] = [];
   for (const p of Array.isArray(raw) ? raw.slice(0, MAX_POINTS * 2) : []) {
     if (!isObj(p) || typeof p.beat !== 'number' || !Number.isFinite(p.beat)) continue;
-    pts.push({ beat: tk(num(p.beat, 0, MAX_BEATS, 0)), value: num(p.value, 0, 1, 0), curve: num(p.curve, -1, 1, 0) });
+    // 1.901: a newer build's fields kept beside these (forwardFields.ts).
+    pts.push(keepExtras(p, { beat: tk(num(p.beat, 0, MAX_BEATS, 0)), value: num(p.value, 0, 1, 0), curve: num(p.curve, -1, 1, 0) }, POINT_FIELDS));
   }
   pts.sort((a, b) => a.beat - b.beat);
   const points: AutomationPoint[] = [];
@@ -2028,7 +2035,8 @@ function sanitiseSongLoop(raw: unknown): SequencerState['loop'] {
   let le = tk(num(loop.end, 0, MAX_BEATS, d.end));
   if (le <= ls) { ls = d.start; le = d.end; }
   else if (le - ls < MIN_SONG_LOOP_BEATS) le = tk(ls + MIN_SONG_LOOP_BEATS);
-  return { on: bool(loop.on, false), start: ls, end: le };
+  // 1.901: a newer build's fields kept beside these (forwardFields.ts).
+  return keepExtras(raw, { on: bool(loop.on, false), start: ls, end: le }, SONG_LOOP_FIELDS);
 }
 
 const sanitiseRecordQuantize = (v: unknown): RecordQuantize =>

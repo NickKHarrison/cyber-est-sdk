@@ -164,39 +164,77 @@ function exampleSource(text) {
   while (i < lines.length && (lines[i].startsWith('//') || lines[i].trim() === '')) i++;
   return lines.slice(i).join('\n').trim();
 }
-/** A template's est.json as the prompt shows it: without `$schema`, which only a folder has. */
-function exampleManifest(text) {
-  return text.replace(/^\s*"\$schema":[^\n]*\n/m, '').trim();
+/** The folder of the prompt's own example plugin: its small est.json and its designed window. */
+export const PROMPT_EXAMPLE = 'sdk/agents/prompt-example';
+/** The line that starts each file of the answer (and of the prompt's examples): what Cyber's reader looks for. */
+export const fileMarker = (path) => `=== file: ${path} ===`;
+
+/** A template's code as the prompt's example: the example's own id, name and vendor in its descriptor. */
+function exampleCode(root, template, id, name) {
+  const manifest = JSON.parse(read(root, `sdk/templates/${template}/est.json`));
+  let code = exampleSource(read(root, `sdk/templates/${template}/assembly/index.ts`));
+  code = code.split(manifest.id).join(id).split(manifest.name).join(name).replace(/"Example", "1\.0\.0"/g, '"Me", "1.0.0"');
+  // The asconfig remark means nothing to a chat assistant.
+  code = code.replace(/ \(asconfig\.json: [^)]*\)/, '');
+  if (!code.includes(`"${id}"`) || !code.includes(`"${name}"`)) throw new Error(`the ${template} template no longer names its id and name in its code`);
+  return code;
 }
 
-/** The one prompt for a chat assistant with no folder. @param {string} root @param {Map<string, string>} sections */
+/**
+ * The one prompt for a chat assistant with no folder (1.898: one answer, with the plugin's own window).
+ * @param {string} root @param {Map<string, string>} sections
+ */
 export function onePrompt(root, sections) {
   const tags = new Set(['as', 'effect', 'instrument', 'notes', 'prompt']);
-  const example = (name) => [
-    '--- assembly/index.ts ---',
-    exampleSource(read(root, `sdk/templates/${name}/assembly/index.ts`)),
-    '',
-    '--- est.json ---',
-    exampleManifest(read(root, `sdk/templates/${name}/est.json`)),
-  ].join('\n');
+  const ex = (rel) => read(root, `${PROMPT_EXAMPLE}/${rel}`).trim();
+  const small = JSON.parse(ex('est.json'));
+  const instrument = { ...small, id: 'com.example.saw-poly', name: 'Saw Poly', kind: 'instrument', description: 'Four voices of a saw through a resonant low-pass, each shaped by an envelope.', limits: { ...small.limits, tailSeconds: 5 } };
   const library = onlyFor(sections.get('library-as') ?? '', tags).split('\n').filter((l) => !l.startsWith('## ')).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   return [
-    'I want an audio plugin for Cyber (an "EST plugin"): AssemblyScript compiled to WebAssembly, run in a sandbox.',
-    'Write me TWO files, each whole, in its own code block: `assembly/index.ts` and `est.json`. I will paste them into Cyber\'s plugin playground, or into a folder made by the kit\'s `est new`, which compiles and plays them. No other files, no build steps.',
+    'I want an audio plugin for Cyber (an "EST plugin") with its own designed window. You write its source files; Cyber compiles them and runs the plugin in a sandbox.',
     '',
     PROMPT_PLACEHOLDER,
     '',
+    'HOW TO ANSWER. Give me the whole plugin in ONE code block: five files, each complete, each under its own marker line, in this order:',
+    '',
+    `${fileMarker('est.json')}           (a few facts; Cyber fills in the rest)`,
+    `${fileMarker('assembly/index.ts')}  (the sound, in AssemblyScript)`,
+    `${fileMarker('ui/index.html')}      (the window)`,
+    fileMarker('ui/style.css'),
+    fileMarker('ui/ui.js'),
+    '',
+    'I will paste your whole answer into Cyber in one go, so: one code block only, no file left out, no "unchanged" or "..." placeholders, no build steps, and at most a line or two of talk outside the block. (If you can attach files, one .zip holding exactly these five files also works.) If I come back with errors, answer the same way, with every file again. Keep comments short so the answer is not cut off before the last file.',
+    '',
     onlyFor(sections.get('prompt-rules') ?? '', tags).trim(),
     '',
-    'A whole working effect (a gain into a filter). For an effect, change this one into mine:',
+    onlyFor(sections.get('prompt-window') ?? '', tags).trim(),
     '',
-    example('effect-as'),
+    'A WHOLE WORKING EXAMPLE, exactly as an answer looks (an effect: a gain into a filter, with its window). Change it into my plugin; do not copy its look:',
     '',
-    'A whole working instrument (four voices of a saw through a filter, each shaped by an envelope). For an instrument, change this one into mine:',
+    fileMarker('est.json'),
+    ex('est.json'),
     '',
-    example('instrument-as'),
+    fileMarker('assembly/index.ts'),
+    exampleCode(root, 'effect-as', small.id, small.name),
     '',
-    'The "est" library (everything you may import):',
+    fileMarker('ui/index.html'),
+    ex('ui/index.html'),
+    '',
+    fileMarker('ui/style.css'),
+    ex('ui/style.css'),
+    '',
+    fileMarker('ui/ui.js'),
+    ex('ui/ui.js'),
+    '',
+    'THE SAME FOR AN INSTRUMENT (four voices of a saw through a filter, each shaped by an envelope). Only its first two files are shown: its window is made the same way as the effect\'s. For an instrument, change this one into mine:',
+    '',
+    fileMarker('est.json'),
+    JSON.stringify(instrument, null, 2),
+    '',
+    fileMarker('assembly/index.ts'),
+    exampleCode(root, 'instrument-as', instrument.id, instrument.name),
+    '',
+    'THE "est" LIBRARY (everything the sound code may import):',
     '',
     library,
     '',
@@ -210,9 +248,9 @@ function promptDoc(prompt) {
     '# The one prompt',
     '',
     'For a chat assistant with no folder and no tools. Copy everything in the block below into the chat and replace `<one sentence>` with what the plugin should do.',
-    'The assistant answers with two files, `assembly/index.ts` and `est.json`: paste them into Cyber\'s plugin playground, or over the same two files in a folder made by `npx @cyber-est/cli new`.',
+    'The assistant answers with one code block that holds the whole plugin: a small `est.json`, the sound (`assembly/index.ts`) and the plugin\'s own window (`ui/index.html`, `ui/style.css`, `ui/ui.js`), each under a `=== file: <path> ===` line. Paste that whole answer into Cyber (Home → EST PLUGINS → Add a plugin file → Paste your AI\'s answer) or into the plugin playground: Cyber compiles it, packs it with its window and plays it. A zip of the same files can be dropped in the same place.',
     '',
-    'This page is generated from [for-agents.md](for-agents.md) and the `effect-as` and `instrument-as` templates by `node sdk/agents/generate.mjs`: change those, never this.',
+    'This page is generated from [for-agents.md](for-agents.md), `sdk/agents/prompt-example/` and the `effect-as` and `instrument-as` templates by `node sdk/agents/generate.mjs`: change those, never this.',
     '',
     '````text',
     prompt.trimEnd(),
@@ -225,8 +263,8 @@ function promptDoc(prompt) {
 function promptModule(prompt) {
   return [
     '// Generated by `node sdk/agents/generate.mjs` from sdk/docs/for-agents.md and the effect-as and',
-    '// instrument-as templates (1.800): the one prompt that makes a chat assistant with no folder write a',
-    '// whole EST plugin as two files. Change the source, never this file; `--check` and',
+    '// instrument-as templates (1.800; 1.898: one answer, with the plugin\'s own window): the one prompt that makes',
+    '// a chat assistant with no folder write a whole EST plugin. Change the source, never this file; `--check` and',
     '// sdk/tests/agents.test.ts fail while it differs. Pure: no DOM, no Node, no store.',
     '',
     '/** The line a person replaces with what the plugin should do. */',

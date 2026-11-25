@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Glow Filter</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><h1>GLOW <span>FILTER</span></h1><div class="meter" aria-hidden="true"><i id="meter"></i></div></header>
+<canvas id="curve" width="488" height="120" role="img" aria-label="The filter's shape"></canvas>
+<main>
+  <est-knob param="1" label="Cutoff" unit="Hz" scale="log" size="64"></est-knob>
+  <est-knob param="2" label="Resonance" size="64"></est-knob>
+  <est-knob param="0" label="Gain" unit="dB" size="64"></est-knob>
+  <div class="modes" role="radiogroup" aria-label="Mode">
+    <button type="button" role="radio" data-mode="0">Low</button>
+    <button type="button" role="radio" data-mode="1">Band</button>
+    <button type="button" role="radio" data-mode="2">High</button>
+    <button type="button" role="radio" data-mode="3">Notch</button>
+  </div>
+</main>
+<script src="est-ui.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>

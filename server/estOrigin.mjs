@@ -335,7 +335,7 @@ function hostOf(hostHeader) {
  *   1.688: `release` (server/estOriginRelease.mjs, only with STORE_RELEASES_OPEN): `/est/v1/` from the
  *   active store release's directory, read again at each request, and `/est/b/<sha256>/` from every
  *   release mirrored, then EST_ORIGIN_DIR (the image's baseline); none, the two directories as before.
- * @returns {null | { handle(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): boolean, refuseUpgrade(req: import('node:http').IncomingMessage, socket: import('node:stream').Duplex): boolean }}
+ * @returns {null | { handle(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): boolean, refuseUpgrade(req: import('node:http').IncomingMessage, socket: import('node:stream').Duplex): boolean, remembered(): { pages: number, idents: number } }}
  */
 export function createEstOrigin(env, o = {}) {
   const rule = o.anyHost ? { any: true } : hostRule(env.EST_ORIGIN_HOST);
@@ -373,7 +373,10 @@ export function createEstOrigin(env, o = {}) {
     const manifest = bundleFile(hash, 'est.json');
     try { page = manifest ? uiPageOf(JSON.parse(fs.readFileSync(manifest, 'utf8'))) : null; } catch { page = null; }
     // 1.688: with releases a hash not yet mirrored may arrive with the next one, so only a page read is kept.
-    if (page !== null || !release) pages.set(hash, page);
+    // 1.902 (the sandbox review, O-1): and never a miss at all. This origin takes requests from anyone,
+    // with no account and no limit, and every unknown hash asked for was remembered for the process's
+    // life (about 170 bytes each, measured): a few million requests filled the machine.
+    if (page !== null) pages.set(hash, page);
     return page;
   };
   /**
@@ -396,7 +399,8 @@ export function createEstOrigin(env, o = {}) {
       if (m && typeof m.id === 'string' && typeof m.version === 'string') { ident = { id: m.id, version: m.version }; read = true; }
     } catch { /* no manifest: the hash alone */ }
     // As `pageOf`: with releases a hash may arrive with the next one, so only a manifest read is kept.
-    if (read || !release) idents.set(hash, ident);
+    // 1.902 (O-1): never a miss (see `pageOf`).
+    if (read) idents.set(hash, ident);
     return ident;
   };
   let uploadsInFlight = 0;
@@ -437,6 +441,9 @@ export function createEstOrigin(env, o = {}) {
     'content-security-policy': csp,
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
+    // 1.902 (the sandbox review, O-2): no DNS prefetch from a plugin's page. A lookup is not a fetch, so no CSP
+    // directive names it, and a host name can carry a few dozen bytes of what a page knows to whoever runs the zone.
+    'x-dns-prefetch-control': 'off',
     'cross-origin-resource-policy': 'cross-origin',
     'permissions-policy': 'camera=(), microphone=(), display-capture=(), geolocation=(), payment=(), usb=(), midi=()',
   });
@@ -639,6 +646,8 @@ export function createEstOrigin(env, o = {}) {
       void serveFile(req, res, file, { ext, cors, cache: guard ? PAGE_CACHE : 'public, max-age=31536000, immutable', guard }).catch(() => res.destroy()); // as registryRoute's
       return true;
     },
+    /** 1.902 (O-1): how many hashes' manifests are remembered (tests: an unknown hash is never one). */
+    remembered: () => ({ pages: pages.size, idents: idents.size }),
     refuseUpgrade(req, socket) {
       if (!matches(req)) return false;
       socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');

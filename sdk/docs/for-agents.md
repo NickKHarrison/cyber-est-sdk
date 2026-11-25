@@ -280,18 +280,28 @@ Publishing on the EST Store is a later step and the person's choice: a published
 <!-- agents:end install -->
 
 <!-- agents:begin prompt-rules -->
-Rules (the playground refuses a plugin that breaks one):
-- Import only from "est" (the library listed at the end). No other import, no console, no `Math.random`, no `Date`. For noise, step a seed of your own on a `u32` (`x ^= x << 13; x ^= x >> 17; x ^= x << 5`), set from a constant in `reset()`.
+THE SOUND (`assembly/index.ts`). It is AssemblyScript, not TypeScript: no closures, no `any`, no union types, no optional chaining, no destructuring; every number has a type (`f64`, `i32`, `u32`) and is cast explicitly (`<f64>x`).
+- Start from the example of the same kind (effect or instrument) and change it. Keep the export block at the top and the `abort` function at the bottom exactly as they are. No top-level code but constants.
+- Import only from "est", and only what the library list at the end names. If a function is not listed, it does not exist: write the few lines yourself. No other import, no console, no `Math.random`, no `Date`. For noise, step a seed of your own on a `u32` (`x ^= x << 13; x ^= x >> 17; x ^= x << 5`), set from a constant in `reset()`.
 - No allocation while playing: `new`, arrays and strings only in field initialisers, the constructor or `activate()`. Never in `render()`, `paramChanged()` or a note handler.
-- No top-level code but constants. Keep the export block at the top and the `abort` function at the bottom exactly as in the examples.
 - Size every buffer and every time from the sample rate `activate()` receives.
-- Each parameter: a numeric id that never changes, a range, a default inside it. The same ids and names in est.json's "parameters". The descriptor's id must equal est.json's "id": use `com.example.<name-in-kebab-case>` in both.
-- Smooth every level or cutoff change (`Smoother`) so a moving knob does not click.
-- A delay or reverb must die away: report its tail in frames from `tail()`, keep est.json's `limits.tailSeconds` (60 at most) at least that long, set `limits.memoryPagesMax` to 64, and set any feedback value below 1e-20 to 0.
-- An effect: first feature "audio-effect"; est.json "kind" is "effect", "notes" is `{ "inputs": 0, "outputs": 0 }`, and "audio" is as in the effect example. An instrument: first feature "instrument"; "kind" is "instrument", "notes" is `{ "inputs": 1, "outputs": 0 }`, and "audio" has no inputs, as in the instrument example.
-- A note's fields are `key`, `velocity`, `noteId`, `channel`, `port`, `time`. There is no `note.id`. `key` is an `i16`: write `<f64>note.key` before maths.
-- Start from the example of the same kind and change it. If you are unsure a function exists, do not use it: write the few lines yourself.
+- Each parameter is declared exactly as in the examples: `const NAME: u32 = <number>;` and `new Param(NAME, "Name")` with a range and a default inside it. Ids start at 0 and never change. Cyber reads this list from the code.
+- The descriptor's id is `com.example.<name-in-kebab-case>` (lower case), the same as est.json's "id"; its version the same as est.json's.
+- Smooth every level or cutoff change (`Smoother`) so a moving knob does not click. Keep the output between -1 and 1.
+- A delay, echo or reverb must die away, and `tail()` must report (in frames, from the current settings) how long it still sounds after the input stops: until its repeats are 60 dB down. For an echo that is `delaySeconds * (1 + 7 / (1 - feedback))`, so cap feedback at 0.85 and the delay at 1 second (48 seconds at most); never report less than it really rings. Set est.json's `limits.tailSeconds` to the longest tail it can report (60 at most), and set any feedback value below 1e-20 to 0.
+- An instrument extends `Instrument`, must sound when a note is held, and must end each voice (`this.voices.end(i, io, n)`) when its envelope finishes, as the example does. A note's fields are `key`, `velocity`, `noteId`, `channel`, `port`, `time`. There is no `note.id`. `key` is an `i16`: write `<f64>note.key` before maths.
 <!-- agents:end prompt-rules -->
+
+<!-- agents:begin prompt-window -->
+THE WINDOW (`ui/index.html`, `ui/style.css`, `ui/ui.js`). Design a real panel for THIS plugin: its own layout, colours, lettering and character that suit what it does, with a display that moves (a curve, a scope shape, a level, an animation drawn from the parameters). Not a plain row of default sliders. The window runs in a locked sandbox, so:
+- Exactly these three text files. No image files (draw with CSS, inline SVG or a canvas), no web fonts (system fonts only), nothing from the internet, no links.
+- No JavaScript inside the HTML: no `<script>` with code in it, no `onclick=` attributes. All code goes in `ui/ui.js`, loaded as in the example: `<script src="est-ui.js"></script>` then `<script src="ui.js"></script>` at the end of `<body>`. Cyber supplies `est-ui.js`: never write it. No `type="module"`, no `import`.
+- No `fetch`, no storage (`localStorage`), no audio or MIDI in the window: it makes no sound and plays no notes. It only reads and writes the plugin's parameters, by the same ids as the sound code. An instrument's keys are Cyber's own.
+- est.json's `ui.size` is the window's exact size in CSS pixels (`w` 300 to 1000, `h` 200 to 700). Lay the page out to fill exactly that, with `html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }`. Nothing outside that box is ever seen, so add up your rows' heights and choose a size every control fits in (a knob with its label and value is about its `size` + 40 px tall).
+- Every parameter of the sound has a control in the window.
+- Ready-made controls (accessible, draggable, keyboard and reset built in): `<est-knob param="1" label="Cutoff" unit="Hz" scale="log" size="64"></est-knob>` and `<est-slider param="0" label="Level" unit="dB"></est-slider>`; `param` is the parameter's id; `scale="log"` for a frequency; `labels="A, B, C"` for a switch. A knob is round; a slider is a horizontal bar that fills its container's width (for a vertical fader, build your own control). They take their colours from the CSS variables `--est-bg`, `--est-fg`, `--est-dim`, `--est-accent`, `--est-track`.
+- The script's whole API, from `const est = EstUI.connect();`: `est.ready` (a promise: wait for it before reading), `est.get(id)` (the value), `est.param(id)` (`{ name, min, max, def }`), `est.set(id, value)`, `est.begin(id)` and `est.end(id)` (around the `set` calls of one drag or click of a control you build yourself), `est.subscribe(fn)` (called after every change, whoever made it: redraw there), `est.onMeter(fn)` (about 30 times a second: `fn({ out: [left, right] })`, linear peaks 0 to 1). Nothing else exists.
+<!-- agents:end prompt-window -->
 
 ## The docs' own notes (not in any generated file)
 

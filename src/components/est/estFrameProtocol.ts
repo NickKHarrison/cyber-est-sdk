@@ -109,13 +109,17 @@ const inBounds = (x: unknown, [lo, hi]: readonly [number, number]): x is number 
  */
 export function checkFrameMessage(raw: unknown, nonce: string, params: readonly EstParam[], resizable = false, audio = false): FrameMessage | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  if (messageSize(raw) > MAX_MESSAGE_BYTES) return null;
   const m = raw as Record<string, unknown>;
   if ((m.v !== 1 && m.v !== 2 && m.v !== 3) || typeof m.nonce !== 'string' || m.nonce !== nonce || typeof m.type !== 'string') return null;
   const v = m.v as EstUiVersion;
   if (!(FRAME_TYPES[v] as readonly string[]).includes(m.type)) return null;
   const keys = KEYS[m.type as FrameMessage['type']];
-  if (Object.keys(m).sort().join(',') !== keys) return null;
+  // 1.902 (U-2): the shape before the size. The size is a `JSON.stringify` of the whole message, and it
+  // ran first, so a page posting megabytes 240 times a second made the app stringify each one; a message
+  // with the right few keys and a huge value is still measured and refused below.
+  const own = Object.keys(m);
+  if (own.length > 8 || own.sort().join(',') !== keys) return null;
+  if (messageSize(raw) > MAX_MESSAGE_BYTES) return null;
   if (m.type === 'est:ready') return { type: 'est:ready', v };
   if (m.type === 'est:resize') {
     if (!resizable || !inBounds(m.w, UI_SIZE_BOUNDS.w) || !inBounds(m.h, UI_SIZE_BOUNDS.h)) return null;

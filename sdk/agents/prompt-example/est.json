@@ -1,0 +1,9 @@
+{
+  "id": "com.example.glow-filter",
+  "name": "Glow Filter",
+  "version": "1.0.0",
+  "kind": "effect",
+  "description": "A smoothed gain into a resonant filter with four shapes.",
+  "limits": { "memoryPagesMax": 64, "tailSeconds": 1 },
+  "ui": { "path": "ui/index.html", "size": { "w": 520, "h": 300 } }
+}

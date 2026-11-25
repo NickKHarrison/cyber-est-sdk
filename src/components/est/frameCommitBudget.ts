@@ -71,3 +71,34 @@ export function frameAttended(view: Window | null | undefined): boolean {
   const ua = (view?.navigator as (Navigator & { userActivation?: { isActive: boolean } }) | undefined)?.userActivation;
   return ua ? ua.isActive : true;
 }
+
+/**
+ * 1.902 (the sandbox review, U-1): **a key the frame hands back needs a real input behind it.** `est:key`
+ * is posted by the frame guard for a key the person pressed in the plugin's window, but a plugin's script
+ * can post the same message (the nonce is in its own address), and the host played it whenever the frame
+ * had the focus: a person who clicked a knob and then only watched had Space (the transport, shared in a
+ * live room), `0` (the selected clips made inactive: a song write and an undo step each), any key they
+ * rebound, and notes into a take being recorded, pressed for them up to 240 times a second, outside the
+ * write budget above. A real key press in the frame gives the page its transient user activation, which
+ * no script can make, so a key **down** is played only while that is so (`frameAttended`), and at most
+ * `KEY_DOWNS_PER_SECOND` of them a second. Escape is taken without it (the browsers do not count Escape
+ * as an activation, and it only closes what is open), inside the same rate. A key **up** always passes:
+ * it can only let go, so a note is never left held.
+ *
+ * The arithmetic of 40: the fastest keyboard repeat the operating systems offer is about 33 a second, and
+ * only the last key held repeats; ten fingers down at once are 10. It bounds a rate and proves no key
+ * press: a script beside a person who is typing can still add keys to theirs.
+ */
+export const KEY_DOWNS_PER_SECOND = 40;
+export function frameKeyGate(now: () => number = () => performance.now()) {
+  const times: number[] = [];
+  return (k: { key: string; down: boolean }, attended: boolean): boolean => {
+    if (!k.down) return true;
+    if (k.key !== 'Escape' && !attended) return false;
+    const t = now();
+    while (times.length && t - times[0]! >= 1000) times.shift();
+    if (times.length >= KEY_DOWNS_PER_SECOND) return false;
+    times.push(t);
+    return true;
+  };
+}

@@ -344,9 +344,47 @@ function rewriteFuel(mod: binaryen.Module, name: string, imp: string, mode: Mete
       ]);
     }
     if (local && id === binaryen.CallIndirectId && (binaryen.getExpressionInfo(e) as binaryen.CallIndirectInfo).isReturn) return mod.block(null, [store(), e], binaryen.unreachable);
-    if (local && id === binaryen.ReturnId) return mod.block(null, [store(), e], binaryen.unreachable);
+    if (local && id === binaryen.ReturnId) {
+      // 1.902 (the sandbox review, M-1): the value first, into the result's local, **then** the write-back.
+      // The copy used to be written to the global before the return's value ran, so whatever that value
+      // spent (a loop with a result, a bulk memory op in an `if`) stayed on the copy and was lost when the
+      // function left: the caller's reload read the old global. A function whose work is its return's
+      // value cost its caller a few points for up to a whole block's fuel of work, so a loop of such
+      // calls ran about fuel² / 60 iterations on one block's fuel (4 × 10⁹ measured, without a trap).
+      // Only for a return whose value holds a point that spends on the copy (`spendingReturns`): any other
+      // return is written exactly as before, so a module with none meters to the bytes it always did.
+      const value = B.Return!.getValue!(e) as ExprRef;
+      if (value && T >= 0 && spendingReturns.has(e)) {
+        const t = binaryen.getExpressionType(value);
+        if (t === binaryen.unreachable) return e; // the value never completes: the return never runs
+        B.Return!.setValue!(e, mod.local.get(T, results));
+        return mod.block(null, [mod.local.set(T, value), store(), e], binaryen.unreachable);
+      }
+      return mod.block(null, [store(), e], binaryen.unreachable);
+    }
     return e;
   };
+  // 1.902 (M-1): the returns whose value spends fuel on the copy (a log point: a loop header; or a bulk
+  // memory op), found before the walk rewrites those points.
+  const spendingReturns = new Set<ExprRef>();
+  if (local) {
+    const spends = (e: ExprRef): boolean => {
+      const id = binaryen.getExpressionId(e);
+      if (id === binaryen.CallId && (binaryen.getExpressionInfo(e) as binaryen.CallInfo).target === imp) return true;
+      if (BULK_SIZE[KIND_OF_ID.get(id) ?? '']) return true;
+      let found = false;
+      eachChild(e, c => { if (!found && spends(c)) found = true; });
+      return found;
+    };
+    const find = (e: ExprRef): void => {
+      if (binaryen.getExpressionId(e) === binaryen.ReturnId) {
+        const v = B.Return!.getValue!(e) as ExprRef;
+        if (v && spends(v)) spendingReturns.add(e);
+      }
+      eachChild(e, find);
+    };
+    find(info.body);
+  }
   const body = walk(info.body, replace);
   let newBody = body;
   if (local) {
@@ -573,6 +611,24 @@ const CHILDREN: Record<string, [string, string][]> = {
 const LEAVES = new Set(['Nop', 'LocalGet', 'GlobalGet', 'Const', 'Unreachable', 'MemorySize', 'DataDrop']);
 const KIND_OF_ID = new Map<number, string>();
 for (const k of [...Object.keys(CHILDREN), ...LEAVES, 'Block', 'Call', 'CallIndirect']) KIND_OF_ID.set(B[`${k}Id`] as number, k);
+
+/** Each child of `e`, in order, read only (the kinds `walk` knows; it refuses any other). */
+function eachChild(e: ExprRef, fn: (c: ExprRef) => void): void {
+  const kind = KIND_OF_ID.get(binaryen.getExpressionId(e));
+  if (!kind) throw new Error(`meter: unsupported expression id ${binaryen.getExpressionId(e)}`);
+  if (kind === 'Block') {
+    const n = B.Block!.getNumChildren!(e);
+    for (let i = 0; i < n; i++) fn(B.Block!.getChildAt!(e, i));
+  } else if (kind === 'Call' || kind === 'CallIndirect') {
+    const cls = B[kind]!;
+    if (kind === 'CallIndirect') fn(cls.getTarget!(e));
+    const n = cls.getNumOperands!(e);
+    for (let i = 0; i < n; i++) fn(cls.getOperandAt!(e, i));
+  } else if (!LEAVES.has(kind)) {
+    const cls = B[kind]!;
+    for (const [get] of CHILDREN[kind]!) { const c = cls[get]!(e); if (c) fn(c); }
+  }
+}
 
 /**
  * Post-order walk: children first, then `replace` on the node; a changed child is set in place.

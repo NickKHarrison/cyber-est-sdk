@@ -9,6 +9,7 @@
  * Phase 1 found that Chromium frees a busy Worker's thread about 2 s after `terminate()`, so after
  * a timeout the next Worker starts no sooner than `TERMINATE_GRACE_MS` later.
  */
+import { EST_WORKER_MODULE_REFUSED } from '../instanceState';
 import type { EstInstallRefusal, WorkerReply, WorkerRequest } from './workerProtocol';
 
 export const INSTALL_TIMEOUT_MS = 30_000;
@@ -95,9 +96,12 @@ function ask(worker: WorkerLike, req: Request, transfer: Transferable[], timeout
     };
     // 1.286 (ET-C, D-32): a reply this browser could not deserialise (a `WebAssembly.Module` it will
     // not take from a Worker) arrives as `messageerror`, never as a message: say so at once.
+    // 1.896: Firefox is such a browser: it applies the page's content security policy to a compiled
+    // module it receives, so without 'wasm-unsafe-eval' there (before 1.899, or a browser that ignores
+    // the keyword) the words are the browser refusal's.
     worker.onmessageerror = () => {
       clearTimeout(timer);
-      reject(new EstWorkerError('worker', "this browser could not read the plugin checking Worker's reply (a compiled module it will not take from a Worker)"));
+      reject(new EstWorkerError('worker', EST_WORKER_MODULE_REFUSED));
     };
     worker.postMessage({ ...req, id }, transfer);
   });
