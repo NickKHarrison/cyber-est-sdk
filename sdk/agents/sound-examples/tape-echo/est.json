@@ -1,0 +1,8 @@
+{
+  "id": "com.example.tape-echo",
+  "name": "Tape Echo",
+  "version": "1.0.0",
+  "kind": "effect",
+  "description": "A warm stereo echo: time free or in beats, feedback, tone, a little wobble and drive.",
+  "ui": { "path": "ui/index.html", "size": { "w": 520, "h": 300 } }
+}

@@ -174,7 +174,7 @@ export function listingCounts(c) {
  *   counts?: { installs?: number, plays?: number, wishlists?: number }, price?: { display: string } | null, licence?: string, hasOwnUi?: boolean,
  *   art?: { url: string, width: number, height: number } | null,
  *   demo?: { url: string, seconds: number } | null, links?: Record<string, string> | null, reviewApproved?: boolean,
- *   sale?: { display: string, endsAt: string } | null, checked?: boolean, hidden?: boolean }} p
+ *   sale?: { display: string, endsAt: string } | null, checked?: boolean, hidden?: boolean, picked?: boolean }} p
  * @returns {StoreListing}
  */
 export function buildStoreListing(p) {
@@ -215,8 +215,19 @@ export function buildStoreListing(p) {
     sale: licence === 'paid' ? saleOf(p.sale) : null,
     // 1.825: only on an admin's list, a plugin hidden from the store (shared/storeHidden.mjs); absent otherwise, so every other answer is unchanged.
     ...(p.hidden === true ? { hidden: /** @type {true} */ (true) } : {}),
+    // 1.917: Picked by Cyber (an admin's choice of a Community plugin; never Reviewed, never sold): absent otherwise.
+    ...(p.picked === true && tier === 'community' ? { picked: /** @type {true} */ (true) } : {}),
   };
 }
+
+/**
+ * 1.917 (Picked by Cyber): the words a picked listing shows, in one place. They never claim a review:
+ * Cyber chose it and its automatic checks passed; nobody at Cyber went through its code.
+ */
+export const PICKED_WORDS = Object.freeze({
+  badge: 'Picked by Cyber',
+  detail: 'Picked by Cyber: chosen by Cyber\'s team and checked automatically. Cyber has not fully reviewed it.',
+});
 
 /** A sale's public part, `{ display, endsAt }`, or null. @param {unknown} v */
 function saleOf(v) {
@@ -238,6 +249,7 @@ function saleOf(v) {
  *   sale: { display: string, endsAt: string } | null,
  *   checked: boolean,
  *   hidden?: true,
+ *   picked?: true,
  * }} StoreListing
  */
 

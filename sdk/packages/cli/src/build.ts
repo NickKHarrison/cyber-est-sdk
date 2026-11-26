@@ -9,6 +9,8 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { nextLine, pack, readProject, type EstProject } from '../../tools/src/index';
 import type { CommandContext } from './command';
+import { isSourceEst } from '../../../../src/audio/est/install/bundle';
+import { SOURCE_EST_WORDS } from '../../../../shared/estSourceEst.mjs';
 
 /** A path as the user would type it from `cwd`: relative when inside it, else absolute. */
 export function shown(cwd: string, p: string): string {
@@ -79,6 +81,11 @@ export interface Packed { file: string; hash: string; bytes: Uint8Array; id: str
 /** Build (unless `noBuild`) and pack `dir` to `dir/dist/<id>-<version>.est`. */
 export function buildAndPack(dir: string, ctx: CommandContext, opts: { noBuild?: boolean } = {}): Packed {
   const d = resolve(ctx.cwd, dir);
+  // 1.909: a plugin's source packed as a .est (shared/estSourceEst.mjs) is not a folder: said in words.
+  if (/\.est$/i.test(d) && existsSync(d) && statSync(d).isFile()) {
+    if (isSourceEst(new Uint8Array(readFileSync(d)))) throw new Error(`${SOURCE_EST_WORDS} With the kit, unzip ${shown(ctx.cwd, d)} into a folder and run \`est pack\` in that folder.`);
+    throw new Error(`${shown(ctx.cwd, d)} is already a built plugin (.est): \`est pack\` packs a plugin folder. Check it with \`est validate ${shown(ctx.cwd, d)}\`.`);
+  }
   if (!existsSync(join(d, 'est.json'))) throw new Error(`no est.json in ${d} (a plugin folder; \`est new\` makes one)`);
   const project = readProject(d);
   if (!opts.noBuild) build(project, ctx);

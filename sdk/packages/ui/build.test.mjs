@@ -13,7 +13,10 @@ describe('@cyber-est/ui build and its copy into a bundle', () => {
   it('the classic script is small and self-contained', async () => {
     const { 'est-ui.js': text } = await buildUi();
     // The order's budget is "about 10 KB minified": recorded here so it cannot grow unseen (protocol 2, EST Phase 5a: about 16 KB; protocol 3, EST 1.1: about 17.4 KB).
-    expect(Buffer.byteLength(text)).toBeLessThan(18_000);
+    // 1.912, the window kit: about 46.6 KB (the two controls' wheel, typed value and fit 3 KB; ten more elements 18 KB; five themes, the page's
+    // styles, the fit and the contrast guard 8 KB). One file a window loads once from its own bundle, in place of the page script an assistant wrote
+    // by hand (on average 2.3 KB less of it per window, docs/releases/1.912.md); 16 KB gzipped.
+    expect(Buffer.byteLength(text)).toBeLessThan(48_000);
     expect(text).not.toMatch(/\bimport\s*\(|\bimport\s+[\w{*]|\brequire\(|https?:\/\/(?!www\.w3\.org)/);
     expect(text).toContain('window.EstUI');
   });

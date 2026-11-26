@@ -1,0 +1,5 @@
+est-window { --est-accent: #39e6ff; background: linear-gradient(160deg, #1b0b33, #07040f 60%); }
+est-window h1 { color: #ff4fd8; text-shadow: 0 0 12px #ff4fd8; }
+est-panel { border-color: #39e6ff55; box-shadow: inset 0 0 18px #39e6ff14; }
+.foot { flex: 0.7 1 0; }
+.foot est-spectrum { flex: 3 1 0; }

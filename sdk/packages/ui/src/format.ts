@@ -50,3 +50,29 @@ export function formatValue(p: Range, v: number, unit = '', labels?: readonly st
   if (u === '%') return `${formatNumber(v)} %`;
   return u ? `${formatNumber(v)} ${u}` : formatNumber(v);
 }
+
+/**
+ * What a person typed as a value: a number with an optional unit ("1.2k", "440 Hz", "-6dB", "50%"),
+ * or, for a stepped parameter, one of its labels (case ignored). Null when it is neither.
+ */
+export function parseTyped(text: string, p: Range, labels?: readonly string[]): number | null {
+  const t = text.trim().toLowerCase().replace(/−/g, '-').replace(',', '.');
+  if (!t) return null;
+  if (labels) {
+    const i = labels.findIndex(l => l.trim().toLowerCase() === t);
+    if (i >= 0) return Math.round(p.min) + i;
+  }
+  const m = /^([+-]?(?:\d+\.?\d*|\.\d+))\s*(k|m)?/.exec(t);
+  if (!m) return null;
+  let v = Number(m[1]);
+  if (!Number.isFinite(v)) return null;
+  // "k" is a thousand; "m" is a thousandth only when written as "ms" would be wrong here, so only "k" scales.
+  if (m[2] === 'k') v *= 1000;
+  if (p.flags & FLAGS.STEPPED) v = Math.round(v);
+  return Math.min(p.max, Math.max(p.min, v));
+}
+
+/** A wheel event's vertical travel in pixels, whatever its `deltaMode` (Firefox may send lines). */
+export function wheelPixels(e: { deltaY: number; deltaMode: number }): number {
+  return e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+}

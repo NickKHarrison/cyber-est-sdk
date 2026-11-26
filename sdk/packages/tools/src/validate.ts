@@ -15,7 +15,9 @@ import { checkBundle, type InstallCheck } from '../../../../src/audio/est/instal
 import { EST_BLOCK_BUDGET_US, EST_RULES, EST_RULES_VERSION, EST_RULE_STEPS, type EstRule } from '../../../../src/audio/est/install/rules';
 import { bestBlockCost, blockCostAgain, standInInstance, type ConformanceReport } from '../../../../src/audio/est/install/conformance';
 import { behaviourChecks, type BehaviourFinding } from '../../../../src/audio/est/review/behaviour';
-import { nodeDeps } from './host';
+import { ADD_CHECK_RULES, addTimeChecks, type AddCheckReport } from '../../../../src/audio/est/review/addChecks';
+import { validatorLine } from '../../../../src/audio/est/review/addCheckWords';
+import { loadMeter, nodeDeps } from './host';
 import { packDir, sha256 } from './pack.mjs';
 import { readProject } from './project';
 import { probeUi, type UiFinding } from './ui';
@@ -90,6 +92,12 @@ export interface ValidateOptions {
    * presets they play besides the defaults (default 3, `'all'` every one), or false to leave them out.
    */
   behaviour?: number | 'all' | false;
+  /**
+   * 1.914: the add-time checks (EST-C031 to EST-C040 and EST-U006, `src/audio/est/review/addChecks.ts`): how the
+   * plugin behaves at its defaults (sound, stuck notes, level, load, controls, rate), each a warning. False
+   * leaves them out. Run whole (no time budget, as Cyber gives itself a few seconds when a plugin is added).
+   */
+  addChecks?: boolean;
 }
 
 const stepIndex = (r: EstRule) => EST_RULE_STEPS.indexOf(r.step);
@@ -110,6 +118,15 @@ export async function validate(input: Uint8Array | { dir: string }, opts: Valida
     r.report.blockUs = bestBlockCost(r.report.blockUs, EST_BLOCK_BUDGET_US, () => blockCostAgain({ module: r.module, shim: r.shim, manifest: r.bundle.manifest, seconds: opts.seconds, sampleRate: opts.sampleRate, presets: r.bundle.presets }));
     extra.state = probeState(r);
     if (opts.behaviour !== false) extra.behaviour = behaviourChecks({ bundle: r.bundle, module: r.module, shim: r.shim }, { presets: opts.behaviour ?? 3 });
+    if (opts.addChecks !== false) {
+      const meter = await loadMeter();
+      const profiled = async () => {
+        const p = (meter as unknown as (b: Uint8Array, o: { mode: 'local'; profile: true }) => { bytes: Uint8Array; profile?: { functions: { index: number; name: string | null }[] } })(r.bundle.module, { mode: 'local', profile: true });
+        return p.profile ? { module: await nodeDeps.compile(p.bytes), profile: p.profile } : null;
+      };
+      // Whole (no budget), and without the short subnormal count: EST-C027 above is the full one.
+      try { extra.addChecks = await addTimeChecks({ bundle: r.bundle, module: r.module, shim: r.shim, profiled }, { budgetMs: Infinity, subnormals: false }); } catch { /* reported as not run */ }
+    }
   }
   return reportOf(bytes, r, at, extra);
 }
@@ -120,6 +137,8 @@ export interface ExtraChecks {
   state?: string | null;
   /** 1.652: the behaviour checks' findings (absent: not run, each reported as a skip). */
   behaviour?: BehaviourFinding[];
+  /** 1.914: the add-time checks' report (absent: not run, each reported as a skip). */
+  addChecks?: AddCheckReport;
 }
 
 /**
@@ -189,6 +208,21 @@ export function reportOf(bytes: Uint8Array, r: InstallCheck, at: string, extra: 
         continue;
       }
     }
+    // 1.914: the add-time checks' rules (warnings): each finding under its rule, in the assistant's precise words.
+    if ((ADD_CHECK_RULES as readonly string[]).includes(rule.id)) {
+      if (!conformanceOk || !report) { add(rule, 'skip', 'not reached: the conformance run did not pass'); continue; }
+      const a = extra.addChecks;
+      if (!a) { add(rule, 'skip', 'not run (validate with addChecks: false)'); continue; }
+      if (rule.id === 'EST-U006' && !m?.ui) { add(rule, 'skip', 'no custom UI (the host generates one)'); continue; }
+      const found = a.findings.filter(f => f.rule === rule.id);
+      if (!found.length) {
+        const ran = a.checks.some(c => c.status !== 'not-checked');
+        if (ran) add(rule, 'pass', ''); else add(rule, 'skip', 'applies to plugins that make or change sound');
+        continue;
+      }
+      for (const f of found) add(rule, 'warn', validatorLine(f, a.kind), `phase:${f.check}`);
+      continue;
+    }
     if (rule.step === 'behaviour') {
       if (!conformanceOk || !report) { add(rule, 'skip', 'not reached: the conformance run did not pass'); continue; }
       const f = extra.behaviour?.find(x => x.rule === rule.id);
@@ -229,9 +263,16 @@ export function reportOf(bytes: Uint8Array, r: InstallCheck, at: string, extra: 
     measured: { blockUs: report ? report.blockUs : null, budgetUs: EST_BLOCK_BUDGET_US, ...r.timings, at },
     tool: { name: TOOL_NAME, version: TOOL_VERSION },
     rules: { version: EST_RULES_VERSION, count: EST_RULES.length },
-    notes: [report ? peakNote(report.peak) : null].filter((n): n is string => !!n),
+    // 1.918: a note, never a rule: the maker's contact is optional and recommended.
+    notes: [report ? peakNote(report.peak) : null, m && !m.contact ? CONTACT_NOTE : null].filter((n): n is string => !!n),
   };
 }
+
+/**
+ * 1.918: the note `validate` adds when est.json names no contact (`"contact": { "email": … }`): optional and
+ * recommended, so people who use the plugin in Cyber can send its maker feature requests. A note, never a rule.
+ */
+export const CONTACT_NOTE = 'est.json names no contact. Add "contact": { "email": "you@example.com" } (optional, recommended) so feature requests people send about this plugin in Cyber reach you. It is never shown to anyone.';
 
 /** A report in readable lines (what `est validate` prints). */
 export function formatReport(v: ValidationReport, opts: { verbose?: boolean } = {}): string {

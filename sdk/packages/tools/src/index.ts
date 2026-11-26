@@ -31,10 +31,15 @@ export { compareRenders, compareWarnings, formatCompare, htmlReport, readWav, wr
 export type { CompareResult, CompareOptions, ChannelCompare, Stereo } from './compare';
 export { readProject, findAsc, tomlValues, CPP_BUILD } from './project';
 export type { EstProject, ProjectKind } from './project';
+export { addChecks } from './addChecks';
+export type { AddCheckReport, AddFinding, AddCheckId, AddSeverity } from '../../../../src/audio/est/review/addChecks';
+export { findingWords, messageForAi as addChecksMessageForAi } from '../../../../src/audio/est/review/addCheckWords';
 export { probeUi } from './ui';
 export type { UiFinding } from './ui';
 export { packBundle, packDir, readPluginDir, storedZip, sha256, crc32, EST_UI_SCRIPT, EST_UI_DIST } from './pack.mjs';
 export { EST_RULES, EST_RULES_VERSION, EST_BLOCK_BUDGET_US, EST_UI_MAX_BYTES, estRule } from '../../../../src/audio/est/install/rules';
+/** 1.918: est.json's optional contact address shape (EST-M023), for `est new --email`. */
+export { EST_CONTACT_EMAIL_RE } from '../../../../src/audio/est/install/bundle';
 export type { EstRule, EstRuleSeverity, EstRuleStep } from '../../../../src/audio/est/install/rules';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');

@@ -14,5 +14,9 @@
   {
     "name": "behave-ok",
     "module": "wasm/behave.wasm"
+  },
+  {
+    "name": "addcheck-ok",
+    "module": "wasm/addcheck.wasm"
   }
 ]

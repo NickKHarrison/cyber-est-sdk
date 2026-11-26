@@ -16,7 +16,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BANNER = '/* @est/ui (MIT): the EST plugin UI library, frame protocol v2. */';
+const BANNER = '/* @est/ui (MIT): the EST plugin UI library and window kit. */';
 
 /** The two builds' text, by file name under dist/. */
 export async function buildUi() {

@@ -1,0 +1,4 @@
+est-window { background: repeating-linear-gradient(0deg, #f1ebdd 0 3px, #ece5d5 3px 4px); }
+est-window h1 { font-style: italic; letter-spacing: .08em; text-transform: none; font-size: 18px; }
+est-panel { border-style: double; border-width: 3px; }
+est-window > est-slider { flex: none; }

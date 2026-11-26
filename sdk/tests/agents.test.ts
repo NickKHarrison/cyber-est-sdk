@@ -13,7 +13,7 @@
 import { readVibeText, textOf } from '../../src/components/est/vibe/vibeFiles';
 import { repairManifest } from '../../src/components/est/vibe/vibeRepair';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -469,12 +469,14 @@ describe('the one prompt', () => {
   it('shows an instrument as well as an effect, a note\'s real fields, and the library', () => {
     expect(EST_ONE_PROMPT).toContain('A WHOLE WORKING EXAMPLE');
     expect(EST_ONE_PROMPT).toContain('THE SAME FOR AN INSTRUMENT');
-    expect(EST_ONE_PROMPT).toContain('There is no `note.id`');
-    expect(EST_ONE_PROMPT).toContain('`noteId: i32`');
-    expect(EST_ONE_PROMPT).toContain('**`DelayLine`**');
+    // 1.911: the sound is built on the sound kit: one `tick()`, blocks, and the kit's list; none of the raw library's plumbing.
+    for (const must of ['from "sound1"', 'THE "sound1" KIT', 'tick(): void', 'tick(): f64', 'extends Instrument<SawVoice>', '**`Echo`**', '**`Filter`**', 'param(ID)', 'this.amp.set(']) expect(EST_ONE_PROMPT, must).toContain(must);
+    for (const no of ['from "est"', 'activate(', 'render(io', 'noteOn(io', 'this.voices.end', 'Smoother', 'DelayLine']) expect(EST_ONE_PROMPT, no).not.toContain(no);
+    // The prompt stays short enough for a small model to answer whole (1.898's was 24.7 KB).
+    expect(EST_ONE_PROMPT.length).toBeLessThan(21500);
     expect(EST_ONE_PROMPT).toContain('com.example.<name-in-kebab-case>');
     // 1.898: one answer, with the plugin's own window: the marker lines Cyber's reader looks for, the window's rules and its example.
-    for (const must of ['ONE code block', '=== file: est.json ===', '=== file: assembly/index.ts ===', '=== file: ui/index.html ===', '=== file: ui/style.css ===', '=== file: ui/ui.js ===', 'THE WINDOW', '<script src="est-ui.js"></script>', 'EstUI.connect()', 'est.subscribe', 'est.onMeter']) expect(EST_ONE_PROMPT, must).toContain(must);
+    for (const must of ['ONE code block', '=== file: est.json ===', '=== file: assembly/index.ts ===', '=== file: ui/index.html ===', '=== file: ui/style.css ===', '=== file: ui/ui.js ===', 'THE WINDOW', '<script src="est-ui.js"></script>', 'EstUI.connect()', '<est-window', 'EstUI.display']) expect(EST_ONE_PROMPT, must).toContain(must);
     // Nothing a chat with no folder cannot use.
     for (const no of ['AGENTS.md', '$schema', 'est/`', 'npx est', '<!--']) expect(EST_ONE_PROMPT, no).not.toContain(no);
   });
@@ -485,7 +487,7 @@ describe('the one prompt', () => {
    */
   function example(which: 'effect' | 'instrument'): { source: string; manifest: string } {
     const from = EST_ONE_PROMPT.indexOf(which === 'effect' ? 'A WHOLE WORKING EXAMPLE' : 'THE SAME FOR AN INSTRUMENT');
-    const to = which === 'effect' ? EST_ONE_PROMPT.indexOf('THE SAME FOR AN INSTRUMENT') : EST_ONE_PROMPT.indexOf('THE "est" LIBRARY');
+    const to = which === 'effect' ? EST_ONE_PROMPT.indexOf('THE SAME FOR AN INSTRUMENT') : EST_ONE_PROMPT.indexOf('THE "sound1" KIT');
     const src = readVibeText(EST_ONE_PROMPT.slice(from, to));
     // The kit's folder has no window here: the two files alone, as before.
     for (const p of [...src.files.keys()]) if (p.startsWith('ui/')) src.files.delete(p);
@@ -498,6 +500,8 @@ describe('the one prompt', () => {
   it.each(['effect', 'instrument'] as const)('its %s example compiles and passes est validate as it stands (two files over a new folder, as the playground takes them)', async (which) => {
     const dir = join(tmp, `prompt-${which}`);
     expect((await est([`${which}-as`, dir, '--no-install', '--name', 'Folder Name'])).code).toBe(0);
+    // 1.911: the examples are built on the sound kit, which a folder takes as a copy beside its `est/`.
+    cpSync(repo('sdk/as/sound1'), join(dir, 'sound1'), { recursive: true, filter: src => !/[\\/]sound1[\\/]test([\\/]|$)/.test(src) });
     const { source, manifest } = example(which);
     expect((JSON.parse(manifest) as { kind: string }).kind).toBe(which);
     // The whole of both files comes from the prompt: nothing of the folder's own two files is left.

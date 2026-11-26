@@ -1,0 +1,6 @@
+{ "size": { "w": 520, "h": 300 }, "params": [
+  { "id": 0, "name": "Gain", "module": "", "min": -60, "max": 12, "def": 0, "flags": 32, "value": 0 },
+  { "id": 1, "name": "Cutoff", "module": "Filter", "min": 20, "max": 20000, "def": 20000, "flags": 32, "value": 2400, "scale": "log" },
+  { "id": 2, "name": "Resonance", "module": "Filter", "min": 0, "max": 1, "def": 0, "flags": 32, "value": 0.45 },
+  { "id": 3, "name": "Mode", "module": "Filter", "min": 0, "max": 3, "def": 0, "flags": 33, "value": 0 }
+] }

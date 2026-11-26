@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tape Echo</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<est-window name="Tape Echo No. 7" theme="paper">
+  <est-row>
+    <est-panel label="Tape">
+      <est-xy x="Time" y="Feedback" x-unit="ms" label="Time across, feedback up"></est-xy>
+    </est-panel>
+    <est-panel label="Tone">
+      <est-knob param="Wow"></est-knob>
+      <est-knob param="Tone" unit="Hz"></est-knob>
+    </est-panel>
+    <est-panel label="Output">
+      <est-meter vertical></est-meter>
+      <est-switch param="Freeze"></est-switch>
+    </est-panel>
+  </est-row>
+  <est-slider param="Mix" unit="%"></est-slider>
+</est-window>
+<script src="est-ui.js"></script>
+</body>
+</html>

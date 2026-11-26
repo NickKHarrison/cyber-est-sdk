@@ -14,12 +14,17 @@ mkdir -p "$HERE/wasm"
 cd "$HERE/src"
 for src in *.c; do
   name="${src%.c}"
+  # addcheck-fx.c is only ever included with a fault defined.
+  [ "$name" = "addcheck-fx" ] && continue
+  # 1.914: the add-time checks' fixtures keep their names (the checks name a hot function from them).
+  strip="-Wl,--strip-all"
+  case "$name" in addcheck*) strip="" ;; esac
   clang --target=wasm32 -std=c11 -O2 -nostdlib -ffreestanding -fvisibility=hidden \
     -Wall -Wextra -Werror -Wno-unused-function \
     -I "$FIX" -I "$FIX/clap/include" \
     -Wl,--no-entry -Wl,--export-dynamic -Wl,--export-table -Wl,--growable-table \
     -Wl,-z,stack-size=65536 -Wl,--initial-memory=262144 -Wl,--max-memory=4194304 \
-    -Wl,--strip-all \
+    $strip \
     -o "$HERE/wasm/$name.wasm" "$src"
   echo "built $name.wasm ($(wc -c < "$HERE/wasm/$name.wasm") bytes)"
 done

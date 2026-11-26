@@ -19,6 +19,7 @@
  * they make a plugin is the compiler's and the install pipeline's to say (`vibeBuild.ts`).
  */
 import { BoundedZip, BoundedZipError, type BoundedZipLimits } from '../../../lib/boundedZip';
+import { isSourceEstNames } from '../../../../shared/estSourceEst.mjs';
 
 /** What one drop or paste may hold. A plugin's sources are small: these are far above any real one and far below a bomb. */
 export const VIBE_CAPS = Object.freeze({
@@ -42,6 +43,13 @@ export interface VibeSource {
   notes: string[];
   /** A pasted answer that stops inside a code block (the assistant ran out of room): the last file it reached. */
   cutOff?: string;
+  /**
+   * 1.910: a pasted answer whose text ends inside its last file (a code block left open, or files under
+   * marker lines with no block round them): if that file is not whole, the answer was cut off there (`vibeCut.ts`).
+   */
+  endsOpen?: boolean;
+  /** 1.910: the window was left out and a note already says why (so the manifest's own note is not a second one). */
+  windowLeftOut?: boolean;
 }
 
 /** A refusal with words for the person (never a stack). */
@@ -100,21 +108,45 @@ function unfence(body: string[]): string {
 
 const finish = (s: string) => `${s.replace(/\s+$/, '')}\n`;
 
+/**
+ * 1.910: a file's name on a line of its own as chats also write it: a markdown heading (`## est.json`,
+ * `### File: ui/ui.js`), bold (`**assembly/index.ts**`) or `File: ui/style.css`. Never valid code in
+ * any of a plugin's files; counted only beside at least one other name line (`byMarkers`).
+ */
+const HEADING = new RegExp(String.raw`^\s{0,3}(?:#{1,6}\s+|\*\*\s*|(?=file(?:name)?\s*[:=]))(?:\d+[.)]\s*)?(?:file(?:name)?\s*[:=]\s*)?[\`"']?(${PATH})[\`"']?\s*(?:\*\*)?\s*:?\s*$`, 'i');
+const FENCE_LINE = /^\s{0,3}(`{3,}|~{3,})/;
+
 function byMarkers(all: string[]): Map<string, string> | null {
-  const at: { line: number; path: string }[] = [];
-  // (A fence's state is not needed to find markers: a marker line is never valid code in these files.)
+  const at: { line: number; path: string; inside: boolean }[] = [];
+  // Whether each line is inside a code block (a marker inside one names a file within a block that holds several).
+  let inside = false;
   for (let i = 0; i < all.length; i++) {
-    const m = MARKER.exec(all[i] ?? '');
-    if (m && KNOWN_EXT.test(m[1] ?? '')) at.push({ line: i, path: m[1] ?? '' });
+    const l = all[i] ?? '';
+    if (FENCE_LINE.test(l)) { inside = !inside; continue; }
+    const m = MARKER.exec(l) ?? HEADING.exec(l);
+    if (m && KNOWN_EXT.test(m[1] ?? '')) at.push({ line: i, path: m[1] ?? '', inside });
   }
-  if (at.length < 2) return null;
+  // One name line alone is a file only in the prompt's own form (`=== file: ui/ui.js ===`): an answer that goes on
+  // from a cut-off one may hold just the one file (1.910). Any other lone name line is too little to go on.
+  if (at.length < 2 && !(at.length === 1 && /^\s*={3,}\s*file\s*:/i.test(all[at[0]!.line] ?? ''))) return null;
+  const chunks = at.map((cur, k) => {
+    const body = all.slice(cur.line + 1, k + 1 < at.length ? at[k + 1]!.line : all.length);
+    // A name outside every block: its file is the first code block after it (talk between them is not the file's).
+    const fenced = !cur.inside && body.some(l => FENCE_LINE.test(l));
+    // A name inside a block: its file runs to the block's end (what follows the closing line is talk, never a block of its own).
+    const closes = cur.inside ? body.findIndex(l => FENCE_LINE.test(l)) : -1;
+    const lines = closes >= 0 ? body.slice(0, closes) : fenced ? body.slice(body.findIndex(l => FENCE_LINE.test(l))) : body;
+    return { ...cur, fenced, text: finish(closes >= 0 ? lines.join('\n') : unfence(lines)) };
+  });
+  // Where files come in code blocks, a name line with no block after it is talk about the file, not the file.
+  const anyCode = chunks.some(c => c.inside || c.fenced);
   const out = new Map<string, string>();
-  for (let k = 0; k < at.length; k++) {
-    const cur = at[k]!;
-    const end = k + 1 < at.length ? at[k + 1]!.line : all.length;
-    out.set(cur.path, finish(unfence(all.slice(cur.line + 1, end))));
+  for (const c of chunks) {
+    if (anyCode && !c.inside && !c.fenced) continue;
+    if (!c.text.trim()) continue;
+    out.set(c.path, c.text);
   }
-  return out;
+  return out.size >= Math.min(2, at.length) ? out : null;
 }
 
 interface Block { info: string; body: string; before: string }
@@ -204,6 +236,7 @@ export function readVibeText(text: string): VibeSource {
   const last = [...found.keys()].pop();
   const out = tidyPaths({ files, notes });
   if (fences % 2 === 1 && last) out.cutOff = last;
+  out.endsOpen = fences % 2 === 1 || fences === 0;
   return out;
 }
 
@@ -249,6 +282,18 @@ export function looksLikeBundle(bytes: Uint8Array): boolean {
   if (dec.decode(bytes.subarray(30, 30 + nameLen)) !== 'est.json') return false;
   try { return new BoundedZip(bytes, ZIP_LIMITS).names().some(n => /\.wasm$/i.test(n)); } catch { return false; }
 }
+
+/**
+ * 1.909: whether a zip's bytes are a plugin's source packed as a `.est` (shared/estSourceEst.mjs: no
+ * `.wasm` entry, an AssemblyScript source). Only the bounded reader's directory is read.
+ */
+export function isSourceEstZip(bytes: Uint8Array): boolean {
+  if (!isZipBytes(bytes)) return false;
+  try { return isSourceEstNames(new BoundedZip(bytes, ZIP_LIMITS).names()); } catch { return false; }
+}
+
+/** 1.909: the note a source `.est` is read with. */
+export const SOURCE_EST_NOTE = 'This .est held the plugin\'s source, not a built plugin, so Cyber built it here.';
 
 // ── Paths ───────────────────────────────────────────────────────────────────────────────────────────
 

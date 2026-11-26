@@ -1,6 +1,6 @@
 # Build an EST plugin
 
-From an idea to your own plugin playing in Cyber, in four steps. You need Node 20 or newer and a terminal. No tools at all? Copy [the one prompt](ONE_PROMPT.md) in Cyber (Home → EST PLUGINS → Make your own), paste it into your AI, and paste its answer into **Add a plugin file**: Cyber builds it, window included. [The playground](playground.md) takes the same answer.
+From an idea to your own plugin playing in Cyber, in four steps. You need Node 20 or newer and a terminal. No tools at all? Copy [the one prompt](ONE_PROMPT.md) in Cyber (Home → EST PLUGINS → Make your own), paste it into your AI, and paste its answer into **Add a plugin file** (or drop the `.est` file it gives you to download: that is the plugin's **source**, a zip with no compiled module): Cyber builds it, window included. Only a built `.est` (from `est pack`, or **Save its .est file** in Cyber) is shared, validated or published; a source `.est` is refused everywhere but Add a plugin file (EST-B017). [The playground](playground.md) takes the same answer.
 
 An EST plugin is one file, a `.est` bundle: your sound code compiled to WebAssembly, plus a manifest (`est.json`). Cyber runs it in a sandbox: it cannot reach the network, your files or the page.
 
@@ -125,6 +125,7 @@ The sandbox keeps every plugin safe to add and every render the same on every ma
 - **No allocation in `render()`.** `new`, arrays and strings only in field initialisers, the constructor or `activate`, or the plugin runs out of memory and stops (`EST-C013`, "probably allocating in render()").
 - **No imports, no top-level code** but constants. Keep the `abort` function at the bottom.
 - **A version you gave someone never changes.** Bump `version` in `est.json` and `describe()`.
+- **Add your email (optional).** `"contact": { "email": "you@example.com" }` in `est.json` (or `est new --email`) sends you the feature requests people make about your plugin in Cyber. The first email asks you to confirm; the address is never shown.
 
 Every check: [validator-rules.md](validator-rules.md).
 

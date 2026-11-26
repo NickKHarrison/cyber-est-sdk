@@ -1,11 +1,11 @@
 import { spawnSync } from 'node:child_process';
-import { readdirSync, existsSync, readFileSync } from 'node:fs';
+import { readdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { COOKBOOK_DIR, SDK_DIR, TEMPLATES_DIR, UsageError, flagString, type CommandContext, type EstCommand } from '../command';
 import { shown } from '../build';
 import { kebab, scaffold, type Scaffolded } from '../scaffold';
-import { SPEC_FILES, TOOL_VERSION } from '../../../tools/src/index';
+import { EST_CONTACT_EMAIL_RE, SPEC_FILES, TOOL_VERSION } from '../../../tools/src/index';
 import { EST_UI_TYPES } from '../../../ui/copyRule.mjs';
 
 /** The plugin folders in `dir` (each with an est.json). */
@@ -94,13 +94,15 @@ const command: EstCommand = {
     return [
       'est new                                   three questions: what it does, instrument or effect, a name',
       'est new --kind <instrument|effect> --name <name> [--idea "<one sentence>"]   the same, with no questions',
-      'est new <template> <dir> [--id <reverse-dns id>] [--name <name>] [--idea "<one sentence>"] [--ui | --app]',
+      'est new <template> <dir> [--id <reverse-dns id>] [--name <name>] [--idea "<one sentence>"] [--email <you@example.com>] [--ui | --app]',
       '',
       `  template  one of: ${have.join(', ') || '(none found)'}`,
       `            or a cookbook recipe: ${recipes.join(', ') || '(none found)'}`,
       '  dir       a new or empty folder (with no template: the name in kebab-case)',
       '  --idea    what the plugin should do, in one sentence: written into the folder\'s AGENTS.md ("What to build"),',
       '            so an AI assistant opened in the folder starts from it',
+      '  --email   your address for feature requests (optional, recommended): est.json\'s "contact", where requests',
+      '            people send about the plugin in Cyber are emailed (the first asks you to confirm); never shown',
       '  --kind    instrument or effect: picks instrument-as or effect-as (AssemblyScript: nothing else to install)',
       '  --id      the plugin\'s id (default com.example.<name in kebab-case>: fine for your own account;',
       '            a published id starts with your dev.<10 hex> name, and is a rename when you publish)',
@@ -119,11 +121,13 @@ const command: EstCommand = {
       'With no terminal to ask in (standard input is not a terminal) and no template, pass --kind and --name.',
     ].join('\n');
   },
-  valueFlags: ['id', 'name', 'idea', 'kind'],
+  valueFlags: ['id', 'name', 'idea', 'kind', 'email'],
   async run(args, ctx) {
     let [template, dir] = args.positional;
     let name = flagString(args, 'name');
     let idea = flagString(args, 'idea');
+    const email = flagString(args, 'email');
+    if (email !== undefined && (email.length > 254 || !EST_CONTACT_EMAIL_RE.test(email))) throw new UsageError(`--email ${email} is not an email address`);
     if (template && !dir) throw new UsageError('name a folder after the template (or run est new with no arguments)');
     if (!template) {
       // 1.800: no template: the three questions, each only when its flag did not answer it; asked only at a terminal.
@@ -155,6 +159,11 @@ const command: EstCommand = {
       idea, windowText: { ui: section('window-ui.md'), app: section('window-app.md') }, kit: KIT,
       ui: args.flags.ui === true, app: args.flags.app === true,
     });
+    // 1.918: the maker's contact (EST-M023), only when given: never filled in from anything else.
+    if (email) {
+      const at = join(r.dir, 'est.json');
+      writeFileSync(at, `${JSON.stringify({ ...JSON.parse(readFileSync(at, 'utf8')), contact: { email } }, null, 2)}\n`);
+    }
     const where = shown(ctx.cwd, r.dir);
     const named = [r.crate && `crate ${r.crate}`, r.type && `type ${r.type}`, r.ui && 'a custom UI in ui/', r.app && 'the window as an app in ui-app/'].filter(Boolean).join(', ');
     // The install: off with --no-install or EST_NO_INSTALL=1, and from a clone unless --install. A failed install

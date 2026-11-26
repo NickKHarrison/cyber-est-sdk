@@ -22,6 +22,7 @@
  */
 import { EST_ID_RE, EST_VERSION_RE } from '../../../audio/est/slot';
 import { probeUi } from '../../../audio/est/install/uiProbe';
+import { usesWindowKit } from '../../../audio/est/install/uiKitCheck';
 import { INDEX, MANIFEST, UI_PAGE, setText, textOf, type VibeSource } from './vibeFiles';
 
 /** A thing the assistant has to fix: where, and what, in words it can act on. */
@@ -215,7 +216,9 @@ export function repairManifest(src: VibeSource): VibeProblem[] {
   // The limits, where the assistant often writes them: `limits.tailSeconds`, or `tailSeconds` at the top.
   const l = isObj(m.limits) ? m.limits : {};
   m.limits = {
-    maxLatencyFrames: whole(l.maxLatencyFrames, 0, 192000) ?? 0,
+    // As the tail below: the most the plugin may report (its `latency()` says what it has), so a lookahead or
+    // pitch-shifting effect is not refused for a number nobody wrote (EST-C005). The host holds it to this ceiling.
+    maxLatencyFrames: 192000,
     memoryPagesMax: whole(l.memoryPagesMax, 16, 2048) ?? 64,
     // The most the plugin may report, not what it does report (`tail()` says that): the ceiling, so a
     // generous tail is never refused for passing a smaller number written here (EST-C006).
@@ -245,7 +248,7 @@ export function repairManifest(src: VibeSource): VibeProblem[] {
     const h = whole(size.h ?? u.height ?? u.h, 80, 1400) ?? (meta ? whole(Number(meta[2]), 80, 1400) : null) ?? DEFAULT_UI_SIZE.h;
     m.ui = { path: UI_PAGE, size: { w, h }, ...(u.resizable === true ? { resizable: true } : {}), ...(wantsAudio ? { audio: true } : {}) };
   } else {
-    if (m.ui !== undefined) note('est.json named a window, but there was no ui/index.html, so the plugin shows Cyber\'s generated dials.');
+    if (m.ui !== undefined && !src.windowLeftOut) note('est.json named a window, but there was no ui/index.html, so the plugin shows Cyber\'s generated dials.');
     delete m.ui;
   }
 
@@ -332,7 +335,7 @@ export function repairUi(src: VibeSource, estUi: string | null): VibeProblem[] {
   }
 
   // Cyber's library: named by the page (added before the first script when a script uses it), and its file put in.
-  const usesLib = [...src.files.keys()].some(p => /^ui\/.*\.js$/i.test(p) && p !== EST_UI_FILE && /\bEstUI\b/.test(textOf(src, p))) || /<est-(knob|slider)\b/i.test(html);
+  const usesLib = [...src.files.keys()].some(p => /^ui\/.*\.js$/i.test(p) && p !== EST_UI_FILE && /\bEstUI\b/.test(textOf(src, p))) || usesWindowKit(html);
   const namesLib = /<script\b[^>]*\bsrc\s*=\s*["'](?:\.\/)?est-ui\.js["']/i.test(html);
   if (usesLib && !namesLib) {
     const firstScript = /<script\b/i.exec(html);
@@ -340,12 +343,34 @@ export function repairUi(src: VibeSource, estUi: string | null): VibeProblem[] {
     html = firstScript ? `${html.slice(0, firstScript.index)}${tag}${html.slice(firstScript.index)}` : html.replace(/<\/body\s*>/i, `${tag}</body>`);
     note('The window uses Cyber\'s library but did not load it: Cyber added the line that does.');
   }
+  // 1.910: a dial that names a parameter the code does not declare would sit dead. Where its label is a declared
+  // parameter's name the id is plainly a slip, and is put right; otherwise the window kit's check reports it.
+  const declared = readCode(textOf(src, INDEX)).params;
+  if (declared && declared.length) {
+    const ids = new Set(declared.map(p => p.id));
+    const same = (a: string, b: string) => a.trim().toLowerCase().replace(/[^a-z0-9]+/g, '') === b.trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const fixedDials: string[] = [];
+    html = html.replace(new RegExp(String.raw`<(est-(?:knob|slider))\b(${TAG_ATTRS})>`, 'gi'), (all, tag: string, attrs: string) => {
+      const raw = attr(attrs, 'param');
+      if (raw === null || !/^\d+$/.test(raw.trim()) || ids.has(Number(raw))) return all;
+      const label = attr(attrs, 'label') ?? '';
+      const match = label ? declared.filter(p => same(p.name, label)) : [];
+      // Unambiguous only when no other dial already shows that parameter.
+      if (match.length === 1 && !new RegExp(String.raw`<est-(?:knob|slider)\b[^>]*\sparam\s*=\s*["']?${match[0]!.id}["'\s>]`, 'i').test(html)) {
+        fixedDials.push(`${label} (${raw} → ${match[0]!.id})`);
+        return `<${tag}${attrs.replace(/(\sparam\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s"'>]+)/i, `$1"${match[0]!.id}"`)}>`;
+      }
+      // Any other unknown number is the window kit's check to report (`vibeWindow.ts`, 1.912), in its words.
+      return all;
+    });
+    if (fixedDials.length) note(`${fixedDials.length === 1 ? 'A dial in the window named' : 'Some dials in the window named'} a parameter number the sound code does not have; by ${fixedDials.length === 1 ? 'its label it is' : 'their labels they are'}: ${fixedDials.join(', ')}. Cyber put ${fixedDials.length === 1 ? 'it' : 'them'} right.`);
+  }
   setText(src, UI_PAGE, html);
   if ((usesLib || namesLib) && estUi) setText(src, EST_UI_FILE, estUi);
 
   const problems: VibeProblem[] = [];
   if (!usesLib) {
-    problems.push({ where: UI_PAGE, message: 'The window never talks to Cyber: no script calls EstUI.connect() and the page has no <est-knob> or <est-slider>, so its controls would do nothing. Load est-ui.js and call EstUI.connect(), as in the example.' });
+    problems.push({ where: UI_PAGE, message: 'The window never talks to Cyber: no script calls EstUI.connect() and the page has none of Cyber\'s elements (<est-window>, <est-knob> …), so its controls would do nothing. Build the window from those elements, as in the example.' });
   }
   // What is still wrong, by the kit's own UI rules.
   const seen = new Set<string>();

@@ -12,7 +12,7 @@
  * Returns the unbind.
  */
 import { currentConnection, type ParamSource } from './connect';
-import { EstKnob, EstSlider } from './controls';
+import { EstBound } from './bound';
 import { formatNumber, fromNorm, toNorm } from './format';
 import { FLAGS, type EstUiParam } from './protocol';
 
@@ -25,8 +25,8 @@ export interface BindOptions {
 export function bind(el: Element, paramId: number, opts: BindOptions = {}): () => void {
   const source = opts.source ?? currentConnection();
   if (!source) throw new Error('@est/ui: bind() needs a source; call connect() first');
-  if (el instanceof EstKnob || el instanceof EstSlider) {
-    const c = el as EstKnob | EstSlider;
+  if (el instanceof EstBound) {
+    const c = el;
     c.paramId = paramId;
     c.source = source;
     return () => { c.source = null; };

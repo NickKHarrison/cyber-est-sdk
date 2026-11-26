@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Glow Filter</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<est-window name="Glow Filter" theme="ember" meter>
+  <canvas id="curve" aria-label="The filter's shape"></canvas>
+  <est-row>
+    <est-knob param="Cutoff" unit="Hz"></est-knob>
+    <est-knob param="Resonance"></est-knob>
+    <est-knob param="Gain" unit="dB"></est-knob>
+    <est-select param="Mode" labels="Low, Band, High, Notch"></est-select>
+  </est-row>
+</est-window>
+<script src="est-ui.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>

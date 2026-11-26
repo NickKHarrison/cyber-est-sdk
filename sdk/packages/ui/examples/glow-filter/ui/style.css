@@ -1,0 +1,5 @@
+/* The theme gives the colours; override any --est-* variable and add your own touches. */
+est-window { --est-accent: #ff8a3d; background: radial-gradient(120% 90% at 50% 0%, #3a2418 0%, var(--est-bg) 70%); }
+est-window h1 { letter-spacing: .4em; }
+#curve { border: 1px solid var(--est-track); }
+est-select { max-width: 150px; }

@@ -17,11 +17,11 @@
  *
  * `step` is where in the pipeline the check runs (in order: `archive`, `manifest`, `files`,
  * `module`, `presets`, `expect`, `meter`, `conformance`, then the validator's own `determinism`,
- * `behaviour` (1.652: src/audio/est/review/behaviour.ts), `ui`, `performance`); `install` says whether Cyber's install refuses on it (a validator-only rule
+ * `behaviour` (1.652: src/audio/est/review/behaviour.ts; 1.914: the add-time checks, addChecks.ts), `ui`, `performance`); `install` says whether Cyber's install refuses on it (a validator-only rule
  * is stricter than the install, never looser).
  */
 
-export const EST_RULES_VERSION = '1.7.0';
+export const EST_RULES_VERSION = '1.8.0';
 
 export type EstRuleSeverity = 'error' | 'warning';
 export type EstRuleStep = 'archive' | 'manifest' | 'files' | 'module' | 'presets' | 'expect' | 'meter' | 'conformance' | 'determinism' | 'behaviour' | 'ui' | 'performance';
@@ -97,6 +97,9 @@ export const EST_RULES: readonly EstRule[] = [
   r('EST-B016', 'presets', 'A preset\'s picture or author is not valid',
     'In EST 1.1 a preset in the index may name an `image`, a WebP file in the bundle of at most 64 KiB and 1024 × 1024 pixels (the Presets tab shows it), and an `author` in plain text (60 characters). A 1.0 bundle\'s presets have neither.',
     'Save the picture as `.webp` (at most 64 KiB, e.g. 256 × 256), put it in `presets/`, and name it by its path; or remove `image`.'),
+  r('EST-B017', 'archive', 'A plugin\'s source, not a built bundle',
+    'The file is a plugin\'s source packed as a .est (a zip with an AssemblyScript source and no WebAssembly module), as a chat assistant writes one. Only Cyber\'s Add a plugin file builds a source .est; everywhere else a .est must be a built bundle, so a source one is refused and never compiled there.',
+    'Add it with Add a plugin file in Cyber, which builds it in your browser; then Save its .est file gives you a built one to share. With the kit, build the folder with `est pack`.'),
 
   // --- EST-M: the manifest ------------------------------------------------------------------
   r('EST-M001', 'manifest', 'est.json is not an EST 1 manifest',
@@ -167,6 +170,10 @@ export const EST_RULES: readonly EstRule[] = [
   r('EST-M022', 'manifest', 'The migrate list is not valid',
     'A version may say what it does with its earlier versions\' settings: `migrate` is a list of at most 32 entries `{ from: "<range>", params: { "<old id>": "<new id>" | null }, state: "keep" | "drop" }`. `from` is a version range (comparators separated by spaces, `>=1.0.0 <1.2.0`, a single version, or `*`); every id is a CLAP id as a decimal string and every new id is one the manifest\'s `parameters` list names (so a manifest with `migrate` lists its parameters); `state` is `keep` (the default) or `drop`. When a project moves a slot to this version, Cyber applies the first entry whose range takes the version moved from: renamed values move, `null` drops, an old id the new version does not know is dropped with a note, and `drop` leaves the saved state behind.',
     'Fix the entry the message names: a range such as `">=1.0.0 <1.2.0"`, ids as strings (`"3": "7"`), a new id that `parameters` lists, and `"state": "keep"` or `"drop"`.'),
+  // 1.918: the maker's contact address (optional, recommended; informational in both editions).
+  r('EST-M023', 'manifest', 'The contact address is not valid',
+    '`contact` is optional and recommended: `{ "email": "you@example.com" }`, the address feature requests for the plugin are emailed to when it has no developer account in Cyber (the first email only asks the address to confirm, and every email can stop them). It is never shown to anyone. When given, the address must be ASCII, a name, `@` and a dotted domain, at most 254 characters. It changes nothing about how the plugin runs, so it is allowed in EST 1.0 and 1.1 alike.',
+    'Write `"contact": { "email": "you@example.com" }` with your real address, or remove `contact`.'),
 
   // --- EST-W: the module --------------------------------------------------------------------
   r('EST-W001', 'module', 'Not a WebAssembly 1.0 module',
@@ -318,6 +325,40 @@ export const EST_RULES: readonly EstRule[] = [
     'A pattern plugin plays from beat 0; at beat 4 the transport jumps to beat 36. In the next 100 ms its output must have at most twice the energy of a start at beat 36 plus the ring-out of what played before: a step clock that catches up step by step after a forward jump fires every skipped step at once, a burst of 128 hits in a few milliseconds.',
     'When the position moves forwards by more than a step (or backwards at all), move the next step to the first one at or after the new position without firing the steps in between.', 'warning', false),
 
+  // 1.914: the add-time checks (src/audio/est/review/addChecks.ts): how a plugin behaves, told to the person who
+  // added it (and to their assistant) in the few seconds after it is added. Warnings only, validator-only: none
+  // refuses an install, a Community publish or `est validate`; a plugin that is merely imperfect is still theirs.
+  r('EST-C031', 'behaviour', 'It makes no sound, or changes nothing',
+    'An instrument is played five notes (keys 36, 48, 60, 72 and 84 at velocity 0.8) and a soft one (key 60 at 0.25), with the transport stopped and, if all were silent, playing; an effect is given the test loop. Reported: every note silent (under -80 dBFS); some keys silent (unless the plugin\'s features say it is a drum kit or a sampler); the soft note silent where the same note played harder sounds; an effect whose output is silent, or is its input sample for sample at its defaults and with every parameter at either end.',
+    'Start a voice and its envelope on every note-on and add every voice to both outputs; work a key\'s pitch out for every key; write the processed sample (not the input) to an effect\'s output, and read each parameter where it is used.', 'warning', false),
+  r('EST-C032', 'behaviour', 'A note never stops, or the sound never dies away',
+    'A three-note chord is held for half a second and released (an effect: a second of the test loop, then nothing), and the output is listened to for 6.5 s. Reported when, in the last second, it is still over -50 dB of its held level and no quieter than nine tenths of the second before (under 1 dB a second: it is not a long release, it is not ending), and the plugin does not sound by itself with nothing played. EST-C024 and EST-C028 look at NOTE_ENDs and the reported tail; this looks at the sound.',
+    'Let a released voice\'s envelope reach 0 and end the voice there (no floor above 0, no oscillator outside a voice); keep every feedback amount below 1 where it is used, not only where it is set.', 'warning', false),
+  r('EST-C033', 'behaviour', 'Dangerously loud at its defaults',
+    'A four-note chord at full velocity held for a second (an effect: the test loop, which peaks at -6 dBFS), at the default settings: the plugin\'s own peak before the host\'s clamp. Over +9.5 dBFS it is dangerous to hear on headphones (the host clamps at +12); over +6 dBFS it is twice full scale and clips whatever comes after it. The install\'s own limit (EST-C015) is +18 dBFS, where the host must protect the graph; this is where a person\'s ears are.',
+    'Aim a full chord\'s peak near -6 dBFS: scale the sum of the voices (by a quarter, or by the voice count\'s square root), lower the default level, and clamp the final sample to -1…1.', 'warning', false),
+  r('EST-C034', 'behaviour', 'A DC offset in the output',
+    'The mean of each output channel over half a second of the held chord (an effect: the test loop): past 0.05 either way the output sits off centre, which wastes headroom, thumps when the sound starts and stops, and pushes every compressor and limiter after it.',
+    'Remove what adds a constant (a unipolar oscillator or LFO mixed into the output, a waveshaper\'s offset), or pass the output through a DC blocker: y = x - x1 + 0.995 × y1.', 'warning', false),
+  r('EST-C035', 'behaviour', 'Output that is not a number, or that the host limits',
+    'At the default settings, on the same chord or loop: a sample that is NaN or infinity (the host writes 0 for it, so the sound drops out), or one past the ±4 (+12 dBFS) where the host clamps a plugin\'s output and its card says "Output limited". The install refuses only what the conformance signal happens to reach; this is the plugin as a person first plays it.',
+    'Guard every division and square root, clamp filter cutoffs to 20 Hz…0.45 × the sample rate, keep resonance below self-oscillation and feedback below 1, and scale the output as EST-C033 says.', 'warning', false),
+  r('EST-C036', 'behaviour', 'A note ends with a click',
+    'One note (key 60, full velocity) is released at two moments, so at two phases of its wave. Reported when, both times, the output steps in one sample by more than a fifth of the note\'s held level and more than four times its largest step while it was held: the voice was cut at the note-off instead of faded. A wave with steps of its own (a square, a saw, noise) is not judged.',
+    'Give every voice a release of at least a few milliseconds and end it when its envelope reaches 0, never at the note-off itself; a choke may be immediate.', 'warning', false),
+  r('EST-C037', 'behaviour', 'Too heavy to run',
+    'The fuel a 128-frame block spends (the meter\'s count of work, the same on every machine) with 1, 8 and 16 notes held (an effect: full-scale noise as its input), as a share of the block\'s budget. The host stops an instance whose blocks each use 90 % of it; every plugin Cyber ships stays under 75 %. Reported from 75 % (it plays, but close to the limit) and as serious from 90 %, or when the host stopped it. With a profiling build (`est profile`\'s meter) the functions that spent the most are named.',
+    'Do less per sample in the functions named: compute coefficients once a block or on a parameter change, replace per-sample sin, exp and pow with a phase accumulator or a table, cap the voices and the unison, and have no per-sample loop whose length grows with a parameter. `est profile` shows where the fuel goes.', 'warning', false),
+  r('EST-C038', 'behaviour', 'A control does nothing',
+    'In a plugin of at most twelve parameters (not hidden, read-only or the bypass), each is set to its minimum and its maximum on a 1.2 s phrase (an instrument: four notes, two of them overlapping at different velocities, releases, the transport playing; an effect: the test loop) and the output compared with the defaults\'. One that changes nothing is tried again, at each end, three times with every other parameter at seeded random values (a depth at 0 or a mode switched off hides a control that works). Reported, as a note: the parameters that never changed a sample. A larger plugin\'s controls depend on modes and on time in ways a second cannot show, so there nothing is said; nor for a drum kit or a sampler (each sound has its own key and controls) or an analyser (its controls are its display\'s).',
+    'Store the value in the parameter\'s setter and read it in render() where it applies; remove a parameter the sound does not use, from the sound code, est.json and the window.', 'warning', false),
+  r('EST-C039', 'behaviour', 'The controls together break the sound',
+    'On the same phrase: every parameter at its maximum, at its minimum, and two seeded mixes of ends. Reported when the plugin stops (a trap) or its output is not a number there, and not at the defaults; the parameters it takes are found by putting each back to its default in turn. The conformance run moves one parameter at a time, so it never sees what two do together: a division by a count that another control makes 0, an index worked out from two.',
+    'Guard what the parameters reach together where the values are used: divisions by a count or a length, indexes and buffer lengths, a filter with cutoff and resonance both at their ends, a feedback that passes 1.', 'warning', false),
+  r('EST-C040', 'behaviour', 'Pitch or time follows the sample rate',
+    'The same note (A4), and for an effect a single click, at 48 kHz and at 44.1 kHz. Reported when the note\'s period, its release (the time to fall 40 dB) or the click\'s strongest echo is the same count of frames at both rates, so 8.8 % apart in seconds: a pitch or a time sized as a constant of frames. A sound with no clear pitch, a release under 150 ms and an echo under 96 frames are not judged. The parity suite (1.342) proves Cyber\'s own plugins sample for sample; this is the cheap form for a plugin just added.',
+    'Size every time and frequency from the rate activate gives: frames = seconds × sampleRate, a phase step = frequency / sampleRate, a coefficient = exp(-1 / (seconds × sampleRate)). Never a constant 44100 or 48000.', 'warning', false),
+
   // --- EST-U: the UI ------------------------------------------------------------------------
   r('EST-U001', 'ui', 'The UI page is not readable HTML',
     'The page est.json\'s `ui.path` names is UTF-8 HTML.',
@@ -334,6 +375,10 @@ export const EST_RULES: readonly EstRule[] = [
   r('EST-U005', 'ui', 'The UI page loads a module script',
     'A UI page with a `<script type="module">`, a `crossorigin` attribute on any element or a `<link rel="modulepreload">` shows a blank frame: the frame\'s origin is opaque (`sandbox="allow-scripts"`), so a module script, a module preload and a `crossorigin` load are CORS requests, which the plugin origin does not answer. A bundler\'s default page (Vite\'s) has all three. (1.335)',
     'Load a classic script: build the app into one `iife` bundle and load it with `<script defer src="assets/app.js">`, with no `type="module"`, no `crossorigin` and no `modulepreload` (see ui.md, "A whole app as the window"; `est new … --app` scaffolds a Vite build that does this).', 'error', false),
+
+  r('EST-U006', 'ui', 'The window names a parameter the plugin lacks',
+    'The window\'s files are read as text (never run): every `param="<id>"` attribute of its page (the kit\'s `<est-knob>` and `<est-slider>`) and every literal id given to the script\'s API (`get`, `set`, `param`, `begin`, `end` on what `EstUI.connect()` returned) must be the id of a parameter the running plugin reports. A window written apart from the sound code often keeps a control for a parameter the sound dropped, or counts from 1: the control moves and nothing happens. An id built at run time is not seen. (1.914)',
+    'Use the same ids in the window and the sound code (they start at 0), and remove a control whose parameter is gone.', 'warning', false),
 
   // --- EST-P: performance --------------------------------------------------------------------
   r('EST-P001', 'performance', 'A block costs more than the budget',

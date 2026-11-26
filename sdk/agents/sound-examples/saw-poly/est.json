@@ -1,0 +1,8 @@
+{
+  "id": "com.example.saw-poly",
+  "name": "Saw Poly",
+  "version": "1.0.0",
+  "kind": "instrument",
+  "description": "Eight voices of two detuned saws through a resonant low-pass with its own envelope.",
+  "ui": { "path": "ui/index.html", "size": { "w": 520, "h": 300 } }
+}

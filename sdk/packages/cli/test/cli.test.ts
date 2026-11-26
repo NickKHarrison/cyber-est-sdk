@@ -190,6 +190,18 @@ describe('est new, pack and validate', () => {
     expect(renameInCode(src, 'Template', 'MyChorus')).toBe('// the Template\nstruct MyChorus { s: &\'static str }\nlet a = "Template";\nimpl Effect for MyChorus {}\nlet c = \'T\';\n/* Template */');
   });
 
+  it('1.918: --email writes est.json\'s contact (optional, recommended); a bad address is refused', () => {
+    const dir = join(tmp, 'with-email');
+    expect(est(['new', 'effect-as', dir, '--id', 'com.example.mailed', '--name', 'Mailed', '--email', 'maker@example.com', '--no-install']).code).toBe(0);
+    expect(JSON.parse(readFileSync(join(dir, 'est.json'), 'utf8')).contact).toEqual({ email: 'maker@example.com' });
+    const plain = join(tmp, 'no-email');
+    expect(est(['new', 'effect-as', plain, '--id', 'com.example.plain', '--name', 'Plain', '--no-install']).code).toBe(0);
+    expect(JSON.parse(readFileSync(join(plain, 'est.json'), 'utf8')).contact).toBeUndefined();
+    const bad = est(['new', 'effect-as', join(tmp, 'bad-email'), '--email', 'not-an-address', '--no-install']);
+    expect(bad.code).toBe(2); // a usage error
+    expect(bad.err).toMatch(/--email not-an-address is not an email address/);
+  });
+
   it('refuses a bad id, an unknown template and a folder that is not empty', () => {
     expect(est(['new', 'instrument-as', join(tmp, 'bad-id'), '--id', 'Not An Id', '--no-install'])).toMatchObject({ code: 1 });
     const unknown = est(['new', 'no-such', join(tmp, 'x'), '--no-install']);
@@ -397,4 +409,24 @@ describe('est test, doctor, help', () => {
     expect(parseArgs(['x', '--id', 'a.b', '--json', '--name=N', '-h', '--', '--y'], ['id'])).toEqual({ positional: ['x', '--y'], flags: { id: 'a.b', json: true, name: 'N', help: true } });
     expect(() => parseArgs(['--id'], ['id'])).toThrow(UsageError);
   });
+});
+
+describe('a plugin\'s source packed as a .est (1.909)', () => {
+  it('est validate refuses it under EST-B017 with Cyber\'s sentence, and est pack says what it is and what to do', async () => {
+    const { pyZip } = await import('../../../testing/sourceEstZip');
+    const { SOURCE_EST_WORDS } = await import('../../../../shared/estSourceEst.mjs');
+    const d = mkdtempSync(join(tmp, 'source-est-'));
+    const file = join(d, 'glow.est');
+    writeFileSync(file, pyZip({ 'est.json': '{ "id": "com.example.glow" }', 'assembly/index.ts': 'import { Effect } from "est";' }, { deflate: true }));
+    const v = est(['validate', '--json', file], d);
+    expect(v.code).toBe(1);
+    const report = JSON.parse(v.out) as { checks: { rule: string; status: string; message: string }[] };
+    const failed = report.checks.find(c => c.status === 'fail');
+    expect(failed?.rule).toBe('EST-B017');
+    expect(failed?.message).toContain(SOURCE_EST_WORDS);
+    const p = est(['pack', file], d);
+    expect(p.code).not.toBe(0);
+    expect(`${p.out}${p.err}`).toContain(SOURCE_EST_WORDS);
+    expect(`${p.out}${p.err}`).toMatch(/unzip glow\.est into a folder and run `est pack`/);
+  }, 120_000);
 });

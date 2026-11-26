@@ -35,6 +35,8 @@ export interface EstManifestInfo {
   logParams?: number[];
   /** EST 1.1 (1.327, DEV-H, D-56): present only on a 1.1 bundle's record. */
   edition?: '1.1';
+  /** 1.918: the maker's contact address from est.json (optional; never shown: it routes feature requests). */
+  contact?: { email: string };
   /** EST 1.1: the sidechain input's channels (`audio.inputs[1]`); absent: none. */
   sidechain?: number;
   /** EST 1.1: the ids est.json marks `"modulatable": true` (Cyber's modulators send them `PARAM_MOD`). */
@@ -45,6 +47,28 @@ export interface EstManifestInfo {
   migrate?: EstMigrateEntry[];
   /** 1.337 (R-F): the parameters est.json lists, by CLAP id (a decimal string), with their names: what a switch's toast calls them. Absent in records from before 1.337 and when est.json lists none. */
   paramNames?: Record<string, string>;
+  /**
+   * 1.913 (own plugin versions): what the install's conformance run and est.json say of each parameter,
+   * in the plugin's own order: its range, default, flags, module, unit and scale. What a move between
+   * versions matches by (`versionMatch.ts`) when the plugin is not running. Absent in records from before 1.913.
+   */
+  paramFacts?: EstParamFact[];
+  /** 1.913: est.json's `stateVersion` (a saved state crosses between versions only when both name the same one). Absent before 1.913. */
+  stateVersion?: number;
+}
+
+/** 1.913: one parameter as an install record keeps it (`EstManifestInfo.paramFacts`). */
+export interface EstParamFact {
+  id: number;
+  name: string;
+  module?: string;
+  unit?: string;
+  min: number;
+  max: number;
+  def: number;
+  /** CLAP's flags (paramInfo.ts: 1 stepped, 4 hidden, 8 read-only, 16 bypass). */
+  flags: number;
+  log?: true;
 }
 
 /**

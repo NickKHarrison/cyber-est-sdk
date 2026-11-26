@@ -6,11 +6,12 @@
  */
 import { bind } from './bind';
 import { connect, currentConnection, whenConnected } from './connect';
-import { defineElements, EstKnob, EstSlider } from './controls';
+import { EstKnob, EstSlider } from './controls';
+import { defineElements, display } from './kit';
 import { formatNumber, formatValue, fromNorm, toNorm } from './format';
 import { EST_UI_PROTOCOL, FLAGS } from './protocol';
 
-export const EstUI = { connect, currentConnection, whenConnected, bind, defineElements, EstKnob, EstSlider, formatValue, formatNumber, toNorm, fromNorm, FLAGS, EST_UI_PROTOCOL };
+export const EstUI = { connect, currentConnection, whenConnected, bind, display, defineElements, EstKnob, EstSlider, formatValue, formatNumber, toNorm, fromNorm, FLAGS, EST_UI_PROTOCOL };
 
 export type EstUIGlobal = typeof EstUI;
 

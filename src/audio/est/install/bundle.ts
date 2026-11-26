@@ -23,6 +23,8 @@ import { EST_HASH_RE, EST_ID_RE, EST_MIGRATE_MAX, EST_STATE_INLINE_MAX, EST_VERS
 import { parseEstRange } from '../migrate';
 import { isHiddenCodePoint } from '../../../../shared/estHiddenText.mjs';
 import { crc32, pathRefusal, readStrictZip } from '../../../../shared/estStrictZip.mjs';
+import { isSourceEstNames, SOURCE_EST_RULE, SOURCE_EST_WORDS } from '../../../../shared/estSourceEst.mjs';
+import { BoundedZip } from '../../../lib/boundedZip';
 
 export const BUNDLE_MAX_BYTES = 64 * 1024 * 1024;
 export const BUNDLE_MAX_ENTRIES = 512;
@@ -69,6 +71,18 @@ export class EstBundleError extends Error {
 const refuse = (code: EstBundleRefusal, message: string, rule: string, where: string | null = null): never => { throw new EstBundleError(code, message, rule, where); };
 
 // --- The archive ------------------------------------------------------------------------------
+
+/**
+ * 1.909: whether these bytes are a plugin's source packed as a `.est` (shared/estSourceEst.mjs: a zip
+ * with no `.wasm` entry and an AssemblyScript source). Only the bounded reader's directory is read
+ * (src/lib/boundedZip.ts), nothing is unpacked; anything it cannot read is not a source `.est`.
+ */
+export function isSourceEst(bytes: Uint8Array): boolean {
+  try {
+    const zip = new BoundedZip(bytes, { maxEntries: BUNDLE_MAX_ENTRIES * 4, maxTotalUnpacked: BUNDLE_MAX_BYTES, maxRatio: 1000, ratioFloor: 1024 * 1024 });
+    return isSourceEstNames(zip.names());
+  } catch { return false; }
+}
 
 export interface ZipEntry { name: string; data: Uint8Array }
 
@@ -117,6 +131,24 @@ export interface EstManifest {
   presets: string | null;
   /** 1.337 (R-F): what this version does with its earlier versions' settings (`migrate`, EST-M022); empty when it says nothing. */
   migrate: EstMigrateEntry[];
+  /**
+   * 1.918: the maker's contact address (`"contact": { "email": … }`), optional and recommended: where
+   * feature requests for a plugin with no developer record are emailed (only once the address confirms,
+   * server/storeFeatureRequests.mjs). Informational in both editions (a 1.0 host ignores unknown keys, so
+   * it changes no meaning); refused when malformed (EST-M023). Present only when est.json gives one.
+   */
+  contact?: { email: string };
+}
+
+/** 1.918: a contact address as est.json may give it: ASCII, a local part and a dotted domain, at most 254 characters. */
+export const EST_CONTACT_EMAIL_RE = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)+$/;
+/** The manifest's `contact`, checked (1.918, EST-M023): absent, or `{ email }` with a valid address. */
+function contactOf(v: unknown): { email: string } | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!isObj(v)) return bad('contact is not an object such as { "email": "you@example.com" }');
+  if (v.email === undefined) return undefined;
+  if (typeof v.email !== 'string' || v.email.length > 254 || !EST_CONTACT_EMAIL_RE.test(v.email)) return bad('contact.email is not an email address (such as you@example.com, at most 254 characters)');
+  return { email: v.email };
 }
 
 /** A parameter's scale hint (spec §1, D-44): how a knob, a slider and a lane move over its range. */
@@ -133,6 +165,8 @@ const MANIFEST_RULES: [RegExp, string][] = [
   [/^audio\.inputs\[1\]/, 'EST-M021'],
   // 1.337 (R-F): the migrate list, before `parameters` (its message may name both).
   [/^migrate\b/, 'EST-M022'],
+  // 1.918: the maker's contact address, before the text fields' own rule.
+  [/^contact\b/, 'EST-M023'],
   [/^(not a JSON object|no "est"|schema version)/, 'EST-M001'],
   [/^id\b/, 'EST-M002'],
   [/^version\b/, 'EST-M003'],
@@ -312,7 +346,8 @@ export function parseManifest(raw: unknown): EstManifest {
     presets = raw.presets as string;
   }
   const migrate = migrateOf(raw.migrate, parameters);
-  return { est: 1, id, version, name, vendor, description, license, kind, features, abi, edition, module, ui, assets, audio, sidechain, notes, limits, parameters, stateVersion, presets, migrate };
+  const contact = contactOf(raw.contact);
+  return { est: 1, id, version, name, vendor, description, license, kind, features, abi, edition, module, ui, assets, audio, sidechain, notes, limits, parameters, stateVersion, presets, migrate, ...(contact ? { contact } : {}) };
 }
 
 /**
@@ -359,6 +394,8 @@ export function manifestInfo(m: EstManifest): EstManifestInfo {
     ...(logParamsOf(m).length ? { logParams: logParamsOf(m) } : {}),
     // EST 1.1 (1.327): only a 1.1 bundle's record carries these (a 1.0 record is as before).
     ...(m.edition !== '1.0' ? { edition: m.edition } : {}),
+    // 1.918: the maker's contact, only where est.json gives one (never shown: it routes feature requests).
+    ...(m.contact ? { contact: { email: m.contact.email } } : {}),
     ...(m.sidechain ? { sidechain: m.sidechain } : {}),
     ...(modulatableOf(m).length ? { modulatable: modulatableOf(m) } : {}),
     ...(m.ui?.audio ? { uiAudio: true as const } : {}),
@@ -366,6 +403,25 @@ export function manifestInfo(m: EstManifest): EstManifestInfo {
     ...(m.migrate.length ? { migrate: m.migrate.map(e => ({ from: e.from, params: { ...e.params }, state: e.state })) } : {}),
     ...(m.parameters.length ? { paramNames: Object.fromEntries(m.parameters.map(p => [String(p.id), p.name])) } : {}),
   };
+}
+
+/**
+ * 1.913 (own plugin versions): the manifest info with what the conformance run measured of each
+ * parameter (`paramFacts`, in the module's own order, est.json's unit and scale beside it) and
+ * est.json's state version: what a move between versions reads when nothing runs. Pure.
+ */
+export function withParamFacts(info: EstManifestInfo, m: Pick<EstManifest, 'parameters' | 'stateVersion'>,
+  params: readonly { id: number; name: string; module?: string; min: number; max: number; def: number; flags: number; scale?: string }[]): EstManifestInfo {
+  const listed = new Map(m.parameters.map(p => [p.id, p]));
+  const facts = params.slice(0, 512).filter(p => [p.min, p.max, p.def].every(Number.isFinite)).map((p) => {
+    const row = listed.get(p.id);
+    const unit = (row?.unit ?? '').slice(0, 16);
+    return {
+      id: p.id, name: String(row?.name || p.name || '').slice(0, 255), ...(p.module ? { module: String(p.module).slice(0, 255) } : {}), ...(unit ? { unit } : {}),
+      min: p.min, max: p.max, def: p.def, flags: p.flags | 0, ...(p.scale === 'log' || row?.scale === 'log' ? { log: true as const } : {}),
+    };
+  });
+  return { ...info, ...(facts.length ? { paramFacts: facts } : {}), stateVersion: m.stateVersion };
 }
 
 /** EST 1.1: the ids est.json marks `"modulatable": true`. */
@@ -759,7 +815,17 @@ export interface EstBundle {
  * each preset loads is the conformance run's). Throws an `EstBundleError`.
  */
 export async function readBundle(bytes: Uint8Array): Promise<EstBundle> {
-  const entries = readStoredZip(bytes);
+  let entries: ZipEntry[];
+  try {
+    entries = readStoredZip(bytes);
+  } catch (err) {
+    // 1.909: a plugin's source packed as a .est (deflated, or in a folder) fails the strict rules; it
+    // is named as what it is. A built bundle that fails them keeps its own refusal.
+    if (err instanceof EstBundleError && isSourceEst(bytes)) refuse('zip', SOURCE_EST_WORDS, SOURCE_EST_RULE);
+    throw err;
+  }
+  // 1.909: a stored source .est (no module, an AssemblyScript source) is refused before its manifest is read.
+  if (isSourceEstNames(entries.map(e => e.name))) refuse('zip', SOURCE_EST_WORDS, SOURCE_EST_RULE);
   const files = new Map(entries.map(e => [e.name, e.data]));
   const json = files.get('est.json');
   if (!json) return refuse('manifest', 'no est.json', 'EST-B010');

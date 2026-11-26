@@ -66,6 +66,13 @@
 import binaryen from 'binaryen';
 import { FUEL_GLOBAL, FUEL_LEFT_EXPORT, REFUEL_EXPORT } from './fuel';
 
+/**
+ * 1.914: the subnormal counter (review/denormals.ts, Binaryen too), exported from here so the compiling
+ * Worker reaches it through its one lazy import of this file (the add-time checks' count): Binaryen stays
+ * in the Worker's one meter chunk (`check-chunks`' `checkEstWorker`).
+ */
+export { countDenormals, DENORMAL_COUNTER } from '../review/denormals';
+
 export { FUEL_GLOBAL, FUEL_LEFT_EXPORT, REFUEL_EXPORT, isMetered } from './fuel';
 const LOG_MODULE = 'env';
 const LOG_BASE = 'log_execution';

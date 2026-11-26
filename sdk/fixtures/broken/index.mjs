@@ -30,6 +30,16 @@ export const PASSING = JSON.parse(readFileSync(join(here, 'passing.json'), 'utf8
 );
 
 /**
+ * 1.914: the add-time checks' planted faults (`addchecks.json`, src/audio/est/review/addChecks.ts): each
+ * **installs and passes the validator** (its rule is a warning: a plugin that is merely imperfect is
+ * still added), and is found under `rule` by the checks.
+ * @type {{ name: string, dir: string, module: string, rule: string }[]}
+ */
+export const ADDCHECKS = JSON.parse(readFileSync(join(here, 'addchecks.json'), 'utf8')).map(
+  (/** @type {{ name: string, module: string, rule: string }} */ f) => ({ ...f, dir: join(here, f.name), module: resolve(here, f.module) }),
+);
+
+/**
  * A fixture's canonical bundle.
  * @param {{ dir: string, module: string }} f
  */

@@ -394,6 +394,24 @@ export function developerSigningInput(manifest, contentHash, publishedAt) {
 export function communitySignedBytes(obj) {
   return new TextEncoder().encode(`est-registry/1 community\n${canonicalJson(obj)}`);
 }
+/**
+ * 1.917 (Picked by Cyber): what a **pick statement**'s signature covers (the community key):
+ * `{ id, version, contentHash, developer, pickedAt, picked: 'cyber' }`. Its own domain, so a pick can
+ * never be read as a version's countersignature or an index, nor either of them as a pick.
+ * @param {unknown} obj
+ */
+export function pickSignedBytes(obj) {
+  return new TextEncoder().encode(`est-registry/1 pick\n${canonicalJson(obj)}`);
+}
+/**
+ * 1.917: what the **picked index**'s signature covers (the community key): the community index's shape
+ * holding only picked plugins, with the whole community blocklist. Its own domain, so it is never taken
+ * for the full community index (a subset served in its place would hide every other plugin's update).
+ * @param {unknown} obj
+ */
+export function pickedIndexSignedBytes(obj) {
+  return new TextEncoder().encode(`est-registry/1 picked\n${canonicalJson(obj)}`);
+}
 /** 1.401 (D-60): what the developer delegation's signature (the developer-root key) covers. @param {unknown} obj */
 export function delegationSignedBytes(obj) {
   return new TextEncoder().encode(`est-developer-root/1 delegation\n${canonicalJson(obj)}`);
@@ -633,6 +651,8 @@ export function sanitiseCommunityIndex(raw) {
         publishedAt: typeof v.publishedAt === 'string' ? v.publishedAt.slice(0, 40) : '', validatedAt: typeof v.validatedAt === 'string' ? v.validatedAt.slice(0, 40) : '',
         early: v.early !== false, ...(typeof v.stagedUntil === 'string' && Number.isFinite(Date.parse(v.stagedUntil)) ? { stagedUntil: v.stagedUntil } : {}),
         ...(v.yanked === true ? { yanked: true } : {}), sizeBytes: Number.isSafeInteger(v.sizeBytes) && v.sizeBytes > 0 ? v.sizeBytes : 0,
+        // 1.917: Picked by Cyber (an admin's choice, the version's pick statement beside it: `verifyPick`).
+        ...(v.picked === true ? { picked: true, pickUrl: rel(v.pickUrl, `${base}/pick.json`) } : {}),
       });
     }
     if (!versions.length) continue;
@@ -654,17 +674,74 @@ export function sanitiseCommunityIndex(raw) {
  * or `{ ok: false, why }`.
  * @param {any} rawIndex @param {any} rawSig @param {{ keyId: string, pub: Uint8Array }[]} communityKeys @param {number} [now]
  */
-export async function verifyCommunityIndex(rawIndex, rawSig, communityKeys, now = Date.now()) {
+export async function verifyCommunityIndex(rawIndex, rawSig, communityKeys, now = Date.now(), { picked = false } = {}) {
   if (!isObj(rawSig) || rawSig.alg !== 'ed25519' || typeof rawSig.sig !== 'string') return { ok: false, why: 'the community index is not signed' };
   const k = (communityKeys ?? []).find((x) => x.keyId === rawSig.keyId);
   if (!k || !isObj(rawIndex) || !isObj(rawIndex.community) || rawIndex.community.keyId !== k.keyId) return { ok: false, why: 'the community index is signed with a key the registry does not name' };
   let bytes;
-  try { bytes = communitySignedBytes(rawIndex); } catch { return { ok: false, why: 'the community index is not JSON' }; }
+  // 1.917: the picked index is checked in its own domain (`pickedIndexSignedBytes`), never the full index's.
+  try { bytes = picked ? pickedIndexSignedBytes(rawIndex) : communitySignedBytes(rawIndex); } catch { return { ok: false, why: 'the community index is not JSON' }; }
   if (!(await verifyBytes(bytes, rawSig.sig, k.pub))) return { ok: false, why: 'the community index\'s signature does not match: it was changed after signing' };
   let index;
   try { index = sanitiseCommunityIndex(rawIndex); } catch (err) { return { ok: false, why: err instanceof Error ? err.message : String(err) }; }
   if (expiredAt(index.community.expiresAt, now)) return { ok: false, why: `the community index expired on ${index.community.expiresAt}` };
   return { ok: true, index };
+}
+
+/**
+ * 1.917 (Picked by Cyber): the picked index checked end to end, as `verifyCommunityIndex` but in the
+ * picked domain, and with every version not marked picked dropped (this file can only carry picks).
+ * @param {any} rawIndex @param {any} rawSig @param {{ keyId: string, pub: Uint8Array }[]} communityKeys @param {number} [now]
+ */
+export async function verifyPickedIndex(rawIndex, rawSig, communityKeys, now = Date.now()) {
+  const r = await verifyCommunityIndex(rawIndex, rawSig, communityKeys, now, { picked: true });
+  if (!r.ok || !r.index) return r;
+  const plugins = r.index.plugins
+    .map((p) => ({ ...p, versions: p.versions.filter((v) => v.picked === true) }))
+    .filter((p) => p.versions.length)
+    .map((p) => ({ ...p, latest: p.versions.some((v) => v.version === p.latest) ? p.latest : p.versions[0].version }));
+  return { ok: true, index: { ...r.index, plugins } };
+}
+
+/**
+ * 1.917 (Picked by Cyber): a version's pick statement checked: `{ alg, keyId, payload: { id, version,
+ * contentHash, developer, pickedAt, picked: 'cyber' }, sig }`, signed by a community key the root names,
+ * naming exactly this version's bytes. It stands in for the developer's own signature (an admin picked
+ * the plugin; its maker signed nothing), so the developer it names must still own the id's namespace in
+ * the root or the delegation (the caller checks, as for any community version). Never a tier: a pick is
+ * not Reviewed, and a community key can sign nothing else. `{ ok: true, developer }` or `{ ok: false, why }`.
+ * @param {any} rawPick @param {{ id: string, version: string, contentHash: string }} expect
+ * @param {{ keyId: string, pub: Uint8Array }[]} communityKeys
+ */
+export async function verifyPick(rawPick, expect, communityKeys) {
+  if (!isObj(rawPick) || rawPick.alg !== 'ed25519' || !isObj(rawPick.payload) || typeof rawPick.keyId !== 'string' || typeof rawPick.sig !== 'string') return { ok: false, why: 'the pick is not signed' };
+  const p = rawPick.payload;
+  if (Object.keys(p).sort().join(',') !== 'contentHash,developer,id,picked,pickedAt,version') return { ok: false, why: 'the pick covers other fields than { id, version, contentHash, developer, pickedAt, picked }' };
+  if (p.picked !== 'cyber') return { ok: false, why: 'the pick does not say Cyber picked it' };
+  if (p.id !== expect.id || p.version !== expect.version || p.contentHash !== expect.contentHash) return { ok: false, why: 'the pick names another version or other bytes' };
+  if (typeof p.developer !== 'string' || !DEVELOPER_ID_RE.test(p.developer)) return { ok: false, why: 'the pick names no developer' };
+  if (typeof p.pickedAt !== 'string' || !Number.isFinite(Date.parse(p.pickedAt))) return { ok: false, why: 'the pick has no date' };
+  const k = (communityKeys ?? []).find((x) => x.keyId === rawPick.keyId);
+  if (!k) return { ok: false, why: 'the pick is signed with a key Cyber does not trust' };
+  if (!(await verifyBytes(pickSignedBytes(p), rawPick.sig, k.pub))) return { ok: false, why: 'the pick\'s signature does not match: it was changed after signing' };
+  return { ok: true, developer: p.developer };
+}
+
+/**
+ * 1.917 (Picked by Cyber): the id a picked plugin is listed under: `dev.<10 hex>.<slug>`, the slug the
+ * old id's last part (lower-case letters, digits and hyphens, at most 40). An id already under the
+ * developer's assigned namespace is kept. The 1.898 prompt's `com.example.<name>` ids all meet here, so
+ * two makers' "glow-filter" become two plugins. Null for a developer id that is not one.
+ * @param {string} oldId @param {string} developerId
+ */
+export function pickedIdOf(oldId, developerId) {
+  const ns = assignedNamespaceOf(developerId);
+  if (!ns) return null;
+  const id = String(oldId ?? '');
+  if (id.startsWith(`${ns}.`) && ID_RE.test(id)) return id;
+  const last = id.split('.').pop() ?? '';
+  const slug = last.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+  return `${ns}.${slug.length >= 2 ? slug : 'plugin'}`;
 }
 
 /**

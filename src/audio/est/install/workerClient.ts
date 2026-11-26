@@ -10,6 +10,7 @@
  * a timeout the next Worker starts no sooner than `TERMINATE_GRACE_MS` later.
  */
 import { EST_WORKER_MODULE_REFUSED } from '../instanceState';
+import type { AddCheckId } from '../review/addChecks';
 import type { EstInstallRefusal, WorkerReply, WorkerRequest } from './workerProtocol';
 
 export const INSTALL_TIMEOUT_MS = 30_000;
@@ -135,6 +136,40 @@ export async function installInWorker(bytes: ArrayBuffer, opts: InstallRequest =
     return await s.install(bytes, opts);
   } finally {
     s.close();
+  }
+}
+
+/** 1.914: how long past its budget the add-time checks' Worker may take to answer (the meter's Binaryen loads first, a few seconds on a slow device). */
+export const CHECKS_GRACE_MS = 12_000;
+
+/**
+ * 1.914: the add-time checks (`review/addChecks.ts`) in a Worker of their own, ended when it answers,
+ * at its timeout (the budget and `CHECKS_GRACE_MS`) or when `signal` aborts (the person moved on: the
+ * Worker is terminated, the one thing that stops code that will not return). Nothing is stored or
+ * installed: the bundle is one the library already holds.
+ */
+export async function addChecksInWorker(bytes: ArrayBuffer, opts: { expectHash?: string | null; budgetMs?: number; signal?: AbortSignal; only?: AddCheckId[]; named?: ArrayBuffer } = {}) {
+  if (opts.signal?.aborted) throw new EstWorkerError('worker', 'the checks were cancelled');
+  const worker = await spawn();
+  let cancel: (() => void) | null = null;
+  try {
+    const budgetMs = opts.budgetMs ?? 4000;
+    const asked = ask(worker, { type: 'checks', bytes, expectHash: opts.expectHash ?? null, budgetMs, ...(opts.only ? { only: opts.only } : {}), ...(opts.named ? { named: opts.named } : {}) }, opts.named ? [bytes, opts.named] : [bytes], budgetMs + CHECKS_GRACE_MS, () => {});
+    const aborted = new Promise<never>((_, reject) => {
+      cancel = () => reject(new EstWorkerError('worker', 'the checks were cancelled'));
+      opts.signal?.addEventListener('abort', cancel, { once: true });
+    });
+    // A cancelled run's own answer (or timeout) is nobody's: its rejection is taken here.
+    asked.catch(() => {});
+    const r = await Promise.race([asked, aborted]);
+    if (r.type !== 'checked') throw new EstWorkerError('worker', `unexpected reply ${r.type}`);
+    return r;
+  } finally {
+    if (cancel) opts.signal?.removeEventListener('abort', cancel);
+    worker.onmessage = null;
+    worker.onerror = null;
+    worker.onmessageerror = null;
+    worker.terminate();
   }
 }
 

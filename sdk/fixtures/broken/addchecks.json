@@ -1,0 +1,67 @@
+[
+  {
+    "name": "addcheck-lowkeys",
+    "module": "wasm/addcheck-lowkeys.wasm",
+    "rule": "EST-C031"
+  },
+  {
+    "name": "addcheck-stuck",
+    "module": "wasm/addcheck-stuck.wasm",
+    "rule": "EST-C032"
+  },
+  {
+    "name": "addcheck-loud",
+    "module": "wasm/addcheck-loud.wasm",
+    "rule": "EST-C033"
+  },
+  {
+    "name": "addcheck-dc",
+    "module": "wasm/addcheck-dc.wasm",
+    "rule": "EST-C034"
+  },
+  {
+    "name": "addcheck-click",
+    "module": "wasm/addcheck-click.wasm",
+    "rule": "EST-C036"
+  },
+  {
+    "name": "addcheck-heavy",
+    "module": "wasm/addcheck-heavy.wasm",
+    "rule": "EST-C037"
+  },
+  {
+    "name": "addcheck-dead",
+    "module": "wasm/addcheck-dead.wasm",
+    "rule": "EST-C038"
+  },
+  {
+    "name": "addcheck-extreme",
+    "module": "wasm/addcheck-extreme.wasm",
+    "rule": "EST-C039"
+  },
+  {
+    "name": "addcheck-rate",
+    "module": "wasm/addcheck-rate.wasm",
+    "rule": "EST-C040"
+  },
+  {
+    "name": "addcheck-fx-nothing",
+    "module": "wasm/addcheck-fx-nothing.wasm",
+    "rule": "EST-C031"
+  },
+  {
+    "name": "addcheck-fx-silent",
+    "module": "wasm/addcheck-fx-silent.wasm",
+    "rule": "EST-C031"
+  },
+  {
+    "name": "addcheck-fx-ring",
+    "module": "wasm/addcheck-fx-ring.wasm",
+    "rule": "EST-C032"
+  },
+  {
+    "name": "addcheck-noend",
+    "module": "wasm/addcheck-noend.wasm",
+    "rule": "EST-C024"
+  }
+]

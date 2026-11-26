@@ -217,6 +217,51 @@ Each is one Tab stop with `role="slider"`, its name, `aria-valuemin`, `aria-valu
 
 Colours are CSS variables, with defaults matching Cyber's dark look: `--est-bg` (`#14161b`), `--est-fg` (`#e8eaf0`), `--est-accent` (`#5ad1c3`), and `--est-dim`, `--est-track` for the quieter parts.
 
+## The window kit: declare and style, the kit wires
+
+Since Cyber 1.912 `est-ui.js` carries a whole window kit. The page places elements and styles them; each element finds its parameter and does the wiring by itself, both ways. A page made only of the kit needs no script of its own.
+
+```html
+<est-window name="Glow Filter" theme="ember" meter>
+  <canvas id="curve" aria-label="The filter's shape"></canvas>
+  <est-row>
+    <est-knob param="Cutoff"></est-knob>
+    <est-xy x="Cutoff" y="Resonance"></est-xy>
+    <est-select param="Mode"></est-select>
+    <est-switch param="Drive On"></est-switch>
+  </est-row>
+</est-window>
+<script src="est-ui.js"></script>
+```
+
+| Element | What it is |
+|---|---|
+| `<est-window name theme meter>` | The page's root. Fills the frame at every size (a column of rows that share its height), carries the theme, keeps text at 4.5:1 whatever colours the page sets, and scales the whole window down by one factor when its content at its smallest needs more room than the frame gives. `name` draws a header; `meter` puts a level meter in it. |
+| `<est-row>`, `<est-panel label>` | Layout: a row's children share its width; a panel is a titled box that flows its controls side by side and wraps them. |
+| `<est-knob param>` | A dial. Without `size`, inside `<est-window>` it sizes itself to its cell. |
+| `<est-slider param [vertical]>` | A fader. |
+| `<est-switch param>` | On/off: the top of the range or the bottom. |
+| `<est-select param [menu]>` | A stepped parameter's choices as a radio group of buttons; `menu` makes it a drop-down. |
+| `<est-xy x y>` | A pad that moves two parameters; one gesture on both. |
+| `<est-value param>` | The value as text. |
+| `<est-meter [in] [vertical]>` | The output (or input) level, from the host's meters. |
+| `<est-spectrum>` | The plugin's output as a spectrum from the host's own analysis (est.json's `ui.audio`, EST 1.1; never samples). Without it, a level trace. |
+| `<est-all [params="3,4"]>` | A control for every parameter no other element shows (or just those ids): a knob, or a switch or buttons for a stepped one. |
+
+**Binding.** `param` (and `x`, `y`) is the parameter's id or its name (letters and digits compared, case ignored). An element whose attribute names nothing the plugin has is marked `data-est-unbound`, drawn disabled with "?" and named "… (not connected)": never a control that looks alive and does nothing. `est validate`-side, the same question is the pure check `checkWindow` (`@cyber-est/tools`: which kit controls name no parameter, which parameters have no control).
+
+**What every control does.** A drag is one gesture (`est:gesture` begin and end, one undo step in Cyber); so are a click, Delete, a typed value and a run of wheel notches. Arrows step, Shift for a fine step, Page Up and Page Down a tenth, Home and End the ends, Delete or Backspace the default, Enter (or a digit) types a value ("1.2k", "-6 dB", a label). The wheel is read in pixels whatever its delta mode. Pointer events with `touch-action: none`; 44 px at the least on a coarse pointer. `role="slider"` (or `switch`, `radio`, `meter`) with ARIA values and a visible focus. A read-only parameter is shown and never written. Keys a control does not use are left alone, so Cyber's key hand-back (letters, Escape) keeps working.
+
+**Units and labels.** `unit="Hz"` and `labels="Low, Band, High"` on an element; or once for the page as `<meta name="est-params" content='[{"id":1,"unit":"Hz"},{"id":3,"labels":["Low","Band"]}]'>`, which Cyber's builder writes from the sound code for a plugin made from an assistant's answer.
+
+**Themes.** `theme="studio"` (the default), `neon`, `paper`, `ember`, `moss`. Each sets `--est-bg`, `--est-panel`, `--est-fg`, `--est-dim`, `--est-accent`, `--est-track`, `--est-cap`, `--est-radius`, `--est-font`, `--est-tracking` on `<est-window>`; the page overrides any of them in its own CSS (the kit's rules have no specificity past the element names). The kit reads the colours back and moves `--est-fg` and `--est-dim` just far enough to reach 4.5:1 on the background and the panel; `--est-on-accent` is the ink for text on the accent.
+
+**A display of the page's own.** `EstUI.display('#curve', function (g, w, h, t) { … }, { animate })`: the canvas is kept at its box's size and the screen's pixel ratio, and `draw` runs (in CSS pixels) after every parameter change and resize; with `animate`, every frame, except under reduced motion.
+
+**Not in the kit, on purpose.** No on-screen keyboard and no preset picker: the frame protocol carries parameter values only, an instrument's keys and the preset browser are Cyber's own, drawn by the host around the window. No oscilloscope: the window never receives samples.
+
+Three whole windows, each under 40 lines: `sdk/packages/ui/examples/` (`glow-filter`, `night-synth`, `tape-echo`). `node scripts/est-window-lab.mjs <folder>` in Cyber's repository opens a window as Cyber frames it and measures it: opens, every control wired both ways, fill at the three sizes, nothing overlapping, contrast.
+
 ## Other exports
 
 `formatValue(param, value, unit, labels?)`, `formatNumber(value)`, `toNorm(param, value, scale)` and `fromNorm(param, u, scale)` (0…1 along a control, log or linear), `FLAGS` (CLAP's parameter flags: `STEPPED` 1, `PERIODIC` 2, `HIDDEN` 4, `READONLY` 8, `BYPASS` 16, `AUTOMATABLE` 32), `EST_UI_PROTOCOL` (3), `AUDIO_FFT_SIZES`, `AUDIO_PER_SECOND` (30), `SPECTRUM_FLOOR_DB` (−120), `currentConnection()`, `whenConnected(fn)`. `est-ui.d.ts` has every signature.

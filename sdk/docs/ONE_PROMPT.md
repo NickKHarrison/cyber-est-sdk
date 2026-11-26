@@ -1,7 +1,7 @@
 # The one prompt
 
 For a chat assistant with no folder and no tools. Copy everything in the block below into the chat and replace `<one sentence>` with what the plugin should do.
-The assistant answers with one code block that holds the whole plugin: a small `est.json`, the sound (`assembly/index.ts`) and the plugin's own window (`ui/index.html`, `ui/style.css`, `ui/ui.js`), each under a `=== file: <path> ===` line. Paste that whole answer into Cyber (Home → EST PLUGINS → Add a plugin file → Paste your AI's answer) or into the plugin playground: Cyber compiles it, packs it with its window and plays it. A zip of the same files can be dropped in the same place.
+The assistant answers with one code block that holds the whole plugin: a small `est.json`, the sound (`assembly/index.ts`) and the plugin's own window (`ui/index.html`, `ui/style.css`, `ui/ui.js`), each under a `=== file: <path> ===` line. Paste that whole answer into Cyber (Home → EST PLUGINS → Add a plugin file → Paste your AI's answer) or into the plugin playground: Cyber compiles it, packs it with its window and plays it. An assistant that can run code or create files also gives a file to download, `<name>.est`: the plugin's source (the same five files in a zip, nothing compiled), dropped in the same place. Only the `.est` Cyber builds from it (Save its .est file, on the plugin's page) is a built plugin to share; a source `.est` is refused everywhere else.
 
 This page is generated from [for-agents.md](for-agents.md), `sdk/agents/prompt-example/` and the `effect-as` and `instrument-as` templates by `node sdk/agents/generate.mjs`: change those, never this.
 
@@ -18,27 +18,42 @@ HOW TO ANSWER. Give me the whole plugin in ONE code block: five files, each comp
 === file: ui/style.css ===
 === file: ui/ui.js ===
 
-I will paste your whole answer into Cyber in one go, so: one code block only, no file left out, no "unchanged" or "..." placeholders, no build steps, and at most a line or two of talk outside the block. (If you can attach files, one .zip holding exactly these five files also works.) If I come back with errors, answer the same way, with every file again. Keep comments short so the answer is not cut off before the last file.
+I will paste your whole answer into Cyber in one go, so: one code block only, no file left out, no "unchanged" or "..." placeholders, no build steps, and at most a line or two of talk outside the block. If I come back with errors, answer the same way, with every file again. Keep comments short so the answer is not cut off before the last file.
 
-THE SOUND (`assembly/index.ts`). It is AssemblyScript, not TypeScript: no closures, no `any`, no union types, no optional chaining, no destructuring; every number has a type (`f64`, `i32`, `u32`) and is cast explicitly (`<f64>x`).
-- Start from the example of the same kind (effect or instrument) and change it. Keep the export block at the top and the `abort` function at the bottom exactly as they are. No top-level code but constants.
-- Import only from "est", and only what the library list at the end names. If a function is not listed, it does not exist: write the few lines yourself. No other import, no console, no `Math.random`, no `Date`. For noise, step a seed of your own on a `u32` (`x ^= x << 13; x ^= x >> 17; x ^= x << 5`), set from a constant in `reset()`.
-- No allocation while playing: `new`, arrays and strings only in field initialisers, the constructor or `activate()`. Never in `render()`, `paramChanged()` or a note handler.
-- Size every buffer and every time from the sample rate `activate()` receives.
-- Each parameter is declared exactly as in the examples: `const NAME: u32 = <number>;` and `new Param(NAME, "Name")` with a range and a default inside it. Ids start at 0 and never change. Cyber reads this list from the code.
-- The descriptor's id is `com.example.<name-in-kebab-case>` (lower case), the same as est.json's "id"; its version the same as est.json's.
-- Smooth every level or cutoff change (`Smoother`) so a moving knob does not click. Keep the output between -1 and 1.
-- A delay, echo or reverb must die away, and `tail()` must report (in frames, from the current settings) how long it still sounds after the input stops: until its repeats are 60 dB down. For an echo that is `delaySeconds * (1 + 7 / (1 - feedback))`, so cap feedback at 0.85 and the delay at 1 second (48 seconds at most); never report less than it really rings. Set est.json's `limits.tailSeconds` to the longest tail it can report (60 at most), and set any feedback value below 1e-20 to 0.
-- An instrument extends `Instrument`, must sound when a note is held, and must end each voice (`this.voices.end(i, io, n)`) when its envelope finishes, as the example does. A note's fields are `key`, `velocity`, `noteId`, `channel`, `port`, `time`. There is no `note.id`. `key` is an `i16`: write `<f64>note.key` before maths.
+A FILE TO DOWNLOAD. If you can run code or create files, ALSO make the plugin as one file for me to download, named after the plugin (for example `glow-filter.est`): a zip of exactly the same five files at its top level, with nothing compiled in it. Give me the file and say "Drop this file on Cyber". Still show the code block above, in case the download does not work. In Python:
 
-THE WINDOW (`ui/index.html`, `ui/style.css`, `ui/ui.js`). Design a real panel for THIS plugin: its own layout, colours, lettering and character that suit what it does, with a display that moves (a curve, a scope shape, a level, an animation drawn from the parameters). Not a plain row of default sliders. The window runs in a locked sandbox, so:
-- Exactly these three text files. No image files (draw with CSS, inline SVG or a canvas), no web fonts (system fonts only), nothing from the internet, no links.
-- No JavaScript inside the HTML: no `<script>` with code in it, no `onclick=` attributes. All code goes in `ui/ui.js`, loaded as in the example: `<script src="est-ui.js"></script>` then `<script src="ui.js"></script>` at the end of `<body>`. Cyber supplies `est-ui.js`: never write it. No `type="module"`, no `import`.
-- No `fetch`, no storage (`localStorage`), no audio or MIDI in the window: it makes no sound and plays no notes. It only reads and writes the plugin's parameters, by the same ids as the sound code. An instrument's keys are Cyber's own.
-- est.json's `ui.size` is the window's exact size in CSS pixels (`w` 300 to 1000, `h` 200 to 700). Lay the page out to fill exactly that, with `html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }`. Nothing outside that box is ever seen, so add up your rows' heights and choose a size every control fits in (a knob with its label and value is about its `size` + 40 px tall).
-- Every parameter of the sound has a control in the window.
-- Ready-made controls (accessible, draggable, keyboard and reset built in): `<est-knob param="1" label="Cutoff" unit="Hz" scale="log" size="64"></est-knob>` and `<est-slider param="0" label="Level" unit="dB"></est-slider>`; `param` is the parameter's id; `scale="log"` for a frequency; `labels="A, B, C"` for a switch. A knob is round; a slider is a horizontal bar that fills its container's width (for a vertical fader, build your own control). They take their colours from the CSS variables `--est-bg`, `--est-fg`, `--est-dim`, `--est-accent`, `--est-track`.
-- The script's whole API, from `const est = EstUI.connect();`: `est.ready` (a promise: wait for it before reading), `est.get(id)` (the value), `est.param(id)` (`{ name, min, max, def }`), `est.set(id, value)`, `est.begin(id)` and `est.end(id)` (around the `set` calls of one drag or click of a control you build yourself), `est.subscribe(fn)` (called after every change, whoever made it: redraw there), `est.onMeter(fn)` (about 30 times a second: `fn({ out: [left, right] })`, linear peaks 0 to 1). Nothing else exists.
+import re, zipfile
+answer = r'''<the code block's text, exactly as you show it, from the first === line>'''
+parts = re.split(r'^=== file: (.+?) ===[ \t]*\n', answer, flags=re.M)
+with zipfile.ZipFile('glow-filter.est', 'w', zipfile.ZIP_DEFLATED) as z:
+    for path, text in zip(parts[1::2], parts[2::2]):
+        z.writestr(path.strip(), text.rstrip() + '\n')
+
+THE SOUND (`assembly/index.ts`). It is AssemblyScript: TypeScript's syntax, stricter. Every number has a type (`f64`, `i32`) and is cast explicitly (`<f64>x`); no closures, no `any`, no union types, no optional chaining, no destructuring.
+- You build the sound from blocks of Cyber's sound kit, "sound1". Start from the example of the same kind (effect or instrument) and change it. Keep the export block at the top (with your id, name and class) and the `abort` line at the bottom. No top-level code but constants.
+- You write ONE method, `tick()`, which runs once per sample. In an effect the input is in `this.l` and `this.r`: leave the output there. In an instrument, your voice class's `tick()` returns one sample of ONE voice; the kit plays the notes (it starts, releases, steals and ends voices), applies the voice's loudness envelope `this.amp`, and mixes the voices.
+- Do not write `activate`, `reset`, `render`, `process`, note handlers, `tail` or any sample-rate code: the kit does all of it. It also smooths every parameter, clears the blocks, reports how long the plugin rings, and keeps the output safe. Times are in seconds, frequencies in Hz.
+- Make blocks only as fields (`osc: Osc = new Osc();`), never with `new` inside `tick()`. Call each block once per sample, and give each signal its own block (a stereo effect needs a left one and a right one; two oscillators need two `Osc`).
+- An instrument must sound on every key at its default settings: a drum kit gives each drum a range of keys (`if (this.key < 48.0) …`), never single keys only.
+- Import only from "sound1", and only what the kit list at the end names. If it is not listed, it does not exist: write the few lines yourself. No other import, no console, no `Math.random`, no `Date`.
+- Each parameter is declared exactly as in the examples: `const NAME: u32 = <number>;` and `new Param(NAME, "Name")` with a range and a default. Ids start at 0 and never change. Read a parameter with `param(NAME)`, a switch with `choice(NAME)`.
+- The id is `com.example.<name-in-kebab-case>` (lower case), the same in `new Descriptor(…)` and est.json; the version too.
+- est.json may name the maker's email: `"contact": { "email": "…" }`. It is optional and recommended: feature requests people send about the plugin in Cyber are emailed there, and it is never shown. Add it only with an address the person gave you (ask for it once, as optional); never make one up.
+
+THE WINDOW (`ui/index.html`, `ui/style.css`, `ui/ui.js`). Build it from Cyber's window kit: you place and style the elements below, and each one connects itself to its parameter (both ways: drag, keys, touch, presets, automation). Design a real panel for THIS plugin: a layout, a theme and colours of its own that suit what it does. Not the example's look. The window runs in a locked sandbox, so:
+- Exactly these three text files (`ui/ui.js` may be one comment line when you draw nothing yourself). No images, no web fonts, nothing from the internet, no links. No code inside the HTML (no inline `<script>`, no `onclick=`), no `type="module"`, no `fetch`, no storage, no sound or notes from the window: an instrument's keys are Cyber's own.
+- The page is laid out as the example's: one `<est-window name="…" theme="…">` holding everything, then `<script src="est-ui.js"></script>` and `<script src="ui.js"></script>`. Cyber supplies `est-ui.js`: never write it.
+- `<est-window>` fills the window by itself at every size: it is a column of rows that share its height, and a row's children share its width. So never give a kit element a fixed pixel size or position. est.json's `ui.size` is the starting size (`w` 300 to 1000, `h` 200 to 700): allow about 110 px of height for each row of knobs and 100 px of width for each knob.
+- `param="…"` is the parameter's name exactly as in the sound code's `new Param(NAME, "Name")`. EVERY parameter of the sound gets exactly one control. Units and a choice's labels are taken from the sound code: do not repeat them.
+- The elements (all of them; nothing else exists):
+  - `<est-knob param="Cutoff"></est-knob>`: a dial. `<est-slider param="Mix"></est-slider>`: a horizontal fader; add `vertical` for an upright one.
+  - `<est-switch param="Drive On"></est-switch>`: on/off, for a parameter with two labels. `<est-select param="Mode"></est-select>`: one button per label, for a parameter with a few labels; add `menu` for a drop-down when there are many.
+  - `<est-xy x="Cutoff" y="Resonance"></est-xy>`: a pad that moves two parameters. `<est-value param="Cutoff"></est-value>`: the value as text.
+  - `<est-meter></est-meter>`: the output level. `<est-spectrum></est-spectrum>`: the live spectrum of the sound.
+  - `<est-row>`: a row. `<est-panel label="Filter">`: a titled box holding rows and controls. `<est-all></est-all>`: a control for every parameter you have not placed.
+  - Any control takes `label="…"` (a shorter caption). `<est-window>` takes `name` (the title), `meter` (a level meter beside the title) and `theme`: `studio` (dark slate, teal), `neon` (black, magenta, monospace), `paper` (cream, ink, serif), `ember` (warm dark, orange) or `moss` (pale green, rounded).
+- Style it in `ui/style.css`: set variables on `est-window` (`--est-bg`, `--est-panel`, `--est-fg` text, `--est-dim` quiet text, `--est-accent`, `--est-track`, `--est-cap` a knob's body, `--est-radius`, `--est-font`), and add backgrounds, borders and shadows of your own to `est-window`, `est-panel`, `h1` and your own elements. Cyber keeps the text readable whatever colours you choose.
+- A display you draw yourself (optional): put `<canvas id="curve"></canvas>` directly inside `<est-window>` and, in `ui/ui.js`, call `EstUI.display('#curve', function (g, w, h) { … })`: `g` is the canvas's 2D context, `w` and `h` its size; it is called again after every parameter change. Read a value with `est.get(ID)` from `var est = EstUI.connect();` (the same ids as the sound code; `undefined` before Cyber's first message, so return early then). That is the script's whole API.
 
 A WHOLE WORKING EXAMPLE, exactly as an answer looks (an effect: a gain into a filter, with its window). Change it into my plugin; do not copy its look:
 
@@ -54,24 +69,13 @@ A WHOLE WORKING EXAMPLE, exactly as an answer looks (an effect: a gain into a fi
 }
 
 === file: assembly/index.ts ===
-import {
-  Descriptor, Effect, Filter, Io, Param, Plugin, Smoother,
-  alloc, dbToGain, filterModeFromIndex, isReady, setup,
-} from "est";
+import { Descriptor, Effect, Filter, Param, alloc, choice, dbToGain, isReady, param, start } from "sound1";
 
-// --- The export block every EST plugin in AssemblyScript carries: `clap_entry`, `free`, and a
-// `malloc` that writes the plugin's structs before its first allocation.
-export { clap_entry, free } from "est";
+// The export block: keep it as it is, with your plugin's id, name, version and class.
+export { clap_entry, free } from "sound1";
 export function malloc(size: usize): usize {
-  if (!isReady()) setup(describe(), parameters(), make);
+  if (!isReady()) start(new Descriptor("com.example.glow-filter", "Glow Filter", "Me", "1.0.0"), parameters(), new GlowFilter());
   return alloc(size);
-}
-function make(): Plugin { return new Template(); }
-
-function describe(): Descriptor {
-  return new Descriptor("com.example.glow-filter", "Glow Filter", "Me", "1.0.0",
-    "A smoothed gain into a resonant filter: the starting point for an EST effect in AssemblyScript.",
-    ["audio-effect", "filter", "stereo"], "TMPE", 1);
 }
 
 const GAIN: u32 = 0;
@@ -82,53 +86,29 @@ const MODE: u32 = 3;
 function parameters(): Param[] {
   return [
     new Param(GAIN, "Gain").range(-60, 12).default(0).unit("dB").decimals(1),
-    new Param(CUTOFF, "Cutoff").range(20, 20000).default(20000).hertz().module("Filter"),
-    new Param(RESONANCE, "Resonance").range(0, 1).default(0).module("Filter"),
-    new Param(MODE, "Mode").labels(["Low-pass", "Band-pass", "High-pass", "Notch"]).module("Filter"),
+    new Param(CUTOFF, "Cutoff").range(20, 20000).default(20000).hertz(),
+    new Param(RESONANCE, "Resonance").range(0, 1).default(0),
+    new Param(MODE, "Mode").labels(["Low-pass", "Band-pass", "High-pass", "Notch"]),
   ];
 }
 
-class Template extends Effect {
-  gain: Smoother = new Smoother(0.005);
+class GlowFilter extends Effect {
   left: Filter = new Filter();
   right: Filter = new Filter();
-  sampleRate: f64 = 48000;
 
-  activate(sampleRate: f64, maxFrames: u32): bool {
-    this.sampleRate = sampleRate;
-    this.gain.setSampleRate(sampleRate);
-    this.left.setSampleRate(sampleRate);
-    this.right.setSampleRate(sampleRate);
-    this.reset();
-    return true;
+  // Runs once a sample. The input is in this.l and this.r: leave the output there.
+  tick(): void {
+    const hz = param(CUTOFF), res = param(RESONANCE), mode = choice(MODE);
+    if (mode == 0) { this.l = this.left.lowpass(this.l, hz, res); this.r = this.right.lowpass(this.r, hz, res); }
+    else if (mode == 1) { this.l = this.left.bandpass(this.l, hz, res); this.r = this.right.bandpass(this.r, hz, res); }
+    else if (mode == 2) { this.l = this.left.highpass(this.l, hz, res); this.r = this.right.highpass(this.r, hz, res); }
+    else { this.l = this.left.notch(this.l, hz, res); this.r = this.right.notch(this.r, hz, res); }
+    const gain = dbToGain(param(GAIN));
+    this.l *= gain;
+    this.r *= gain;
   }
-
-  reset(): void {
-    this.gain.reset();
-    this.left.reset();
-    this.right.reset();
-  }
-
-  paramChanged(id: u32, value: f64): void {
-    if (id == GAIN) this.gain.setTarget(dbToGain(value));
-    else if (id == CUTOFF) { this.left.setCutoff(value); this.right.setCutoff(value); }
-    else if (id == RESONANCE) { this.left.setResonance(value); this.right.setResonance(value); }
-    else if (id == MODE) { this.left.setMode(filterModeFromIndex(value)); this.right.setMode(filterModeFromIndex(value)); }
-  }
-
-  render(io: Io, from: i32, to: i32): void {
-    for (let n = from; n < to; n++) {
-      const g = this.gain.next();
-      if (io.channels > 0) io.output(0, n, <f32>(this.left.process(<f64>io.input(0, n)) * g));
-      if (io.channels > 1) io.output(1, n, <f32>(this.right.process(<f64>io.input(1, n)) * g));
-    }
-  }
-
-  /** A resonant filter rings on after its input stops: a second covers it. */
-  tail(): u32 { return <u32>this.sampleRate; }
 }
 
-// No imports: a trap instead of the runtime's `env.abort`.
 function abort(message: usize, file: usize, line: u32, column: u32): void { unreachable(); }
 
 === file: ui/index.html ===
@@ -140,80 +120,48 @@ function abort(message: usize, file: usize, line: u32, column: u32): void { unre
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header><h1>GLOW <span>FILTER</span></h1><div class="meter" aria-hidden="true"><i id="meter"></i></div></header>
-<canvas id="curve" width="488" height="120" role="img" aria-label="The filter's shape"></canvas>
-<main>
-  <est-knob param="1" label="Cutoff" unit="Hz" scale="log" size="64"></est-knob>
-  <est-knob param="2" label="Resonance" size="64"></est-knob>
-  <est-knob param="0" label="Gain" unit="dB" size="64"></est-knob>
-  <div class="modes" role="radiogroup" aria-label="Mode">
-    <button type="button" role="radio" data-mode="0">Low</button>
-    <button type="button" role="radio" data-mode="1">Band</button>
-    <button type="button" role="radio" data-mode="2">High</button>
-    <button type="button" role="radio" data-mode="3">Notch</button>
-  </div>
-</main>
+<est-window name="Glow Filter" theme="ember" meter>
+  <canvas id="curve" aria-label="The filter's shape"></canvas>
+  <est-row>
+    <est-knob param="Cutoff" unit="Hz"></est-knob>
+    <est-knob param="Resonance"></est-knob>
+    <est-knob param="Gain" unit="dB"></est-knob>
+    <est-select param="Mode" labels="Low, Band, High, Notch"></est-select>
+  </est-row>
+</est-window>
 <script src="est-ui.js"></script>
 <script src="ui.js"></script>
 </body>
 </html>
 
 === file: ui/style.css ===
-:root { --est-bg: #17121f; --est-fg: #f4ecff; --est-dim: #b7a9cf; --est-accent: #ff8a3d; --est-track: #3a2d52; }
-* { box-sizing: border-box; }
-html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
-body { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; color: var(--est-fg);
-  background: radial-gradient(120% 90% at 50% 0%, #2a1f3d 0%, #17121f 70%); font: 12px/1.3 system-ui, sans-serif; }
-header { display: flex; align-items: center; justify-content: space-between; }
-h1 { margin: 0; font-size: 15px; letter-spacing: .32em; font-weight: 800; }
-h1 span { color: var(--est-accent); }
-.meter { width: 120px; height: 6px; border-radius: 3px; background: var(--est-track); overflow: hidden; }
-.meter i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #5ad1c3, var(--est-accent)); }
-canvas { width: 488px; height: 120px; border-radius: 10px; background: #0f0b16; border: 1px solid var(--est-track); }
-main { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.modes button { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--est-track); background: #221a31;
-  color: var(--est-dim); font: inherit; cursor: pointer; }
-.modes button[aria-checked="true"] { background: var(--est-accent); border-color: var(--est-accent); color: #1b1020; font-weight: 700; }
-.modes button:focus-visible { outline: 2px solid var(--est-fg); outline-offset: 2px; }
+/* The theme gives the colours; override any --est-* variable and add your own touches. */
+est-window { --est-accent: #ff8a3d; background: radial-gradient(120% 90% at 50% 0%, #3a2418 0%, var(--est-bg) 70%); }
+est-window h1 { letter-spacing: .4em; }
+#curve { border: 1px solid var(--est-track); }
+est-select { max-width: 150px; }
 
 === file: ui/ui.js ===
-// The window only reads and writes parameters (by the same ids as the sound code); it makes no sound.
-const est = EstUI.connect();
-const CUTOFF = 1, RESONANCE = 2, MODE = 3;
-const canvas = document.getElementById('curve');
-const g = canvas.getContext('2d');
-const buttons = Array.from(document.querySelectorAll('.modes button'));
+// Only the display is drawn here: every control in the page is wired by Cyber's kit.
+var est = EstUI.connect();
+var CUTOFF = 1, RESONANCE = 2, MODE = 3; // the same ids as the sound code
 
-// A control of my own: one click is one gesture (begin, set, end), so it is one undo step in Cyber.
-buttons.forEach(function (b) {
-  b.addEventListener('click', function () {
-    est.begin(MODE); est.set(MODE, Number(b.dataset.mode)); est.end(MODE);
-  });
-});
-
-// Draw from the parameters' values: called on every change, whoever made it (this window, Cyber, automation).
-function draw() {
-  const mode = Math.round(est.get(MODE)), f0 = est.get(CUTOFF), q = 0.6 + est.get(RESONANCE) * 8;
-  buttons.forEach(function (b) { b.setAttribute('aria-checked', String(Number(b.dataset.mode) === mode)); });
-  const w = canvas.width, h = canvas.height;
-  g.clearRect(0, 0, w, h);
+// Called after every change (this window, Cyber, automation) and on resize; w and h are CSS pixels.
+EstUI.display('#curve', function (g, w, h) {
+  if (est.get(CUTOFF) === undefined) return; // before Cyber's first message
+  var mode = Math.round(est.get(MODE)), f0 = est.get(CUTOFF), q = 0.6 + est.get(RESONANCE) * 8;
   g.beginPath();
-  for (let x = 0; x <= w; x++) {
-    const r = 20 * Math.pow(1000, x / w) / f0;            // 20 Hz to 20 kHz, as a ratio to the cutoff
-    const d = Math.sqrt((1 - r * r) * (1 - r * r) + (r / q) * (r / q));
-    const mag = mode === 0 ? 1 / d : mode === 1 ? (r / q) / d : mode === 2 ? r * r / d : Math.abs(1 - r * r) / d;
-    const y = h * 0.45 - Math.max(-36, Math.min(18, 20 * Math.log10(mag + 1e-6))) * (h / 60);
+  for (var x = 0; x <= w; x++) {
+    var r = 20 * Math.pow(1000, x / w) / f0; // 20 Hz to 20 kHz, as a ratio to the cutoff
+    var d = Math.sqrt((1 - r * r) * (1 - r * r) + (r / q) * (r / q));
+    var mag = mode === 0 ? 1 / d : mode === 1 ? (r / q) / d : mode === 2 ? r * r / d : Math.abs(1 - r * r) / d;
+    var y = h * 0.45 - Math.max(-36, Math.min(18, 20 * Math.log10(mag + 1e-6))) * (h / 60);
     if (x === 0) g.moveTo(x, y); else g.lineTo(x, y);
   }
   g.strokeStyle = '#ff8a3d'; g.lineWidth = 2; g.shadowColor = '#ff8a3d'; g.shadowBlur = 12; g.stroke();
-}
+});
 
-est.ready.then(function () { est.subscribe(draw); draw(); });
-// The output level, about 30 times a second: linear peaks [left, right].
-est.onMeter(function (m) { document.getElementById('meter').style.width = Math.min(100, Math.max(m.out[0], m.out[1]) * 100) + '%'; });
-
-THE SAME FOR AN INSTRUMENT (four voices of a saw through a filter, each shaped by an envelope). Only its first two files are shown: its window is made the same way as the effect's. For an instrument, change this one into mine:
+THE SAME FOR AN INSTRUMENT (eight voices of two saws through a filter). Only its first two files are shown: its window is made the same way as the effect's. For an instrument, change this one into mine:
 
 === file: est.json ===
 {
@@ -221,38 +169,17 @@ THE SAME FOR AN INSTRUMENT (four voices of a saw through a filter, each shaped b
   "name": "Saw Poly",
   "version": "1.0.0",
   "kind": "instrument",
-  "description": "Four voices of a saw through a resonant low-pass, each shaped by an envelope.",
-  "limits": {
-    "memoryPagesMax": 64,
-    "tailSeconds": 5
-  },
-  "ui": {
-    "path": "ui/index.html",
-    "size": {
-      "w": 520,
-      "h": 300
-    }
-  }
+  "description": "Eight voices of two detuned saws through a resonant low-pass with its own envelope.",
+  "ui": { "path": "ui/index.html", "size": { "w": 520, "h": 300 } }
 }
 
 === file: assembly/index.ts ===
-import {
-  Descriptor, Envelope, Filter, Instrument, Io, Note, Oscillator, Param, Plugin, Smoother, Voice, Voices, Wave,
-  alloc, dbToGain, isReady, keyToHz, setup,
-} from "est";
+import { Adsr, Descriptor, Filter, Instrument, Osc, Param, Voice, alloc, dbToGain, isReady, param, start } from "sound1";
 
-// --- The export block every EST plugin in AssemblyScript carries.
-export { clap_entry, free } from "est";
+export { clap_entry, free } from "sound1";
 export function malloc(size: usize): usize {
-  if (!isReady()) setup(describe(), parameters(), make);
+  if (!isReady()) start(new Descriptor("com.example.saw-poly", "Saw Poly", "Me", "1.0.0"), parameters(), new SawPoly());
   return alloc(size);
-}
-function make(): Plugin { return new Template(); }
-
-function describe(): Descriptor {
-  return new Descriptor("com.example.saw-poly", "Saw Poly", "Me", "1.0.0",
-    "Four voices of a saw through a resonant low-pass and an ADSR: the starting point for an EST instrument in AssemblyScript.",
-    ["instrument", "synthesizer", "stereo"], "TMPI", 1);
 }
 
 const LEVEL: u32 = 0;
@@ -262,121 +189,60 @@ const ATTACK: u32 = 3;
 const DECAY: u32 = 4;
 const SUSTAIN: u32 = 5;
 const RELEASE: u32 = 6;
-const VOICES = 4;
+const DETUNE: u32 = 7;
 
 function parameters(): Param[] {
   return [
-    new Param(LEVEL, "Level").range(-60, 0).default(-12).unit("dB").decimals(1),
-    new Param(CUTOFF, "Cutoff").range(20, 20000).default(2000).hertz().module("Filter"),
-    new Param(RESONANCE, "Resonance").range(0, 1).default(0.2).module("Filter"),
-    new Param(ATTACK, "Attack").range(1, 2000).default(5).unit("ms").decimals(0).module("Envelope"),
-    new Param(DECAY, "Decay").range(1, 2000).default(200).unit("ms").decimals(0).module("Envelope"),
-    new Param(SUSTAIN, "Sustain").range(0, 100).default(70).unit("%").decimals(0).module("Envelope"),
-    new Param(RELEASE, "Release").range(1, 4000).default(300).unit("ms").decimals(0).module("Envelope"),
+    new Param(LEVEL, "Level").range(-40, 6).default(0).unit("dB").decimals(1),
+    new Param(CUTOFF, "Cutoff").range(40, 16000).default(2400).hertz(),
+    new Param(RESONANCE, "Resonance").range(0, 1).default(0.3),
+    new Param(ATTACK, "Attack").range(0.001, 2).default(0.01).unit("s").decimals(3),
+    new Param(DECAY, "Decay").range(0.01, 4).default(0.4).unit("s"),
+    new Param(SUSTAIN, "Sustain").range(0, 1).default(0.6),
+    new Param(RELEASE, "Release").range(0.01, 6).default(0.5).unit("s"),
+    new Param(DETUNE, "Detune").range(0, 50).default(12).unit("ct").decimals(0),
   ];
 }
 
-class SynthVoice extends Voice {
-  osc: Oscillator = new Oscillator();
+// What ONE voice sounds like. The kit plays the notes: it starts, releases, steals and ends voices.
+class SawVoice extends Voice {
+  a: Osc = new Osc();
+  b: Osc = new Osc();
   filter: Filter = new Filter();
-  env: Envelope = new Envelope();
-  velocity: f64 = 0;
-  constructor() { super(); this.osc.setWave(Wave.Saw); }
-  release(): void { this.env.release(); }
-  stop(): void { this.env.reset(); }
+  sweep: Adsr = new Adsr();
+
+  // Runs once a sample while the voice sounds: return its sound, about -1 to 1.
+  tick(): f64 {
+    // this.amp is the voice's loudness envelope; the kit applies it and ends the voice when it has faded.
+    this.amp.set(param(ATTACK), param(DECAY), param(SUSTAIN), param(RELEASE));
+    this.sweep.set(0.005, param(DECAY), 0.3, param(RELEASE));
+    const wide = this.hz * param(DETUNE) * 0.0006;           // cents to Hz, near enough
+    const saws = (this.a.saw(this.hz - wide) + this.b.saw(this.hz + wide)) * 0.5;
+    const cutoff = param(CUTOFF) * (0.4 + 1.6 * this.sweep.next() * this.velocity);
+    return this.filter.lowpass(saws, cutoff, param(RESONANCE)) * dbToGain(param(LEVEL));
+  }
 }
 
-class Template extends Instrument {
-  voices: Voices<SynthVoice> = new Voices<SynthVoice>(VOICES);
-  level: Smoother = new Smoother(0.005);
-  sampleRate: f64 = 48000;
-
-  activate(sampleRate: f64, maxFrames: u32): bool {
-    this.sampleRate = sampleRate;
-    this.level.setSampleRate(sampleRate);
-    this.level.reset();
-    for (let i = 0; i < VOICES; i++) {
-      const v = this.voices.voice(i);
-      v.osc.setSampleRate(sampleRate);
-      v.filter.setSampleRate(sampleRate);
-      v.env.setSampleRate(sampleRate);
-    }
-    return true;
-  }
-
-  reset(): void { this.voices.reset(); }
-
-  paramChanged(id: u32, value: f64): void {
-    if (id == LEVEL) { this.level.setTarget(dbToGain(value)); return; }
-    for (let i = 0; i < VOICES; i++) {
-      const v = this.voices.voice(i);
-      if (id == CUTOFF) v.filter.setCutoff(value);
-      else if (id == RESONANCE) v.filter.setResonance(value);
-      else if (id == ATTACK) v.env.setAttack(value / 1000);
-      else if (id == DECAY) v.env.setDecay(value / 1000);
-      else if (id == SUSTAIN) v.env.setSustain(value / 100);
-      else if (id == RELEASE) v.env.setRelease(value / 1000);
-    }
-  }
-
-  noteOn(io: Io, note: Note): void {
-    const i = this.voices.start(io, note);
-    const v = this.voices.voice(i);
-    v.osc.setFrequency(keyToHz(<f64>note.key));
-    v.osc.reset(0);
-    v.filter.reset();
-    v.env.start();
-    v.velocity = note.velocity;
-  }
-
-  noteOff(io: Io, note: Note): void { this.voices.release(note); }
-
-  choke(io: Io, note: Note): void { this.voices.choke(io, note); }
-
-  render(io: Io, from: i32, to: i32): void {
-    for (let n = from; n < to; n++) {
-      const level = this.level.next();
-      let sum = 0.0;
-      for (let i = 0; i < VOICES; i++) {
-        if (!this.voices.isOn(i)) continue;
-        const v = this.voices.voice(i);
-        const e = v.env.next();
-        if (!v.env.isActive()) { this.voices.end(i, io, n); continue; }
-        sum += v.filter.process(v.osc.next()) * e * v.velocity;
-      }
-      const s = <f32>(sum * level);
-      io.add(0, n, s);
-      io.add(1, n, s);
-    }
-  }
-
-  /** The longest a released voice sounds: its release. */
-  tail(): u32 { return this.voices.voice(0).env.tailFrames(); }
+class SawPoly extends Instrument<SawVoice> {
+  constructor() { super(8); }      // eight voices
 }
 
-// No imports: a trap instead of the runtime's `env.abort`.
 function abort(message: usize, file: usize, line: u32, column: u32): void { unreachable(); }
 
-THE "est" LIBRARY (everything the sound code may import):
+THE "sound1" KIT (everything the sound code may import; numbers are `f64` unless a type is shown):
 
-Import everything from `"est"`. Numbers are `f64` unless a type is shown. If a function is not listed here, it does not exist: write the few lines yourself.
-
-- **Base class**: extend `Effect` or `Instrument`. You must write `render(io: Io, from: i32, to: i32): void`. Optional hooks: `activate(sampleRate: f64, maxFrames: u32): bool`, `reset(): void`, `paramChanged(id: u32, value: f64): void`, `tail(): u32` and `latency(): u32` (frames), `event(io: Io, e: Event): void`, `saveState(w: StateWriter): void`, `loadState(r: StateReader, version: u32): bool`.
-- **`Io`**: `io.channels: i32`, `io.frames: i32`, `io.input(c: i32, n: i32): f32`, `io.output(c, n, v: f32)`, `io.add(c, n, v: f32)`, `io.param(id: u32): f64`, `io.transport`.
-- **Note hooks**: `noteOn(io: Io, note: Note): void`, `noteOff` and `choke` (the same arguments). Out: `io.noteEnd(id: i32, port: i16, channel: i16, key: i16, n: i32)`, `io.sendNoteOn(id: i32, channel: i16, key: i16, velocity: f64, n: i32)`, `io.sendNoteOff` (the same arguments).
-- **`Note`** fields: `time: i32` (its frame in the block), `noteId: i32` (-1: none), `port: i16`, `channel: i16`, `key: i16`, `velocity: f64` (0 to 1). There is no `id` field. Cast before maths: `keyToHz(<f64>note.key)`.
-- **`Transport`** fields: `tempo: f64`, `playing: bool`, `beat: f64`, `barStart: f64`, `num: u16`, `den: u16`.
-- **`Event`** fields: `kind` (`EventKind.Param`, `NoteOn`, `NoteOff`, `Choke`, `Transport` …), `time: i32`, `id: u32`, `value: f64`, `note`, `transport`.
-- **`Param`**: `new Param(id: u32, "Name")`, then `.range(min, max)`, `.default(v)`, `.unit("dB")`, `.decimals(n)`, `.hertz()`, `.log()`, `.labels(["A", "B"])` (a switch: values 0, 1 …), `.module("Group")`, `.bypass()`, `.hidden()`, `.readOnly()`.
-- **`Descriptor`**: `new Descriptor(id, name, vendor, version, description, features: string[], stateMagic, stateVersion: u32)`; `.noteEffect()` for notes out.
-- **Maths**: `dbToGain(db)`, `gainToDb(gain)`, `keyToHz(key)`, `clamp(x, lo, hi)`, `exp(x)`, `ln(x)`, `exp2(x)`, `log2(x)`, `floor(x)`, `round(x)`, `sinTurns(t)` and `cosTurns(t)` (`t` in turns: 1 is a whole cycle), `tanHalfTurns(t)`, `onePole(seconds, sampleRate)` (a smoothing coefficient). The language's own `Math.sqrt`, `Math.abs`, `Math.sin`, `Math.tanh`, `Math.pow` and `Math.exp` also work; never `Math.random`.
-- **`Smoother`**: `new Smoother(seconds)`; `setSampleRate(sr)`, `setTime(seconds)`, `setTarget(v)`, `jump(v)`, `reset()` (jump to the target), `next(): f64` once a sample, `settled(): bool`.
-- **`Filter`** (state-variable, one per channel): `setSampleRate(sr)`, `setMode(FilterMode.Low)` (or `Band`, `High`, `Notch`; `filterModeFromIndex(v)`), `setCutoff(hz)`, `setResonance(r)` (0 to 1), `setSmoothing(seconds)`, `reset()`, `process(x: f64): f64`.
-- **`Biquad`**: `set(BiquadKind.Peak, freq, q, gainDb, sampleRate)` (or `LowShelf`, `HighShelf`, `LowPass`, `HighPass`), `reset()`, `process(x: f64): f64`.
-- **`DelayLine`** (`f64` in and out): `allocate(maxFrames: i32): bool` in `activate`, `clear()`; each sample, `read(delayFrames: f64): f64` **before** `write(x: f64)`. The shortest delay is 1 frame; a fraction is interpolated.
-- **`Oscillator`**: `setSampleRate(sr)`, `setFrequency(hz)`, `setWave(Wave.Sine)` (or `Saw`, `Square`, `Triangle`; `waveFromIndex(v)`), `reset(phase)`, `next(): f64` (-1 to 1).
-- **`Lfo`**: `setSampleRate(sr)`, `setRate(hz)`, `setSync(beats)` (0: free), `setTempo(bpm)`, `setWave(Wave.Sine)`, `reset(phase)`, `next(): f64` (-1 to 1).
-- **`Envelope`** (ADSR): `setSampleRate(sr)`, `setAdsr(attack, decay, sustain, release)` (seconds; sustain 0 to 1) or `setAttack`, `setDecay`, `setSustain`, `setRelease`; `start()`, `release()`, `reset()`, `next(): f64`, `isActive(): bool`, `tailFrames(): u32`.
-- **`Voices<T>`**: `new Voices<MyVoice>(n)` in a field initialiser; `start(io, note): i32` (the voice's index), `release(note)`, `choke(io, note)`, `voice(i): T`, `note(i): Note`, `isOn(i): bool`, `end(i, io, n)`, `reset()`. A voice class extends `Voice`, has a constructor with no arguments, and overrides `release(): void` and `stop(): void`.
-- **State**: `w.u32(v)`, `w.f32(v)`, `w.f64(v)`; `r.u32()`, `r.f32()`, `r.f64()`.
+- **An effect**: `class X extends Effect { tick(): void { … } }` with `this.l` and `this.r` (in, then out).
+- **An instrument**: `class V extends Voice { tick(): f64 { … } }` and `class I extends Instrument<V> { constructor() { super(8); } }` (the number of voices, 1 to 32; 1 is monophonic). In a voice: `this.hz` (the note's frequency), `this.key` (60 is middle C), `this.velocity` (0 to 1: multiply by it for touch), `this.seconds` (since the note began), `this.pan` (set it, -1 to 1), and `this.amp`, the loudness envelope the kit applies: `this.amp.set(attack, decay, sustain, release)`, or `this.amp.perc(attack, decay)` for a hit that fades by itself. Optional: `start(): void` in the voice (a note began); in the instrument, `tick(): void` on the mix of the voices (`this.l`, `this.r`) for an effect on the whole instrument, and `this.glide = 0.1;` in its constructor for a pitch glide between notes.
+- **Parameters**: `param(ID)` is the value now, already smoothed. `choice(ID): i32` is a switch's position (0, 1, 2 …). `new Param(ID, "Name").range(min, max).default(v)`, then optionally `.unit("dB")`, `.decimals(n)`, `.hertz()`, or `.labels(["A", "B"])` for a switch.
+- **`Osc`**: `sine(hz)`, `saw(hz)`, `square(hz)`, `pulse(hz, width)`, `triangle(hz)`: -1 to 1, free of aliasing. `sine(hz, fm)` adds `fm` (in turns) to the phase, for FM. One wave call per `Osc` per sample.
+- **`Noise`**: `white()`, `pink()` (-1 to 1), `random()` (0 to 1). **`Lfo`**: `sine(hz)`, `triangle(hz)`, `saw(hz)`, `square(hz)`, `random(hz)` (-1 to 1).
+- **`Wavetable`**: in the voice's constructor `this.wave.harmonic(n, level)` for each harmonic (n 1 to 32), then `this.wave.next(hz)`.
+- **`Adsr`**: `set(attack, decay, sustain, release)` or `perc(attack, decay)`, then `next()` (0 to 1). In a voice it starts and releases with the note by itself; elsewhere call `start()` and `release()`.
+- **`Filter`**: `lowpass(x, hz, resonance)`, `highpass(…)`, `bandpass(…)`, `notch(…)`; resonance 0 to 1. Always stable. **`OnePole`**: `lowpass(x, hz)`, `highpass(x, hz)` (gentle).
+- **`Echo`**: `new Echo(maxSeconds)`; `process(x, seconds, feedback, tone)` returns the repeats alone (feedback 0 to 0.95; tone 0 dark to 1 bright). **`PingPong`**: `process(l, r, seconds, feedback)`, then its `.l` and `.r`. **`Delay`**: `new Delay(maxSeconds)`; `read(seconds)`, then `write(x)`.
+- **`Reverb`**: `process(l, r, seconds, damping)`, then its `.l` and `.r` (the reverb alone; damping 0 to 1). **`Chorus`**: `process(l, r, rateHz, depth)`, then `.l` and `.r`. **`Flanger`**: `process(l, r, rateHz, depth, feedback)`, then `.l` and `.r`.
+- **`Compressor`**: `gain(l, r, thresholdDb, ratio, attack, release)` returns the gain to multiply both sides by. **`Limiter`**: `gain(l, r, ceilingDb)`, the same way. **`Crusher`**: `process(x, bits, rateHz)`.
+- **`Smooth`**: `next(target, seconds)` glides a value of your own. **`Steps`**: `next(stepsPerBeat)` is -1, except on the sample a step starts while the song plays, when it is the step's number in its bar; an instrument's optional `pattern(): void` runs every sample and may call `this.play(key, velocity, seconds)` to play a note of its own.
+- **Functions**: `drive(x, amount)` (saturation, amount 0 to 1), `softClip(x)`, `mix(dry, wet, amount)`, `panLeft(pan)`, `panRight(pan)`, `dbToGain(db)`, `gainToDb(gain)`, `keyToHz(key)`, `clamp(x, lo, hi)`, `beats(n)` (n beats in seconds at the song's tempo), `tempo()`, `playing()`, `sampleRate()`.
+- The language's `Math.sqrt`, `Math.abs`, `Math.pow`, `Math.sin`, `Math.exp`, `Math.floor`, `Math.min`, `Math.max` and `Math.PI` work. Never `Math.random` (use `Noise`).
 ````

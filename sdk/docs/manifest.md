@@ -6,6 +6,8 @@ The manifest of an EST plugin bundle (EST specification §1), as Cyber's install
 
 Every bundle has an `est.json` at its root. Name the schema in it (`"$schema"`) and an editor completes and checks the fields as you type; `est validate` checks the same rules (Cyber's reader, `parseManifest`), so a manifest the schema accepts is one Cyber installs. `est pack` fills in the hashes and sizes (`module.sha256`, `module.bytes`, `ui.sha256`, `assets`, marked *filled by `est pack`* below): leave them out of your source `est.json`. They are required in a bundle, so an editor checking a source `est.json` against the schema reports them missing; that is expected.
 
+**A built bundle and a source `.est`.** Only a built bundle (its `module.wasm` inside, from `est pack` or Cyber's **Save its .est file**) is shared, validated, published or registered. A zip of a plugin's source files with no WebAssembly module and an AssemblyScript source (`.ts`), as a chat assistant with file tools writes one and names `<name>.est`, is a **source `.est`**: only Cyber's **Add a plugin file** builds it (in the browser), and everywhere else it is refused under EST-B017 (`shared/estSourceEst.mjs`).
+
 Schema: `est-manifest-1.schema.json` (beside `est.json` in every folder `est new` makes), JSON Schema 2020-12.
 
 | Field | Type | Required | What it is |
@@ -18,6 +20,8 @@ Schema: `est-manifest-1.schema.json` (beside `est.json` in every folder `est new
 | `vendor` | string | yes | Who makes it. (EST-M004) Matches `^(?=[\s\S]*\S)[^\u0000-\u001f\u007f]*$`; 0 to 60 characters. |
 | `description` | string |  | One or two plain sentences. (EST-M004) Matches `^[^\u0000-\u001f\u007f]*$`; 0 to 400 characters. |
 | `url` | string |  | The plugin's web page, https only. (EST-M004) Matches `^https://[^\s]{1,300}$`. |
+| `contact` | object |  | Optional, recommended (1.918): the maker's contact, where feature requests for the plugin are emailed when it has no developer account in Cyber (the first email only asks the address to confirm; every email can stop them). Never shown to anyone. Informational in EST 1.0 and 1.1 alike. (EST-M023) |
+| `contact.email` | string |  | The address, such as you@example.com. Matches `^[A-Za-z0-9.!#$%&'*+/=?^_`{\|}~-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)+$`; 0 to 254 characters. |
 | `license` | string | yes | An SPDX licence id or name (`MIT`). (EST-M004) Matches `^(?=[\s\S]*\S)[^\u0000-\u001f\u007f]*$`; 0 to 64 characters. |
 | `kind` | `"effect"` or `"instrument"` | yes | An effect (audio in, audio out) or an instrument (notes in, audio out). (EST-M005) |
 | `features` | list of string | yes | CLAP feature names, the kind's first: `audio-effect` or `instrument`. (EST-M006) 1 to 32 items. |

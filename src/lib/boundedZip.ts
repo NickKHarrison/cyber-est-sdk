@@ -166,7 +166,7 @@ export class BoundedZip {
 /** Raw deflate unpacked, stopping (and refusing as a zip bomb) as soon as it passes `limit` bytes. */
 export async function inflateBounded(raw: Uint8Array, limit: number, entry?: string): Promise<Uint8Array> {
   if (typeof DecompressionStream === 'undefined') throw new BoundedZipError('unsupported', 'This browser cannot read a compressed zip: save it uncompressed (stored) and try again.');
-  const stream = new Blob([raw as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  const stream = new Blob([raw as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;

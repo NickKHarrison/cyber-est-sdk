@@ -92,7 +92,13 @@ export interface EstBindOptions {
 export type EstScale = 'linear' | 'log';
 type EstRange = Pick<EstUiParam, 'min' | 'max' | 'flags'>;
 
-/** `<est-knob>` and `<est-slider>`: attributes param, label, name, unit, scale ("log" or "linear"; default the parameter's own), labels, size (knob). */
+/**
+ * The window kit's elements (all bind by themselves; `param` is a parameter's id or its name):
+ * `<est-window name theme meter>` (the page's root: fills the frame, themes `studio`, `neon`, `paper`, `ember`, `moss`),
+ * `<est-row>`, `<est-panel label>`, `<est-knob>`, `<est-slider [vertical]>`, `<est-switch>`, `<est-select [menu]>`,
+ * `<est-xy x y>`, `<est-value>`, `<est-meter [in]>`, `<est-spectrum>`, `<est-all>`.
+ * `<est-knob>` and `<est-slider>`: attributes param, label, name, unit, scale ("log" or "linear"; default the parameter's own), labels, size (knob).
+ */
 export interface EstControlElement extends HTMLElement {
   source: EstParamSource | null;
   readonly paramId: number | null;
@@ -108,6 +114,11 @@ export interface EstUIApi {
   whenConnected(fn: (c: EstConnection) => void): () => void;
   /** One element follows one parameter and writes it; returns the unbind. */
   bind(el: Element, paramId: number, options?: EstBindOptions): () => void;
+  /**
+   * A canvas of the page's own, kept at its box's size and the screen's pixel ratio: `draw(g, w, h, t)` (CSS pixels;
+   * `t` seconds) runs after every parameter change and resize, and with `animate` every frame. Returns the stop.
+   */
+  display(target: HTMLCanvasElement | string, draw: (g: CanvasRenderingContext2D, w: number, h: number, t: number) => void, options?: { animate?: boolean }): () => void;
   formatValue(p: EstRange, v: number, unit?: string, labels?: readonly string[]): string;
   formatNumber(v: number): string;
   toNorm(p: EstRange, v: number, scale?: EstScale): number;

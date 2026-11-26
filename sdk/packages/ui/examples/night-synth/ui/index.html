@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Night Synth</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<est-window name="Night Synth" theme="neon" meter>
+  <est-row>
+    <est-panel label="Oscillator">
+      <est-select param="Wave" labels="Saw, Square, Sine"></est-select>
+      <est-row>
+        <est-knob param="Detune" unit="ct"></est-knob>
+        <est-knob param="Sub"></est-knob>
+      </est-row>
+    </est-panel>
+    <est-panel label="Filter">
+      <est-xy x="Cutoff" y="Resonance" x-unit="Hz"></est-xy>
+    </est-panel>
+    <est-panel label="Envelope">
+      <est-row>
+        <est-slider vertical param="Attack" label="A" unit="ms"></est-slider>
+        <est-slider vertical param="Decay" label="D" unit="ms"></est-slider>
+        <est-slider vertical param="Sustain" label="S"></est-slider>
+        <est-slider vertical param="Release" label="R" unit="ms"></est-slider>
+      </est-row>
+    </est-panel>
+  </est-row>
+  <est-row class="foot">
+    <est-spectrum></est-spectrum>
+    <est-switch param="Glide"></est-switch>
+    <est-knob param="Level" unit="dB"></est-knob>
+  </est-row>
+</est-window>
+<script src="est-ui.js"></script>
+</body>
+</html>

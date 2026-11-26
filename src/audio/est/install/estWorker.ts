@@ -5,7 +5,8 @@
  * nowhere else: the page's policy stays as it is, and the page and the worklet only instantiate
  * the `WebAssembly.Module`s this posts back (Phase 1: Chromium allows that under the page's CSP).
  *
- * Two requests (`workerProtocol.ts`):
+ * Three requests (`workerProtocol.ts`; 1.914: `checks`, the add-time checks of `review/addChecks.ts`, on a
+ * bundle the install already passed: nothing stored, only the report back):
  * - `install`: the bundle read and checked (`bundle.ts`: the archive, the manifest, every hash,
  *   the module's imports, exports and memory, the note ports and presets, before anything runs);
  *   effects and, since Phase 3, instruments (the conformance run checks their notes); the module metered (`estMeter.ts`, Binaryen, `local` placement; loaded only for an install); the
@@ -24,9 +25,12 @@
  */
 import { compactAbi } from '../abi/layout';
 import { buildEstShim } from '../runtime/shim';
-import { EstBundleError, inspectWasm, sha256Hex, wasiTypeRefusal } from './bundle';
+import { EstBundleError, inspectWasm, sha256Hex, wasiTypeRefusal, withParamFacts } from './bundle';
 import { isMetered } from './fuel';
 import { checkBundle, type InstallCheckDeps } from './pipeline';
+// Static, so the Worker stays one file with its one lazy meter chunk (the processor's code it runs on a stand-in
+// audio thread is in this file alone: check-worklets finds the worklet's own chunk by that).
+import { addChecksOf, AddChecksHashError } from '../review/addChecksOf';
 import type { EstInstallRefusal, WorkerReply, WorkerRequest } from './workerProtocol';
 
 interface WorkerScope {
@@ -60,7 +64,7 @@ async function install(m: Extract<WorkerRequest, { type: 'install' }>): Promise<
     : metered.slice().buffer as ArrayBuffer;
   return {
     reply: {
-      type: 'installed', id: m.id, hash: bundle.hash, bytes: bundle.bytes, manifest: bundle.manifest, info: bundle.info,
+      type: 'installed', id: m.id, hash: bundle.hash, bytes: bundle.bytes, manifest: bundle.manifest, info: withParamFacts(bundle.info, bundle.manifest, report.params),
       metered: buf, meteredSha256, points, module, shim: shimModule, report, timings,
     },
     transfer: [buf],
@@ -80,10 +84,29 @@ async function compile(m: Extract<WorkerRequest, { type: 'compile' }>): Promise<
   return { type: 'compiled', id: m.id, module, shim: shimModule, compileMs: now() - t0 };
 }
 
+/**
+ * 1.914: the add-time checks (`review/addChecksOf.ts`). The bundle is one the install pipeline passed (the
+ * library's own copy, by its hash): read and metered again as at install, compiled here through `deps`
+ * (the one compile site), then played within its budget. The profiling build (`meter(…, { profile: true })`)
+ * is made and compiled only when a check asks for it (a heavy plugin), and exists only for that run.
+ */
+async function checks(m: Extract<WorkerRequest, { type: 'checks' }>): Promise<WorkerReply> {
+  try {
+    const r = await addChecksOf(new Uint8Array(m.bytes), deps, { expectHash: m.expectHash, ...(m.budgetMs ? { budgetMs: m.budgetMs } : {}), ...(m.only ? { only: m.only } : {}), ...(m.named ? { named: new Uint8Array(m.named) } : {}) });
+    return { type: 'checked', id: m.id, hash: r.hash, report: r.report };
+  } catch (err) {
+    if (err instanceof AddChecksHashError) throw new Refusal('hash', err.message, 'EST-B015');
+    throw err;
+  }
+}
+
 scope.onmessage = (e: MessageEvent) => {
   const m = e.data as WorkerRequest;
   if (!m || typeof m !== 'object' || typeof m.id !== 'number') return;
-  const run = m.type === 'install' ? install(m) : m.type === 'compile' ? compile(m).then(reply => ({ reply, transfer: [] as Transferable[] })) : null;
+  const run = m.type === 'install' ? install(m)
+    : m.type === 'compile' ? compile(m).then(reply => ({ reply, transfer: [] as Transferable[] }))
+      : m.type === 'checks' ? checks(m).then(reply => ({ reply, transfer: [] as Transferable[] }))
+        : null;
   if (!run) return;
   run.then(({ reply, transfer }) => {
     // 1.286 (ET-C, D-32): a browser that will not pass a compiled `WebAssembly.Module` to the page
